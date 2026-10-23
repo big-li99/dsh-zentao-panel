@@ -170,6 +170,8 @@ conversation.input.for(scope).addAttachments(ids)       // :15093，只收「已
   `my-work-*.json` 列表里是占位符 `<img src="{35861.png}">` → 都归一成 `/file-read-35861.png`
   （`service.mjs` 的 `extractImageRefs/normalizeImageUrl`）。
 - 卡片模型与详情都带 `images: [{url, name}]`；`htmlToText` 把 `<img>` 渲染成 `[图片：35861.png]`（不内联 URL）。
+- 插入内容用**精简模板**（2026-10-23 用户要求）：只有「`## 禅道Bug #id：标题` + `### 重现步骤/描述` + 描述正文」，
+  不带类型/状态/优先级/截止、原地址、`[图片：xxx]` 占位符、插件页脚；图片以真实附件插入（`stripImageMarkers()` 负责去占位符）。
 - host 新增 RPC `zentao.image`：同源校验 + 路径白名单（`/file-read-`、`/data/upload/`、`/index.php`）
   + magic 嗅探 → 返回 `{name, mediaType, base64, bytes}`，单图上限 20MB。
 - client 端 `attachImagesToDraft()`：RPC 取图 → `new File([bytes], name, {type})` → `createDrafts`
@@ -238,7 +240,7 @@ conversation.input.for(scope).addAttachments(ids)       // :15093，只收「已
 - M3 处理（新会话下发）：`sessions.create({cwd})` 继承当前会话工作目录 → `uiWorkspace.openSession` → `conversation.input.for(scope).setDraft` + 延迟 250ms `submit()`；服务不可用时降级插入当前会话。真机重点验证：新会话 composer 挂载时序（250ms 是否够，不够就调大或改事件驱动）
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
 - 测试现状（2026-10-23 23:5x 复跑）：`test/host.mjs` 全绿（19 项，含 `zentao.image` 真图下载 + SSRF 拒绝）；
-  `test/smoke.mjs` 全绿（含 `extractImageRefs` / `fetchImage` 真图下载）；`test/client.mjs` 全绿（29 项，含图片附件管线）
+  `test/smoke.mjs` 全绿（含 `extractImageRefs` / `fetchImage` 真图下载）；`test/client.mjs` 全绿（33 项，含图片附件管线 + 精简插入模板）
 
 ### 2. M4 打磨
 - 自动刷新（面板打开时轮询，间隔可选——计划书里定的 30s/1m/5m/10m/关闭）

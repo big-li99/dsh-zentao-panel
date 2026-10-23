@@ -229,26 +229,28 @@
         return days >= 0 && days <= 3;
       }
 
-      /** 卡片 → Markdown 任务卡（M3：插入输入框 / 新会话用） */
+      /**
+       * 描述文本里去掉图片占位标记（`[图片：35861.png]` / `[图片]`）。
+       * 图片本身会作为真实附件插入，文本里不再保留占位符。
+       */
+      function stripImageMarkers(text) {
+        return String(text ?? '')
+          .replace(/[ \t]*\[图片(?:[：:][^\]\n]*)?\][ \t]*/g, '')
+          .replace(/[ \t]+\n/g, '\n')
+          .replace(/\n{3,}/g, '\n\n')
+          .trim();
+      }
+
+      /** 卡片 → 精简 Markdown（M3：插入输入框 / 新会话用；标题 + 描述/重现步骤，图片走真实附件） */
       function cardToMarkdown(card, detail) {
         var lines = [];
         lines.push('## 禅道' + (KIND_LABEL[card.kind] || card.kind) + ' #' + card.id + '：' + card.title);
-        var meta = [];
-        meta.push('**类型**：' + (KIND_LABEL[card.kind] || card.kind) + (card.severity != null ? '（严重程度 ' + card.severity + '）' : ''));
-        meta.push('**状态**：' + statusLabel(card.status));
-        if (card.pri != null) meta.push('**优先级**：P' + card.pri);
-        if (card.openedBy) meta.push('**创建人**：' + card.openedBy);
-        if (card.deadline) meta.push('**截止**：' + fmtDate(card.deadline));
-        lines.push('- ' + meta.join(' · '));
-        lines.push('- **原地址**：' + card.url);
-        var desc = (detail && detail.desc) || card.descBrief || '';
+        var desc = stripImageMarkers((detail && detail.desc) || card.descBrief || '');
         if (desc) {
           lines.push('');
           lines.push(card.kind === 'bug' ? '### 重现步骤/描述' : '### 描述');
           lines.push(desc);
         }
-        lines.push('');
-        lines.push('> 来自 dsh-zentao-panel，可直接编辑后发送');
         return lines.join('\n');
       }
 

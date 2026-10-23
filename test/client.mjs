@@ -115,14 +115,21 @@ check('挂点通过 slots.inject 注册（keyed slot 契约）',
   slotInjects.includes('sidebar.right.pane.tab') && slotInjects.includes('sidebar.right.pane.tab.title'));
 check('slot 组件可实例化', typeof bodyReg.comp === 'function' && typeof titleReg.comp === 'function');
 
-// ── 卡片 → Markdown ──────────────────────────────────────────
+// ── 卡片 → Markdown（精简模板：标题 + 描述/重现步骤，图片走真实附件）──
 const md = mod.cardToMarkdown({
   kind: 'bug', id: 123, title: '登录页报错', status: 'active', pri: 2, severity: 1,
   openedBy: '张三', deadline: '2026-10-30', url: 'http://z/bug-view-123.html', descBrief: '步骤…',
 });
 check('cardToMarkdown 含标题行', md.includes('## 禅道Bug #123：登录页报错'));
-check('cardToMarkdown 含原地址', md.includes('http://z/bug-view-123.html'));
 check('cardToMarkdown 用「重现步骤/描述」小节', md.includes('### 重现步骤/描述'));
+check('cardToMarkdown 不含元信息（类型/状态/优先级/截止）',
+  !md.includes('**类型**') && !md.includes('**状态**') && !md.includes('**优先级**') && !md.includes('**截止**'));
+check('cardToMarkdown 不含原地址', !md.includes('bug-view-123.html'));
+check('cardToMarkdown 不含插件页脚', !md.includes('来自 dsh-zentao-panel'));
+check('cardToMarkdown 去掉 [图片：xxx] 文本占位符',
+  !mod.cardToMarkdown({ kind: 'bug', id: 1, title: 't' }, { desc: '取消该限制。\n[图片：35861.png]' }).includes('[图片'));
+check('cardToMarkdown 描述为空时只有标题行',
+  mod.cardToMarkdown({ kind: 'bug', id: 1, title: 't' }, null) === '## 禅道Bug #1：t');
 
 // ── 真实图片附件管线（conversation.createDrafts + facade.addAttachments）──
 const base64Png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]).toString('base64');
