@@ -1,0 +1,12 @@
+# 运行时产物
+node_modules/
+.DS_Store
+
+# 本机环境配置（凭据走环境变量，绝不进 git）
+.env
+.env.*
+
+# 测试落盘的配置（DSH_HOME 指向 /tmp 时不落这里，防手滑）
+config.json
+
+# 计划书为交接文档，保留；如日后不想公开可移除这行
