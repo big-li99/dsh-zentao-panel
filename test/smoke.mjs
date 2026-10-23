@@ -77,12 +77,39 @@ if (mine1.cards[0]) {
   console.log('  卡片 url 示例:', d.url);
 }
 
-// ── 5. htmlToText ────────────────────────────────────────────────
-console.log('== htmlToText ==');
-const { htmlToText } = await import('../lib/service.mjs');
+// ── 5. htmlToText / 图片引用 ─────────────────────────────────────
+console.log('== htmlToText / images ==');
+const { htmlToText, extractImageRefs, normalizeImageUrl, sniffImageMediaType } = await import('../lib/service.mjs');
 const sample = '<p>第一段</p><p>第二段&nbsp;&amp;转义</p><ol><li>步骤1</li><li>步骤2</li></ol><img src="http://x/y.png" onload="evil">';
 const text = htmlToText(sample);
-check('html→text', text.includes('第一段') && text.includes('• 步骤1') && text.includes('[图片]') && !text.includes('<'), JSON.stringify(text));
+check('html→text', text.includes('第一段') && text.includes('• 步骤1') && text.includes('[图片：y.png]') && !text.includes('<'), JSON.stringify(text));
+check('htmlToText 不把 data: 图片内联进文本', !htmlToText('<img src="data:image/png;base64,AAAA">').includes('base64'));
+
+const baseNoSlash = BASE.replace(/\/+$/, '');
+const absRefs = extractImageRefs('<p><img src="http://zentao.example.com:8090/file-read-35861.png" /></p>', BASE);
+check('extractImageRefs 绝对地址', absRefs.length === 1 && absRefs[0].url.includes('/file-read-35861.png') && absRefs[0].name === '35861.png', JSON.stringify(absRefs));
+const braceRefs = extractImageRefs('<p><img src="{35861.png}" alt="" /></p>', BASE);
+check('extractImageRefs 列表占位符 → /file-read-', braceRefs.length === 1 && braceRefs[0].url === `${baseNoSlash}/file-read-35861.png`, braceRefs[0]?.url);
+check('normalizeImageUrl 拒绝 data:/javascript:', normalizeImageUrl('data:image/png;base64,AAA', BASE) === null && normalizeImageUrl('javascript:alert(1)', BASE) === null);
+check('sniffImageMediaType png/gif', sniffImageMediaType(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) === 'image/png'
+  && sniffImageMediaType(Buffer.from('GIF89a', 'ascii')) === 'image/gif'
+  && sniffImageMediaType(Buffer.from('<html>')) === null);
+check('mine 卡片带 images 字段', mine1.cards.every((c) => Array.isArray(c.images)), `${mine1.cards.filter((c) => c.images.length).length} 张卡片带图`);
+
+// ── 6. 真实图片下载（RPC zentao.image 的 host 半边）───────────────
+console.log('== fetchImage ==');
+const withImage = mine1.cards.find((c) => c.images.length > 0);
+if (withImage) {
+  const img = await service.fetchImage(withImage.images[0].url);
+  const bytes = Buffer.from(img.base64, 'base64');
+  check('service.fetchImage 下载真实图片', /^image\/(png|jpeg|webp|gif)$/.test(img.mediaType) && bytes.length === img.bytes && bytes.length > 100,
+    `${withImage.kind}#${withImage.id} ${img.mediaType} ${img.bytes} bytes ${img.name}`);
+} else {
+  check('service.fetchImage 下载真实图片', false, '当前账号没有带内联图片的卡片');
+}
+let ssrf = null;
+try { await service.fetchImage('http://evil.example.com/file-read-1.png'); } catch (e) { ssrf = e; }
+check('fetchImage 拒绝非同源地址（SSRF）', ssrf && ssrf.code === 'BAD_IMAGE_URL', ssrf?.message);
 
 console.log(failures === 0 ? '\n全部通过 ✅' : `\n${failures} 项失败 ❌`);
 process.exit(failures === 0 ? 0 : 1);

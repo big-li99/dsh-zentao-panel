@@ -22,7 +22,7 @@
 | M0 禅道 API 探测 | ✅ 完成，结论在《计划书.md》附录 A（必读） |
 | M1 host 插件（登录/取数/RPC） | ✅ 代码完成，测试全绿，**已装入 desktop profile 加载树**（重启 DSH Desktop 激活） |
 | M2 client 右侧栏 tab + 引导卡片 | ✅ 已改为 `sidebarRightTabs` 入口（对齐 dsh-context「上下文」），样式走 DSH token 支持日/夜；注册契约有测试，待真机目视确认 |
-| M3 插入输入框 + 新会话下发 | ⏳ 插入输入框有初版实现（composer 选择器是猜测，需真机适配）；新会话下发代码已写待验证 |
+| M3 插入输入框 + 新会话下发 | ✅ 服务级 `setDraft` 真机可用；**描述里的截图改为真实图片附件**（`conversation.createDrafts` + `facade.addAttachments`，见 §4.1）；新会话下发待真机复验 |
 | M4 打磨 | ⏳ 未开始 |
 
 测试命令：
@@ -100,6 +100,12 @@ User-Agent: <常规浏览器 UA>
 
 注意：**my-work 列表的 `id` 是字符串，v1 详情的 `id` 是数字**——比较时统一 `Number()`（已在 `toCard()` 处理，但新代码容易再踩）。story 列表是 dict（按 id 索引）不是数组。
 
+**描述里的图片**（M3 图片附件依赖，2026-10-23 实测）：同一张截图在两种接口里形态不同——
+- v1 详情：`<img onload="setImageSize(this,0)" src="http://zentao.example.com:8090/file-read-35861.png" />`
+- my-work 列表：`<img src="{35861.png}" />`（占位符，basename 就是 fileID）
+两者都归一成 `/file-read-<fileID>.<ext>` 下载（登录态 cookie + Referer 可拿到 `image/png`）；不存在的 fileID
+返回 `text/html` 空包（要按 content-type/magic 校验）。见 §4.1。
+
 ### 4. DSH 客户端服务 API（M3 实现依据，从 app.asar 源码逆向确认）
 
 **怎么读源码**：DSH Desktop 的 web 端全部模块在 `app.asar` 里：
@@ -129,6 +135,46 @@ client-modules: <pkg> declares dsh.client but exports no "./client" bundle
 **验证 client bundle 是否被服务的办法**：`curl -X POST http://127.0.0.1:<dsh端口>/dsh-zentao-panel/zentao.status`——返回 **401**（信任栅栏拒绝）说明 host 路由已挂载；返回 404/405 说明插件没加载。端口用 `lsof -nP -iTCP -sTCP:LISTEN | grep DeepSeek` 找（桌面版是 127.0.0.1 高位端口，3081 是 dsh-pocket 代理）。
 
 **composer DOM**：`[data-composer-input]`（contenteditable，Lexical 受控）。写法必须 `execCommand('insertText')`（选中全部内容后），失败兜底 `textContent + input 事件`——dsh-rewind-plugin 的 `fillComposerEditable` 原样照抄。`data-composer-card` / `data-composer-seat` 是外围挂点。
+
+### 4.1 真实图片附件（2026-10-23 新增，DSH 0.2.1-rc.2 源码确认）
+
+用户要求：插入对话时，禅道描述里的截图要变成**真实图片**（不是 `[图片] {35861.png}` 文本占位符）。
+
+**结论：用户消息不渲染 markdown**（`UserText` 只有 text/session 两类节点，气泡 `white-space:pre-wrap`），
+所以图片只能走 **attachments API**，插 markdown `![]()` 没用。
+
+正确调用链（`dsh-client-ui-conversation/lib/client.js`）：
+```
+conversation.createDrafts(sessionId, File[])            // :4751，File → 注册 draft，图片得 blob: 预览
+  → [{id, kind:'image', previewUrl, file}]
+conversation.input.for(scope).addAttachments(ids)       // :15093，只收「已注册的 draft id」
+  → 草稿附件栏显示缩略图；submit 时 encodeImage 成 base64
+  → 宿主 admitPromptContent → image block（模型可见）
+```
+- `addAttachments(ids)` **不接受 File / Blob / path**，只接受 registry 里的不透明 id；伪造 id 会被
+  InputBar 的 `pruneAttachments` 静默清掉（提交时抛 "draft attachments are no longer available"）。
+- `conversation.input.for(scope)` 返回 `SessionInputShell` 本体，除 `setDraft/addAttachments/submit/focus`
+  外还有 `insertText(需要 captureInsertion 的 span)` / `pickFiles` / `notify` / `snapshot`。
+- 附件不持久化：localStorage 只存文本，刷新/切会话后附件 rail 清空。
+- 约束：`File.type ∈ {image/png,image/jpeg,image/webp,image/gif}`；单图 ≤20MB、≤64MP、单边 ≤8192；
+  单消息 ≤20 张 / 200MB；宿主入库归一化到 ≤2048²px、≤4MiB。
+- **模型不支持图片输入时宿主拒绝整条 prompt**（reason `MODEL_DOES_NOT_SUPPORT_IMAGES`，DSH 会提示
+  「当前模型不支持图片，请切换支持图片的模型」），发送失败会保留草稿与附件。
+- 参考实现：`~/.dsh/profiles/desktop/node_modules/dsh-rewind-plugin/lib/client.js:1680-1716`
+  （snapshot 恢复时用同一套 createDrafts + addAttachments）。
+- renderer 拿不到附件磁盘路径（没有 `/dsh-attachment` 路由），图片字节要么来自我们自己的 RPC，
+  要么用 `session.readAttachment(attachmentId)`。
+
+本项目的实现：
+- 禅道图片**两种形态**：v1 详情 `<img src="http://zentao.example.com:8090/file-read-35861.png">`；
+  `my-work-*.json` 列表里是占位符 `<img src="{35861.png}">` → 都归一成 `/file-read-35861.png`
+  （`service.mjs` 的 `extractImageRefs/normalizeImageUrl`）。
+- 卡片模型与详情都带 `images: [{url, name}]`；`htmlToText` 把 `<img>` 渲染成 `[图片：35861.png]`（不内联 URL）。
+- host 新增 RPC `zentao.image`：同源校验 + 路径白名单（`/file-read-`、`/data/upload/`、`/index.php`）
+  + magic 嗅探 → 返回 `{name, mediaType, base64, bytes}`，单图上限 20MB。
+- client 端 `attachImagesToDraft()`：RPC 取图 → `new File([bytes], name, {type})` → `createDrafts`
+  → `interface.addAttachments`；`addAttachments` 返回 false 时 `releaseDraftAttachments` 清理。
+  超大图（>8192 边长 / >64MP / >20MB）先用 `createImageBitmap` + canvas 缩到 2048 长边再附加。
 
 ### 5. DSH 插件体系（本机实测）
 
@@ -175,7 +221,7 @@ client-modules: <pkg> declares dsh.client but exports no "./client" bundle
 - **client 免构建**：手写 `window.__ModuleLoader__.load` 包装的 CJS 风格 bundle（dsh-notify-me 模式），不用 esbuild——改动即时生效，代价是不能用 JSX（全用 `h()` createElement）
 - **RPC 通道选型**：直接挂自己 inject 的 webServer（dsh-pocket v2 模式），回退 `ctx.connection.rpc.handle`；不复刻浏览器 cookie 认证（loopback-only 信任栅栏足够）
 - **缓存 60s**：面板展开不重复打禅道；「刷新」按钮带 `refresh:true` 强刷
-- **卡片统一模型**：`{kind, id, title, status, pri, severity, deadline, assignedTo, openedBy, execution, product, url, descBrief}`，Markdown 生成在 client 的 `cardToMarkdown()`
+- **卡片统一模型**：`{kind, id, title, status, pri, severity, deadline, assignedTo, openedBy, execution, product, url, descBrief, images}`，Markdown 生成在 client 的 `cardToMarkdown()`
 
 ## 剩余任务（按优先级）
 
@@ -186,9 +232,13 @@ client-modules: <pkg> declares dsh.client but exports no "./client" bundle
 - client 侧如果没出现：先 `node test/client.mjs` 确认注册契约没坏；再看 console 里 `[dsh-zentao-panel]` 前缀的报错；
   悬浮按钮出现说明走的是兜底路径（没拿到 `sidebarRightTabs`）
 - M3 插入对话：服务级 setDraft 优先（当前主视图会话），DOM 兜底 `[data-composer-input]`（contenteditable + execCommand insertText），再兜底剪贴板
+- M3 图片附件（2026-10-23 新增，host 有改动 → **必须重启桌面版**才生效）：列表卡片或详情点「插入对话」→
+  输入框上方应出现图片缩略图（附件 rail），发送后消息里是真实图片；「处理」新会话同理。
+  若只看到文本 + toast「图片未能附加」，说明 host 还是旧代码（`zentao.image` 404）或禅道图片下载失败，看 console/日志
 - M3 处理（新会话下发）：`sessions.create({cwd})` 继承当前会话工作目录 → `uiWorkspace.openSession` → `conversation.input.for(scope).setDraft` + 延迟 250ms `submit()`；服务不可用时降级插入当前会话。真机重点验证：新会话 composer 挂载时序（250ms 是否够，不够就调大或改事件驱动）
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- M1 host 半边与 RPC 已在 test/host.mjs 全绿（13 项，2026-10-23 22:00 复跑通过）；client 注册契约在 test/client.mjs 全绿（22 项）
+- 测试现状（2026-10-23 23:5x 复跑）：`test/host.mjs` 全绿（19 项，含 `zentao.image` 真图下载 + SSRF 拒绝）；
+  `test/smoke.mjs` 全绿（含 `extractImageRefs` / `fetchImage` 真图下载）；`test/client.mjs` 全绿（29 项，含图片附件管线）
 
 ### 2. M4 打磨
 - 自动刷新（面板打开时轮询，间隔可选——计划书里定的 30s/1m/5m/10m/关闭）

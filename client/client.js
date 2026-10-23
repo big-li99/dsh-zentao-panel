@@ -127,6 +127,7 @@
         '.ztp-kv dd{margin:0;word-break:break-word;}',
         '.ztp-desc{margin-top:10px;padding:10px 12px;border-radius:var(--dsw-radius-md);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);font-size:12.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word;}',
         '.ztp-section{font-size:11.5px;color:var(--dsw-alias-label-tertiary);margin:14px 2px 6px;}',
+        '.ztp-hint{margin:8px 0 0;font-size:11.5px;line-height:1.55;color:var(--dsw-alias-label-tertiary);}',
 
         // 登录
         '.ztp-fill{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;}',
@@ -318,12 +319,178 @@
         return null;
       }
 
+      /** host RPC（模块级，方便附件辅助函数复用）。 */
+      function rpcCall(endpoint, payload) {
+        if (!appCtx || !appCtx.connection || !appCtx.connection.rpc || typeof appCtx.connection.rpc.call !== 'function') {
+          return Promise.reject(new Error('RPC unavailable'));
+        }
+        return appCtx.connection.rpc.call(CHANNEL, endpoint, payload || {});
+      }
+
+      /** 当前会话的输入目标：{sessionId, scope, facade, conversation}；不可用时 null。 */
+      function currentInputTarget() {
+        try {
+          var sessions = lookupService('sessions');
+          var conversation = lookupService('conversation');
+          if (!sessions || !conversation || !conversation.input) return null;
+          var cur = currentSessionId(sessions);
+          if (!cur) return null;
+          var scope = null;
+          try { scope = sessions.scope(cur); } catch (e) { scope = null; }
+          if (!scope) return null;
+          var facade = null;
+          try { facade = conversation.input.for(scope); } catch (e) { facade = null; }
+          if (!facade) return null;
+          return { sessionId: cur, scope: scope, facade: facade, conversation: conversation };
+        } catch (e) { return null; }
+      }
+
+      /** base64 → Uint8Array（浏览器 atob；不依赖 Buffer）。 */
+      function bytesFromBase64(b64) {
+        var bin = atob(b64);
+        var len = bin.length;
+        var out = new Uint8Array(len);
+        for (var i = 0; i < len; i++) out[i] = bin.charCodeAt(i);
+        return out;
+      }
+
+      /** 卡片/详情里的图片引用（host 已把禅道 HTML 里的 <img> 归一成可下载地址）。 */
+      function imagesOf(card, detail) {
+        var list = (detail && detail.images) || (card && card.images) || [];
+        if (!Array.isArray(list)) return [];
+        return list.filter(function (x) { return x && typeof x.url === 'string' && x.url; });
+      }
+
+      /** DSH 附件上限（dsh-attachment-local 默认）：单边 ≤8192、总像素 ≤64MP、单图 ≤20MB。 */
+      var IMAGE_MAX_DIMENSION = 8192;
+      var IMAGE_MAX_PIXELS = 64000000;
+      var IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+
+      /**
+       * 超大截图先缩到 2048 长边（DSH 入库本来就会归一化到 ≤2048）。
+       * 不做这步时超限图会让整条 prompt 被宿主拒绝（IMAGE_DIMENSION_TOO_LARGE / IMAGE_TOO_MANY_PIXELS）。
+       */
+      function normalizeImageFile(file) {
+        if (typeof createImageBitmap !== 'function' || typeof document === 'undefined') return Promise.resolve(file);
+        return Promise.resolve(createImageBitmap(file)).then(function (bmp) {
+          var w = bmp.width, h = bmp.height;
+          var oversized = w > IMAGE_MAX_DIMENSION || h > IMAGE_MAX_DIMENSION
+            || (w * h) > IMAGE_MAX_PIXELS || (file.size || 0) > IMAGE_MAX_BYTES;
+          if (!oversized) {
+            try { if (typeof bmp.close === 'function') bmp.close(); } catch (e) { /* 忽略 */ }
+            return file;
+          }
+          var scale = Math.min(2048 / Math.max(w, h), 1);
+          var cw = Math.max(1, Math.round(w * scale));
+          var ch = Math.max(1, Math.round(h * scale));
+          try {
+            var canvas = document.createElement('canvas');
+            canvas.width = cw; canvas.height = ch;
+            var g = canvas.getContext('2d');
+            g.drawImage(bmp, 0, 0, cw, ch);
+            try { if (typeof bmp.close === 'function') bmp.close(); } catch (e) { /* 忽略 */ }
+            return new Promise(function (resolve) {
+              try {
+                canvas.toBlob(function (blob) {
+                  if (!blob) { resolve(file); return; }
+                  var baseName = String(file.name || 'image').replace(/\.[^.]+$/, '');
+                  resolve(new File([blob], baseName + '.png', { type: 'image/png' }));
+                }, 'image/png');
+              } catch (e) { resolve(file); }
+            });
+          } catch (e) { return file; }
+        }, function () { return file; });
+      }
+
+      /**
+       * 真实图片附件：禅道图片 bytes → 浏览器 File → DSH 草稿附件 → addAttachments。
+       * DSH 0.2.1-rc.2 的会话服务契约（app.asar 源码确认）：
+       *   conversation.createDrafts(sessionId, File[]) → [{id, kind:'image', previewUrl}]
+       *   conversation.input.for(scope).addAttachments(ids) → 挂到当前草稿（发送后成为模型可见图片）
+       * 任意一环不可用（旧版 DSH / 无 conversation 服务）就返回 {ok:false}，文本仍已插入。
+       */
+      function attachImagesToDraft(images, target) {
+        if (!images || !images.length || !target || !target.conversation || !target.facade) {
+          return Promise.resolve({ ok: false, reason: 'unavailable', count: 0 });
+        }
+        var conversation = target.conversation;
+        var facade = target.facade;
+        if (typeof conversation.createDrafts !== 'function' || typeof facade.addAttachments !== 'function'
+          || typeof File !== 'function' || typeof atob !== 'function') {
+          return Promise.resolve({ ok: false, reason: 'unsupported', count: 0 });
+        }
+        var picked = images.slice(0, 20);
+        return Promise.all(picked.map(function (img) {
+          return rpcCall('zentao.image', { url: img.url }).then(function (r) {
+            if (!r || !r.ok || !r.value || !r.value.base64) return null;
+            return r.value;
+          }, function () { return null; });
+        })).then(function (values) {
+          var files = [];
+          for (var i = 0; i < values.length; i++) {
+            var v = values[i];
+            if (!v) continue;
+            try {
+              var name = v.name || picked[i].name || ('image-' + (i + 1) + '.png');
+              files.push(new File([bytesFromBase64(v.base64)], name, { type: v.mediaType || 'image/png' }));
+            } catch (e) { /* 单张失败不影响其它 */ }
+          }
+          if (!files.length) return { ok: false, reason: 'download', count: 0 };
+          return Promise.all(files.map(normalizeImageFile)).then(function (prepared) {
+            var drafts = null;
+            try { drafts = conversation.createDrafts(target.sessionId, prepared); } catch (e) { drafts = null; }
+            var ids = (drafts || []).map(function (d) { return d.id; }).filter(Boolean);
+            if (!ids.length) return { ok: false, reason: 'drafts', count: 0 };
+            var added = false;
+            try { added = facade.addAttachments(ids) !== false; } catch (e) { added = false; }
+            if (!added) {
+              // 草稿处于 adjudicating/submitting 时 DSH 拒绝追加，释放草稿避免泄漏 objectURL
+              try { if (typeof conversation.releaseDraftAttachments === 'function') conversation.releaseDraftAttachments(drafts); } catch (e) { /* 忽略 */ }
+              return { ok: false, reason: 'busy', count: 0 };
+            }
+            return { ok: true, count: ids.length };
+          });
+        });
+      }
+
+      /**
+       * 插入当前会话：服务级 setDraft（优先，可带图片附件）→ DOM composer → 剪贴板。
+       * @returns {Promise<{mode:'service'|'dom'|'clipboard', attached:number, failed?:boolean}>}
+       */
+      function insertToCurrentChat(md, images) {
+        var target = currentInputTarget();
+        var mode = null;
+        if (target && target.facade && typeof target.facade.setDraft === 'function') {
+          try {
+            target.facade.setDraft(md);
+            try { if (typeof target.facade.focus === 'function') target.facade.focus(); } catch (e) { /* 忽略 */ }
+            mode = 'service';
+          } catch (e) { mode = null; }
+        }
+        if (!mode) {
+          var domOk = false;
+          try { domOk = tryInsertIntoComposer(md); } catch (e) { domOk = false; }
+          if (domOk) mode = 'dom';
+        }
+        if (!mode) {
+          try {
+            return Promise.resolve(root.navigator.clipboard.writeText(md)).then(
+              function () { return { mode: 'clipboard', attached: 0 }; },
+              function () { return { mode: 'clipboard', attached: 0, failed: true }; });
+          } catch (e) { return Promise.resolve({ mode: 'clipboard', attached: 0, failed: true }); }
+        }
+        if (!images.length || !target) return Promise.resolve({ mode: mode, attached: 0 });
+        return attachImagesToDraft(images, target).then(function (r) {
+          return { mode: mode, attached: r && r.ok ? r.count : 0, imageError: r && !r.ok ? r.reason : null };
+        });
+      }
+
       /**
        * M3「处理」：新会话自动下发。
        *   sessions.create({cwd}) → uiWorkspace.openSession(id) → conversation.input.for(scope).setDraft/submit
        * 任一环失败 → 降级插入当前会话 composer；再失败 → 剪贴板。
        */
-      function dispatchToNewSession(md) {
+      function dispatchToNewSession(md, images) {
         var sessions = lookupService('sessions');
         var ws = lookupService('uiWorkspace');
         var conversation = lookupService('conversation');
@@ -352,12 +519,17 @@
               var facade = null;
               try { facade = conversation.input.for(scope); } catch (e) { facade = null; }
               if (facade && typeof facade.setDraft === 'function') {
-                facade.setDraft(md);
-                try { facade.focus(); } catch (e) { /* 忽略 */ }
-                setTimeout(function () {
-                  try { if (typeof facade.submit === 'function') facade.submit(); } catch (e) { /* 已填草稿，发送交给用户 */ }
-                }, 250);
-                return { ok: true, mode: 'dispatched', message: '已在新会话发送任务背景', sessionId: sessionId };
+                var target = { sessionId: sessionId, scope: scope, facade: facade, conversation: conversation };
+                // 先把真实图片挂成草稿附件，再填文本并发送（图片下载失败也照常发送）
+                return attachImagesToDraft(images, target).then(function (att) {
+                  facade.setDraft(md);
+                  try { facade.focus(); } catch (e) { /* 忽略 */ }
+                  setTimeout(function () {
+                    try { if (typeof facade.submit === 'function') facade.submit(); } catch (e) { /* 已填草稿，发送交给用户 */ }
+                  }, 250);
+                  var suffix = att && att.ok ? '（含 ' + att.count + ' 张图片）' : '';
+                  return { ok: true, mode: 'dispatched', message: '已在新会话发送任务背景' + suffix, sessionId: sessionId };
+                });
               }
             }
             setTimeout(function () {
@@ -469,6 +641,10 @@
 
           err[0] ? h('div', { className: 'ztp-err' }, err[0]) : null,
 
+          (d.images && d.images.length)
+            ? h('div', { className: 'ztp-hint' }, '描述含 ' + d.images.length + ' 张图片，插入对话时会作为真实图片附件一并带上')
+            : null,
+
           h('div', { className: 'ztp-section' }, card.kind === 'bug' ? '重现步骤 / 描述' : '描述'),
           desc
             ? h('div', { className: 'ztp-desc' }, desc)
@@ -577,49 +753,37 @@
           if (status[0] && status[0].configured) loadMine(false);
         }, [status[0] && status[0].configured]);
 
-        // 插入到输入框：服务级 setDraft → DOM composer → 剪贴板
+        // 插入到输入框：服务级 setDraft（+ 真实图片附件）→ DOM composer → 剪贴板
         var insertToChat = useCallback(function (card, detail) {
           var md = cardToMarkdown(card, detail);
-          var filled = false;
-          try {
-            var sessions = lookupService('sessions');
-            var conversation = lookupService('conversation');
-            var cur = sessions && typeof currentSessionId === 'function' ? currentSessionId(sessions) : null;
-            var scope = cur ? sessions.scope(cur) : null;
-            if (conversation && conversation.input && scope) {
-              var facade = conversation.input.for(scope);
-              if (facade && typeof facade.setDraft === 'function') {
-                facade.setDraft(md);
-                try { facade.focus(); } catch (e) { /* 忽略 */ }
-                filled = true;
-              }
+          var images = imagesOf(card, detail);
+          insertToCurrentChat(md, images).then(function (r) {
+            if (r.mode === 'clipboard') {
+              toast[1](r.failed ? '复制失败，请手动复制' : '已复制 Markdown，可粘贴到输入框');
+            } else if (r.attached) {
+              toast[1]('已插入对话输入框（含 ' + r.attached + ' 张图片）');
+            } else if (images.length) {
+              toast[1]('已插入对话输入框（图片未能附加，可在禅道查看）');
+            } else {
+              toast[1]('已插入对话输入框');
             }
-          } catch (e) { filled = false; }
-          if (!filled) {
-            try { filled = tryInsertIntoComposer(md); } catch (e) { filled = false; }
-          }
-          if (filled) { toast[1]('已插入对话输入框'); return; }
-          try {
-            root.navigator.clipboard.writeText(md).then(
-              function () { toast[1]('已复制 Markdown，可粘贴到输入框'); },
-              function () { toast[1]('复制失败，请手动复制'); });
-          } catch (e) { toast[1]('复制失败'); }
+          });
         }, []);
 
         // 「处理」：新会话自动下发（失败降级插入当前会话 → 剪贴板）
         var dispatchCard = useCallback(function (card, detail) {
           var md = cardToMarkdown(card, detail);
-          Promise.resolve(dispatchToNewSession(md)).then(function (r) {
+          var images = imagesOf(card, detail);
+          Promise.resolve(dispatchToNewSession(md, images)).then(function (r) {
             if (r && r.ok) { toast[1](r.message); return; }
             var msg = r && r.message ? r.message + '，已改为插入当前会话' : '新会话不可用，已改为插入当前会话';
-            var ok = false;
-            try { ok = tryInsertIntoComposer(md); } catch (e) { ok = false; }
-            if (ok) { toast[1](msg); return; }
-            try {
-              root.navigator.clipboard.writeText(md).then(
-                function () { toast[1](msg + '（已复制到剪贴板）'); },
-                function () { toast[1]('复制失败，请手动复制'); });
-            } catch (e) { toast[1]('复制失败'); }
+            insertToCurrentChat(md, images).then(function (x) {
+              if (x.mode === 'clipboard') {
+                toast[1](msg + (x.failed ? '（复制失败，请手动复制）' : '（已复制到剪贴板）'));
+              } else {
+                toast[1](msg + (x.attached ? '（含 ' + x.attached + ' 张图片）' : ''));
+              }
+            });
           }).catch(function (e) { toast[1]('下发失败：' + String((e && e.message) || e)); });
         }, []);
 
@@ -848,7 +1012,14 @@
       exports.inject = inject;
       exports.apply = apply;
       exports.cardToMarkdown = cardToMarkdown; // 测试用
-      exports._test = { fillComposerEditable: fillComposerEditable, tryInsertIntoComposer: tryInsertIntoComposer };
+      exports._test = {
+        fillComposerEditable: fillComposerEditable,
+        tryInsertIntoComposer: tryInsertIntoComposer,
+        insertToCurrentChat: insertToCurrentChat,
+        attachImagesToDraft: attachImagesToDraft,
+        imagesOf: imagesOf,
+        bytesFromBase64: bytesFromBase64,
+      };
       return module.exports;
     },
   });

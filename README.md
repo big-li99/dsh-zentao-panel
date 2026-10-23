@@ -8,7 +8,9 @@ DeepSeekRuntime 的禅道（ZenTao）工作台插件：在 DSH 右侧栏「开�
 
 - 右侧栏 tab：任务 / Bug / 需求三个分段标签，卡片列表 + 详情；
 - 卡片拖拽/点击插入对话输入框（Markdown 任务卡）；
-- 「处理」按钮：新建会话并自动下发任务背景提示词；
+- **描述里的截图变成真实图片**：插入时把禅道 `<img>`（含列表接口的 `{35861.png}` 占位符）
+  下载下来，作为 DSH 图片附件挂到输入框，发送后模型真的能看到图；
+- 「处理」按钮：新建会话并自动下发任务背景提示词（含图片附件）；
 - 登录态持久化（30 天免登），会话失效自动重登；
 - 全部颜色走 DSH 语义 token（`--dsw-alias-*`），日间 / 夜间自动跟随；
 - 只读，不回写禅道。
@@ -19,7 +21,7 @@ DeepSeekRuntime 的禅道（ZenTao）工作台插件：在 DSH 右侧栏「开�
 - **M1** ✅ host 插件：登录（30 天免登 cookie）/ my-work 三接口 / v1 详情 / loopback RPC
 - **M2** ✅ client 入口：右侧栏 tab 类型 + 「开始」页引导卡片（参照 dsh-context 的「上下文」）；
   旧版 DSH 没有 `sidebarRightTabs` 时自动退回悬浮按钮 + 侧滑面板
-- **M3** ⏳ 插入输入框（服务级 setDraft → composer DOM → 剪贴板兜底）+ 新会话下发
+- **M3** ✅ 插入输入框（服务级 setDraft + 真实图片附件 → composer DOM → 剪贴板兜底）+ 新会话下发
 - **M4** ⏳ 自动刷新、错误提示打磨
 
 ## 测试
@@ -71,6 +73,19 @@ rm -rf ~/.dsh/zentao-panel
 - `sidebar.right.pane.tab` / `.title` 两个 keyed slot 提供 tab 正文与标题，
   **key 用 tab 类型的 id**（`TabSlot` 的 entryKey = `definition.id ?? tab.kind`）；
 - 颜色只用 `--dsw-alias-*` 语义 token，暗色由 `body[data-ds-dark-theme]` 自动切换。
+
+真实图片附件（DSH 0.2.1-rc.2 源码确认）：
+
+- 宿主用登录态 cookie 下载禅道图片，RPC `zentao.image` 返回 `{name, mediaType, base64}`；
+- 渲染端 `new File([bytes], name, {type})` →
+  `conversation.createDrafts(sessionId, files)` 拿到 draft id →
+  `conversation.input.for(scope).addAttachments(ids)`；
+  `addAttachments` **只接受已注册的 draft id**，不直接收 File；
+- 用户消息不渲染 markdown，所以图片只能走附件通道；发送后是模型可见的 image block；
+- 仅支持 png/jpeg/webp/gif，单图 ≤20MB、单边 ≤8192、单消息 ≤20 张；超大截图会先在
+  浏览器里缩到 2048 长边再附加（DSH 宿主本来也会归一化到 ≤2048）。
+- 模型不支持图片输入时宿主会拒绝整条 prompt（DSH 自身会提示「当前模型不支持图片」），
+  此时可在输入框里移除图片附件后发送。
 
 详见《计划书.md》附录 A。
 

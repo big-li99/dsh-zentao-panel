@@ -101,7 +101,22 @@ check('refresh bypass cache', m3.value.cached === false);
 const first = m.value.cards.find((c) => c.kind === 'bug') ?? m.value.cards[0];
 const d = await rpc('zentao.detail', { kind: first.kind, id: first.id });
 check('detail via rpc', d.ok === true && d.value.id === first.id && typeof d.value.desc === 'string', `${first.kind}#${first.id} desc=${d.value.desc.length}字`);
+check('detail 带 images 数组', d.ok === true && Array.isArray(d.value.images));
 console.log('  详情 url:', d.value.url);
+
+// 图片：mine 卡片 → zentao.image RPC（真实图片附件的数据来源）
+const withImage = m.value.cards.find((c) => Array.isArray(c.images) && c.images.length > 0);
+check('mine 卡片带 images 字段', m.value.cards.every((c) => Array.isArray(c.images)), `${m.value.cards.filter((c) => c.images.length).length} 张带图`);
+if (withImage) {
+  const img = await rpc('zentao.image', { url: withImage.images[0].url });
+  check('image via rpc', img.ok === true && /^image\/(png|jpeg|webp|gif)$/.test(img.value.mediaType) && img.value.base64.length > 100,
+    `${withImage.kind}#${withImage.id} ${img.value?.mediaType} ${img.value?.bytes} bytes`);
+} else {
+  check('image via rpc', false, '当前账号没有带内联图片的卡片');
+}
+const badImg = await rpc('zentao.image', { url: 'http://evil.example.com/file-read-1.png' });
+check('image RPC 拒绝非同源（SSRF）', badImg.ok === false, badImg.error?.message);
+check('image RPC 拒绝空 url', (await rpc('zentao.image', {})).ok === false);
 
 // 非法参数
 const bad = await rpc('zentao.detail', { kind: 'exec', id: 1 });

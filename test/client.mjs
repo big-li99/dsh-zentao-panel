@@ -41,6 +41,16 @@ const React = {
 const sandbox = {
   window, document, console, setTimeout, clearTimeout, Symbol, Object, Array, String, Number, Date, JSON, Math, Promise,
   Event: class Event {}, HTMLTextAreaElement: class HTMLTextAreaElement {},
+  // 真实图片附件管线用到的 Web API（Node vm 上下文里没有，需要显式提供）
+  atob: (s) => Buffer.from(String(s), 'base64').toString('binary'),
+  File: class File {
+    constructor(parts, name, opts) {
+      this.parts = parts;
+      this.name = name;
+      this.type = (opts && opts.type) || '';
+      this.size = parts.reduce((n, p) => n + (p.byteLength || p.length || 0), 0);
+    }
+  },
 };
 sandbox.globalThis = sandbox;
 vm.runInContext(src, vm.createContext(sandbox));
@@ -113,6 +123,57 @@ const md = mod.cardToMarkdown({
 check('cardToMarkdown 含标题行', md.includes('## 禅道Bug #123：登录页报错'));
 check('cardToMarkdown 含原地址', md.includes('http://z/bug-view-123.html'));
 check('cardToMarkdown 用「重现步骤/描述」小节', md.includes('### 重现步骤/描述'));
+
+// ── 真实图片附件管线（conversation.createDrafts + facade.addAttachments）──
+const base64Png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]).toString('base64');
+const images = mod._test.imagesOf(
+  { kind: 'bug', id: 1 },
+  { images: [{ url: 'http://z/file-read-1.png', name: '1.png' }, { url: 'http://z/file-read-2.png', name: '2.png' }] },
+);
+check('imagesOf 读取详情 images', images.length === 2 && images[0].url.includes('file-read-1.png'));
+check('imagesOf 无图时返回空数组', mod._test.imagesOf({ kind: 'bug', id: 1 }, {}).length === 0);
+check('bytesFromBase64 还原字节', Array.from(mod._test.bytesFromBase64(base64Png)).slice(0, 4).join(',') === '137,80,78,71');
+
+const draftsCreated = [];
+const addedIds = [];
+const fakeFacade = {
+  draft: '',
+  setDraft(t) { this.draft = t; },
+  focus() {}, submit() {},
+  addAttachments(ids) { addedIds.push(...ids); return true; },
+};
+const fakeConversation = {
+  input: { for: () => fakeFacade },
+  createDrafts(sessionId, files) {
+    draftsCreated.push({ sessionId, files });
+    return files.map((f, i) => ({ id: 'draft-' + (i + 1), kind: 'image', name: f.name }));
+  },
+};
+ctx.connection.rpc.call = async (channel, endpoint) => (endpoint === 'zentao.image'
+  ? { ok: true, value: { name: '1.png', mediaType: 'image/png', base64: base64Png, bytes: 10 } }
+  : { ok: false, error: { message: 'unexpected endpoint ' + endpoint } });
+
+const att = await mod._test.attachImagesToDraft(images, { sessionId: 's1', facade: fakeFacade, conversation: fakeConversation });
+check('attachImagesToDraft 走 createDrafts + addAttachments',
+  att.ok === true && att.count === 2 && draftsCreated.length === 1 && draftsCreated[0].sessionId === 's1' && addedIds.length === 2);
+check('图片以 File(image/png) 交给 DSH', draftsCreated[0].files.every((f) => f.type === 'image/png' && f.size === 10));
+
+const attOld = await mod._test.attachImagesToDraft(images, { sessionId: 's1', facade: {}, conversation: {} });
+check('旧版 DSH 无 createDrafts 时降级不报错', attOld.ok === false && attOld.reason === 'unsupported');
+
+// insertToCurrentChat：服务级 setDraft + 图片附件（经 ctx.get 懒查找 sessions/conversation）
+ctx.get = function (name) {
+  if (name === 'sidebarRightTabs') return fakeTabs;
+  if (name === 'sessions') return {
+    list: { getSnapshot: () => ({ current: 's1', byId: { s1: { cwd: '/tmp' } } }) },
+    scope: () => ({}),
+  };
+  if (name === 'conversation') return fakeConversation;
+  return undefined;
+};
+const ins = await mod._test.insertToCurrentChat('## 卡片', images);
+check('insertToCurrentChat 服务级插入 + 图片附件',
+  ins.mode === 'service' && ins.attached === 2 && fakeFacade.draft === '## 卡片');
 
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);
