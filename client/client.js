@@ -1,10 +1,16 @@
-// dsh-zentao-panel — client 半边（悬浮按钮 + 右侧滑出面板）
+// dsh-zentao-panel — client 半边（右侧栏 tab + 起始页引导卡片）
+//
+// 入口形态参照 dsh-context 的「上下文」：注册到右侧栏的 sidebarRightTabs，
+// 在「开始」引导页里呈现为一张卡片，点开后在右侧栏里作为 tab 打开（可停靠/浮窗/分屏）。
+//
+// 主题：DSH 用 body[data-ds-dark-theme] 切暗色，颜色全部来自 --dsw-alias-* 语义 token，
+// 所以日间/夜间无需任何 JS 判断，自动跟随。
+// （旧版用的 --dsw-alias-border-subtle / --dsw-alias-bg-canvas-subtle 等变量在 0.2.1-rc.2
+//   并不存在，回落到 #fff 兜底色，正是夜间模式错色的根源。）
 //
 // 装载方式（参照 dsh-notify-me）：dsh.client 声明 → dsh-client-modules 以
 // /plugins/dsh-zentao-panel/client.js 提供 → window.__ModuleLoader__.load 执行。
-// 界面挂载（参照 dsh-pocket）：shell.overlay slot —— 不改布局、纯覆盖层。
-// 数据通道：ctx.connection.rpc.call('/dsh-zentao-panel', endpoint, payload) →
-// host 半边挂载的 loopback RPC 路由。
+// 数据通道：ctx.connection.rpc.call('/dsh-zentao-panel', endpoint, payload) → host 半边的 loopback RPC。
 (function (root) {
   if (!root || !root.__ModuleLoader__ || typeof root.__ModuleLoader__.load !== 'function') return;
 
@@ -19,69 +25,208 @@
       try { React = require('react'); } catch (e) { React = null; }
       if (!React || typeof React.createElement !== 'function') return module.exports;
       var h = React.createElement;
-      var useState = React.useState, useEffect = React.useEffect, useMemo = React.useMemo, useRef = React.useRef, useCallback = React.useCallback;
+      var useState = React.useState, useEffect = React.useEffect, useMemo = React.useMemo, useCallback = React.useCallback;
 
       var CHANNEL = '/dsh-zentao-panel';
+      var TAB_ID = 'dsh-zentao-panel';
+      var TAB_KIND = 'zentao';
 
       // ───────────────────────── 样式 ─────────────────────────
-      var Z = 9000; // 覆盖层 z-index（低于 DSH 自身弹窗，高于正文）
+      // 只用 DSH 的语义 token：bg-layer-1/2、border-l1..l4、label-primary/secondary/tertiary、
+      // state-error/success/warn/business、interactive-bg-hover(-solid)、toast-bg… 全部随主题翻转。
+      var CSS = [
+        // 根容器：右侧栏 tab body 是 flex 列，自身不画背景，吃面板底色
+        '.ztp-root{height:100%;min-height:0;display:flex;flex-direction:column;flex:auto;color:var(--dsw-alias-label-primary);font-size:var(--dsh-content-font-size-secondary,13px);line-height:1.5;}',
+
+        // 头部（38px，与 DSH 各面板保持一致）
+        '.ztp-head{flex:none;display:flex;align-items:center;gap:2px;height:38px;padding:0 6px 0 10px;border-bottom:.5px solid var(--dsw-alias-border-l3);box-sizing:border-box;}',
+        '.ztp-head-title{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);padding-left:4px;}',
+        '.ztp-seg{display:flex;align-items:center;gap:2px;min-width:0;overflow-x:auto;scrollbar-width:none;}',
+        '.ztp-seg::-webkit-scrollbar{display:none;}',
+        '.ztp-seg-btn{appearance:none;border:0;background:transparent;font:inherit;font-size:12.5px;line-height:1;color:var(--dsw-alias-label-secondary);height:26px;padding:0 10px;border-radius:999px;display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;}',
+        '.ztp-seg-btn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
+        '.ztp-seg-btn[aria-selected="true"]{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary);font-weight:600;}',
+        '.ztp-num{font-size:11px;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-tertiary);font-weight:400;}',
+        '.ztp-seg-btn[aria-selected="true"] .ztp-num{color:var(--dsw-alias-label-secondary);}',
+        '.ztp-grow{flex:1;min-width:6px;}',
+
+        // 图标按钮
+        '.ztp-tool{width:28px;height:28px;flex:none;display:inline-flex;align-items:center;justify-content:center;padding:6px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;line-height:1;box-sizing:border-box;}',
+        '.ztp-tool:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
+        '.ztp-tool svg{width:15px;height:15px;}',
+        '.ztp-spin{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--dsw-alias-border-l4);border-top-color:var(--dsw-alias-label-secondary);animation:ztp-rot .8s linear infinite;box-sizing:border-box;}',
+        '@keyframes ztp-rot{to{transform:rotate(360deg)}}',
+
+        // 滚动区
+        '.ztp-scroll{flex:1;min-height:0;overflow:auto;scrollbar-gutter:stable;padding:8px 10px 14px;box-sizing:border-box;}',
+
+        // 卡片
+        '.ztp-card{position:relative;display:block;width:100%;box-sizing:border-box;text-align:left;font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);padding:10px 12px 10px 14px;margin:0 0 8px;cursor:pointer;transition:background .12s ease,border-color .12s ease;}',
+        '.ztp-card:hover{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l4);}',
+        '.ztp-card:active{background:var(--dsw-alias-interactive-bg-active);}',
+        '.ztp-card:before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:2px;border-radius:0 2px 2px 0;background:var(--ztp-c,transparent);opacity:.7;}',
+        '.ztp-k-task{--ztp-c:var(--dsw-alias-state-business-primary);}',
+        '.ztp-k-bug{--ztp-c:var(--dsw-alias-state-error-primary);}',
+        '.ztp-k-story{--ztp-c:var(--dsw-alias-state-success-primary);}',
+        '.ztp-row{display:flex;align-items:center;gap:6px;min-width:0;}',
+        '.ztp-id{font-size:11px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;flex:none;}',
+        '.ztp-card-title{margin-top:4px;font-size:13px;line-height:1.45;color:var(--dsw-alias-label-primary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;}',
+
+        // 类型标签
+        '.ztp-tag{display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;font-size:11px;font-weight:500;flex:none;line-height:18px;}',
+        '.ztp-tag.task{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 14%,transparent);}',
+        '.ztp-tag.bug{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 14%,transparent);}',
+        '.ztp-tag.story{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 14%,transparent);}',
+
+        // 元信息
+        '.ztp-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin-top:6px;font-size:11.5px;color:var(--dsw-alias-label-tertiary);}',
+        '.ztp-st{display:inline-flex;align-items:center;gap:5px;color:var(--dsw-alias-label-secondary);}',
+        '.ztp-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none;}',
+        '.ztp-st-active{color:var(--dsw-alias-state-business-primary);}',
+        '.ztp-st-done{color:var(--dsw-alias-state-success-primary);}',
+        '.ztp-st-warn{color:var(--dsw-alias-state-warn-primary);}',
+        '.ztp-st-idle{color:var(--dsw-alias-label-tertiary);}',
+        '.ztp-pri{font-weight:500;color:var(--dsw-alias-label-secondary);}',
+        '.ztp-pri.p1{color:var(--dsw-alias-state-error-primary);}',
+        '.ztp-pri.p2{color:var(--dsw-alias-state-warn-primary);}',
+        '.ztp-warn{color:var(--dsw-alias-state-warn-primary);}',
+
+        // 按钮
+        '.ztp-acts{display:flex;justify-content:flex-end;gap:6px;margin-top:8px;}',
+        '.ztp-btn{appearance:none;font:inherit;font-size:12px;line-height:1;height:26px;padding:0 10px;border-radius:var(--dsw-radius-sm);border:.5px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;box-sizing:border-box;}',
+        '.ztp-btn:hover{background:var(--dsw-alias-interactive-bg-hover);}',
+        '.ztp-btn.primary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);border-color:transparent;}',
+        '.ztp-btn.primary:hover{background:var(--dsw-alias-button-primary-hover);}',
+        '.ztp-btn:disabled{opacity:.45;cursor:default;}',
+        '.ztp-btn svg{width:13px;height:13px;}',
+
+        // 空态 / 骨架 / 错误
+        '.ztp-empty{padding:44px 16px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px;line-height:1.7;}',
+        '.ztp-skel{height:76px;border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-skeleton);border:.5px solid var(--dsw-alias-border-l1);margin-bottom:8px;animation:ztp-pulse 1.5s ease-in-out infinite;}',
+        '@keyframes ztp-pulse{0%,100%{opacity:.5}50%{opacity:.95}}',
+        '.ztp-err{margin:8px 0;padding:8px 10px;border-radius:var(--dsw-radius-md);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent);color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:1.55;}',
+        '.ztp-err-row{display:flex;align-items:center;gap:8px;justify-content:space-between;}',
+        '.ztp-err-retry{appearance:none;border:.5px solid currentColor;background:transparent;color:inherit;font:inherit;font-size:11.5px;height:22px;padding:0 8px;border-radius:var(--dsw-radius-sm);cursor:pointer;flex:none;}',
+
+        // 页脚
+        '.ztp-foot{flex:none;display:flex;align-items:center;gap:8px;height:28px;padding:0 12px;border-top:.5px solid var(--dsw-alias-border-l1);font-size:11px;color:var(--dsw-alias-label-tertiary);box-sizing:border-box;overflow:hidden;white-space:nowrap;}',
+        '.ztp-foot-dim{opacity:.75;}',
+
+        // 详情
+        '.ztp-detail-bar{display:flex;align-items:center;gap:8px;margin:0 0 8px;}',
+        '.ztp-back{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;height:24px;padding:0 6px 0 2px;border-radius:var(--dsw-radius-sm);cursor:pointer;display:inline-flex;align-items:center;gap:3px;}',
+        '.ztp-back:hover{color:var(--dsw-alias-label-primary);}',
+        '.ztp-back svg{width:13px;height:13px;}',
+        '.ztp-link{margin-left:auto;color:var(--dsw-alias-link);text-decoration:none;font-size:12px;display:inline-flex;align-items:center;gap:3px;}',
+        '.ztp-link:hover{text-decoration:underline;}',
+        '.ztp-link svg{width:12px;height:12px;}',
+        '.ztp-panel-card{border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1);padding:12px;}',
+        '.ztp-detail-title{margin-top:6px;font-size:14px;line-height:1.5;font-weight:600;color:var(--dsw-alias-label-primary);word-break:break-word;}',
+        '.ztp-kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin-top:10px;font-size:12px;color:var(--dsw-alias-label-secondary);}',
+        '.ztp-kv dt{color:var(--dsw-alias-label-tertiary);white-space:nowrap;}',
+        '.ztp-kv dd{margin:0;word-break:break-word;}',
+        '.ztp-desc{margin-top:10px;padding:10px 12px;border-radius:var(--dsw-radius-md);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);font-size:12.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word;}',
+        '.ztp-section{font-size:11.5px;color:var(--dsw-alias-label-tertiary);margin:14px 2px 6px;}',
+
+        // 登录
+        '.ztp-fill{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;}',
+        '.ztp-login{flex:1;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;padding:24px 20px;}',
+        '.ztp-login-mark{width:44px;height:44px;border-radius:var(--dsw-radius-md);display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent);color:var(--dsw-alias-state-business-primary);margin-bottom:14px;}',
+        '.ztp-login-title{font-size:15px;font-weight:600;color:var(--dsw-alias-label-primary);}',
+        '.ztp-login-sub{margin:6px 0 16px;font-size:12px;line-height:1.7;color:var(--dsw-alias-label-tertiary);}',
+        '.ztp-label{display:block;font-size:12px;color:var(--dsw-alias-label-secondary);margin:12px 0 5px;}',
+        '.ztp-input{width:100%;height:32px;box-sizing:border-box;padding:0 10px;border-radius:var(--dsw-radius-md);border:.5px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;outline:none;}',
+        '.ztp-input::placeholder{color:var(--dsw-alias-label-caption);}',
+        '.ztp-input:focus{border-color:var(--dsw-alias-border-l4);box-shadow:0 0 0 1px var(--dsw-alias-border-l4);}',
+
+        // 轻提示
+        '.ztp-toast{position:fixed;left:50%;bottom:44px;transform:translateX(-50%);z-index:2147483000;max-width:min(420px,80vw);background:var(--dsw-alias-toast-bg);color:var(--dsw-alias-toast-label);border-radius:var(--dsw-radius-md);padding:8px 14px;font-size:12.5px;line-height:1.5;box-shadow:var(--dsw-shadow-lv3);}',
+
+        // 兜底：没有 sidebarRightTabs 的旧版 DSH 用悬浮入口
+        '.ztp-fab{position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:9000;display:flex;align-items:center;justify-content:center;height:44px;padding:0 7px;border:.5px solid var(--dsw-alias-border-l3);border-right:none;border-radius:var(--dsw-radius-md) 0 0 var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);box-shadow:var(--dsw-shadow-lv2);cursor:pointer;}',
+        '.ztp-fab:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
+        '.ztp-fab svg{width:18px;height:18px;}',
+        '.ztp-mask{position:fixed;inset:0;z-index:9000;background:var(--dsw-alias-bg-mask-2);}',
+        '.ztp-flyout{position:fixed;top:0;right:0;bottom:0;z-index:9001;width:min(420px,92vw);display:flex;flex-direction:column;background:var(--dsw-alias-bg-base);border-left:.5px solid var(--dsw-alias-border-l3);box-shadow:var(--dsw-shadow-lv3);animation:ztp-slide .16s ease-out;}',
+        '@keyframes ztp-slide{from{transform:translateX(24px);opacity:.5}to{transform:none;opacity:1}}',
+      ].join('\n');
+
       var cssInjected = false;
       function injectCss() {
         if (cssInjected || typeof document === 'undefined') return;
         cssInjected = true;
-        var style = document.createElement('style');
-        style.setAttribute('data-dsh-zentao-panel', '1');
-        style.textContent = [
-          // 悬浮按钮
-          '.ztp-fab{position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:' + Z + ';width:34px;padding:10px 6px;border:1px solid var(--dsw-alias-border-strong,#d0d5dd);border-right:none;border-radius:8px 0 0 8px;background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#1f2937);font-size:12px;line-height:1.25;writing-mode:vertical-rl;letter-spacing:2px;cursor:pointer;box-shadow:-2px 2px 10px rgba(0,0,0,.12);user-select:none;}',
-          '.ztp-fab:hover{background:var(--dsw-alias-state-brand-bg-layer,#eef2ff);color:var(--dsw-alias-brand-primary,#4f6ef7);}',
-          // 面板
-          '.ztp-mask{position:fixed;inset:0;z-index:' + Z + ';background:rgba(0,0,0,.28);}',
-          '.ztp-panel{position:fixed;top:0;right:0;bottom:0;z-index:' + (Z + 1) + ';width:min(430px,92vw);display:flex;flex-direction:column;background:var(--dsw-alias-bg-layer-1,#fff);box-shadow:-6px 0 24px rgba(0,0,0,.18);animation:ztp-slide .18s ease-out;}',
-          '@keyframes ztp-slide{from{transform:translateX(30px);opacity:.4}to{transform:none;opacity:1}}',
-          '.ztp-head{display:flex;align-items:center;gap:8px;padding:14px 16px;border-bottom:1px solid var(--dsw-alias-border-subtle,#e4e7ec);}',
-          '.ztp-title{font-size:15px;font-weight:600;color:var(--dsw-alias-label-primary,#1f2937);flex:1;}',
-          '.ztp-tabs{display:flex;gap:4px;padding:8px 12px;border-bottom:1px solid var(--dsw-alias-border-subtle,#e4e7ec);}',
-          '.ztp-tab{padding:5px 14px;border:none;border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary,#6b7280);font-size:13px;cursor:pointer;}',
-          '.ztp-tab.on{background:var(--dsw-alias-state-brand-bg-layer,#eef2ff);color:var(--dsw-alias-brand-primary,#4f6ef7);font-weight:600;}',
-          '.ztp-body{flex:1;overflow-y:auto;padding:10px 12px;}',
-          // 卡片
-          '.ztp-card{border:1px solid var(--dsw-alias-border-subtle,#e4e7ec);border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer;background:var(--dsw-alias-bg-layer-1,#fff);}',
-          '.ztp-card:hover{border-color:var(--dsw-alias-brand-primary,#4f6ef7);background:var(--dsw-alias-state-brand-bg-layer,#eef2ff);}',
-          '.ztp-card-title{font-size:13px;font-weight:500;color:var(--dsw-alias-label-primary,#1f2937);line-height:1.45;word-break:break-all;}',
-          '.ztp-card-meta{display:flex;flex-wrap:wrap;gap:4px 10px;margin-top:6px;font-size:11.5px;color:var(--dsw-alias-label-secondary,#6b7280);align-items:center;}',
-          '.ztp-badge{display:inline-block;padding:1px 8px;border-radius:999px;font-size:11px;line-height:1.5;}',
-          '.ztp-btn{padding:5px 12px;border:1px solid var(--dsw-alias-border-strong,#d0d5dd);border-radius:8px;background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#1f2937);font-size:12.5px;cursor:pointer;}',
-          '.ztp-btn:hover{background:var(--dsw-alias-bg-canvas-subtle,#f2f4f7);}',
-          '.ztp-btn.primary{background:var(--dsw-alias-brand-primary,#4f6ef7);border-color:var(--dsw-alias-brand-primary,#4f6ef7);color:#fff;}',
-          '.ztp-btn.primary:hover{opacity:.9;}',
-          '.ztp-input{width:100%;padding:7px 10px;border:1px solid var(--dsw-alias-border-strong,#d0d5dd);border-radius:8px;font-size:13px;background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#1f2937);box-sizing:border-box;}',
-          '.ztp-label{display:block;font-size:12.5px;color:var(--dsw-alias-label-secondary,#6b7280);margin:12px 0 4px;}',
-          '.ztp-empty{padding:40px 10px;text-align:center;color:var(--dsw-alias-label-secondary,#6b7280);font-size:13px;}',
-          '.ztp-err{margin:10px 12px;padding:8px 12px;border-radius:8px;background:var(--dsw-alias-state-error-bg-layer,#fef2f2);color:var(--dsw-alias-state-error-primary,#dc2626);font-size:12.5px;line-height:1.5;}',
-          '.ztp-detail-desc{font-size:12.5px;line-height:1.7;color:var(--dsw-alias-label-primary,#1f2937);white-space:pre-wrap;word-break:break-word;margin-top:10px;padding:10px;background:var(--dsw-alias-bg-canvas-subtle,#f2f4f7);border-radius:8px;max-height:340px;overflow-y:auto;}',
-          '.ztp-back{border:none;background:transparent;color:var(--dsw-alias-label-secondary,#6b7280);font-size:12.5px;cursor:pointer;padding:4px 6px;}',
-          '.ztp-spin{display:inline-block;width:14px;height:14px;border:2px solid var(--dsw-alias-border-strong,#d0d5dd);border-top-color:var(--dsw-alias-brand-primary,#4f6ef7);border-radius:50%;animation:ztp-rot .7s linear infinite;vertical-align:-2px;margin-right:6px;}',
-          '@keyframes ztp-rot{to{transform:rotate(360deg)}}',
-        ].join('\n');
-        document.head.appendChild(style);
+        var el = document.createElement('style');
+        el.setAttribute('data-dsh-zentao-panel', '1');
+        el.textContent = CSS;
+        document.head.appendChild(el);
       }
 
-      // ───────────────────────── 工具 ─────────────────────────
+      // ───────────────────────── 图标 ─────────────────────────
+      /** 禅道标记：卡片 + 清单勾，与 DSH 16px 线性图标同语言。 */
+      function ZentaoGlyph(props) {
+        var size = (props && props.size) || 16;
+        return h('svg', {
+          width: size, height: size, viewBox: '0 0 16 16', fill: 'none',
+          'aria-hidden': 'true', className: props && props.className,
+        },
+          h('rect', { x: 2.3, y: 3.3, width: 11.4, height: 9.4, rx: 2.2, stroke: 'currentColor', strokeWidth: 1.1 }),
+          h('path', { d: 'M4.9 6.4h2.7M4.9 9.5h2.2', stroke: 'currentColor', strokeWidth: 1.1, strokeLinecap: 'round' }),
+          h('path', { d: 'M9.3 9.3l1.1 1.1 2.1-2.3', stroke: 'currentColor', strokeWidth: 1.1, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+        );
+      }
+      function RefreshIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('path', { d: 'M13.1 8a5.1 5.1 0 1 1-1.55-3.67', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round' }),
+          h('path', { d: 'M13.3 2.9v2.6h-2.6', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+        );
+      }
+      function LogoutIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('path', { d: 'M6.5 2.9H3.9c-.66 0-1.2.54-1.2 1.2v7.8c0 .66.54 1.2 1.2 1.2h2.6', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round' }),
+          h('path', { d: 'M10.4 5.3L13.1 8l-2.7 2.7M12.8 8H6.6', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+        );
+      }
+      function BackIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('path', { d: 'M9.8 3.6L5.4 8l4.4 4.4', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+        );
+      }
+      function CloseIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('path', { d: 'M4.4 4.4l7.2 7.2M11.6 4.4l-7.2 7.2', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round' }),
+        );
+      }
+      function LinkIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('path', { d: 'M6.4 9.6l3.2-3.2', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round' }),
+          h('path', { d: 'M7.2 4.6l1-1a2.6 2.6 0 0 1 3.7 3.7l-1 1M8.8 11.4l-1 1a2.6 2.6 0 0 1-3.7-3.7l1-1', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round' }),
+        );
+      }
+
+      // ───────────────────────── 数据/文案工具 ─────────────────────────
       var KIND_LABEL = { task: '任务', bug: 'Bug', story: '需求' };
+      var KIND_ORDER = ['task', 'bug', 'story'];
       var STATUS_LABEL = {
         wait: '未开始', doing: '进行中', done: '已完成', closed: '已关闭', cancel: '已取消', pause: '已暂停',
-        active: '激活', resolved: '已解决', reviewing: '评审中',
+        active: '激活', resolved: '已解决', reviewing: '评审中', draft: '草稿', changed: '已变更', postponed: '已延期',
       };
-      var KIND_COLOR = {
-        task: { bg: '#eef2ff', fg: '#4f6ef7' },
-        bug: { bg: '#fef2f2', fg: '#dc2626' },
-        story: { bg: '#ecfdf5', fg: '#059669' },
+      // 状态语义色：doing/active 蓝、done/closed 绿、pause/postponed 黄、其余灰
+      var STATUS_TONE = {
+        wait: 'idle', doing: 'active', done: 'done', closed: 'idle', cancel: 'idle', pause: 'warn',
+        active: 'active', resolved: 'done', reviewing: 'active', draft: 'idle', changed: 'active', postponed: 'warn',
       };
 
       function statusLabel(s) { return STATUS_LABEL[s] ?? s ?? ''; }
+      function statusTone(s) { return STATUS_TONE[s] ?? 'idle'; }
       function fmtDate(d) { return d ? String(d).slice(0, 10) : ''; }
-      function fmtPri(p) { return p != null ? 'P' + p : ''; }
+      /** 距截止 ≤3 天标黄。 */
+      function isUrgent(d) {
+        if (!d) return false;
+        var t = Date.parse(String(d).slice(0, 10) + 'T23:59:59');
+        if (!Number.isFinite(t)) return false;
+        var days = (t - Date.now()) / 86400000;
+        return days >= 0 && days <= 3;
+      }
 
       /** 卡片 → Markdown 任务卡（M3：插入输入框 / 新会话用） */
       function cardToMarkdown(card, detail) {
@@ -106,268 +251,9 @@
         return lines.join('\n');
       }
 
-      // ───────────────────────── 登录表单 ─────────────────────────
-      function LoginForm(props) {
-        var rpc = props.rpc, onDone = props.onDone, init = props.init || {};
-        var baseUrl = useState(init.baseUrl || 'http://'), account = useState(init.account || ''), password = useState('');
-        var busy = useState(false), err = useState(null);
-        var doLogin = useCallback(function () {
-          if (busy[0]) return;
-          busy[1](true); err[1](null);
-          Promise.resolve(rpc('zentao.login', { baseUrl: baseUrl[0].trim(), account: account[0].trim(), password: password[0] }))
-            .then(function (r) {
-              busy[1](false);
-              if (r && r.ok) onDone(r.value);
-              else err[1]((r && r.error && r.error.message) || '登录失败');
-            })
-            .catch(function (e) { busy[1](false); err[1](String(e && e.message || e)); });
-        }, [baseUrl[0], account[0], password[0], busy[0]]);
-        return h('div', { style: { padding: '18px 16px' } },
-          h('div', { style: { fontSize: 14, fontWeight: 600, marginBottom: 4, color: 'var(--dsw-alias-label-primary,#1f2937)' } }, '登录禅道'),
-          h('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary,#6b7280)', marginBottom: 8 } }, '账号密码仅保存在本机（~/.dsh/zentao-panel），用于换取 30 天免登 cookie。'),
-          err[0] ? h('div', { className: 'ztp-err', style: { margin: '0 0 8px' } }, err[0]) : null,
-          h('label', { className: 'ztp-label' }, '禅道地址'),
-          h('input', { className: 'ztp-input', value: baseUrl[0], onChange: function (e) { baseUrl[1](e.target.value); }, placeholder: 'http://zentao.example.com:8090', spellCheck: false }),
-          h('label', { className: 'ztp-label' }, '账号'),
-          h('input', { className: 'ztp-input', value: account[0], onChange: function (e) { account[1](e.target.value); }, placeholder: '禅道登录账号', spellCheck: false, autoFocus: true }),
-          h('label', { className: 'ztp-label' }, '密码'),
-          h('input', { className: 'ztp-input', type: 'password', value: password[0], onChange: function (e) { password[1](e.target.value); }, onKeyDown: function (e) { if (e.key === 'Enter') doLogin(); } }),
-          h('button', { className: 'ztp-btn primary', style: { width: '100%', marginTop: 16, padding: '8px 0' }, disabled: busy[0], onClick: doLogin },
-            busy[0] ? '登录中…' : '登录'),
-        );
-      }
-
-      // ───────────────────────── 卡片列表 ─────────────────────────
-      function CardList(props) {
-        var cards = props.cards, onOpen = props.onOpen, onInsert = props.onInsert, onDispatch = props.onDispatch;
-        if (!cards.length) return h('div', { className: 'ztp-empty' }, '没有指派给你的' + (props.kind ? KIND_LABEL[props.kind] : '内容'));
-        return h('div', null, cards.map(function (c) {
-          var kc = KIND_COLOR[c.kind] || {};
-          return h('div', {
-            key: c.kind + c.id, className: 'ztp-card',
-            draggable: true,
-            onDragStart: function (e) {
-              try { e.dataTransfer.setData('text/plain', cardToMarkdown(c)); e.dataTransfer.effectAllowed = 'copy'; } catch (err) { /* 忽略 */ }
-            },
-            onClick: function () { onOpen(c); },
-          },
-            h('div', { className: 'ztp-card-title' },
-              h('span', { className: 'ztp-badge', style: { background: kc.bg, color: kc.fg, marginRight: 6 } }, KIND_LABEL[c.kind] || c.kind),
-              '#' + c.id + ' ' + c.title,
-            ),
-            h('div', { className: 'ztp-card-meta' },
-              h('span', null, statusLabel(c.status)),
-              c.pri != null ? h('span', null, 'P' + c.pri) : null,
-              c.severity != null ? h('span', null, '严重' + c.severity) : null,
-              c.deadline ? h('span', null, '截止 ' + fmtDate(c.deadline)) : null,
-              c.openedBy ? h('span', null, '来自 ' + c.openedBy) : null,
-            ),
-            h('div', { style: { display: 'flex', gap: 6, marginTop: 8 } },
-              h('button', { className: 'ztp-btn primary', style: { fontSize: 11.5, padding: '3px 10px' }, title: '新建会话并自动发送任务背景', onClick: function (e) { e.stopPropagation(); onDispatch(c); } }, '▶ 处理'),
-              h('button', { className: 'ztp-btn', style: { fontSize: 11.5, padding: '3px 10px' }, onClick: function (e) { e.stopPropagation(); onInsert(c, null); } }, '⤵ 插入对话'),
-              h('a', { href: c.url, target: '_blank', rel: 'noreferrer', className: 'ztp-btn', style: { fontSize: 11.5, padding: '3px 10px', textDecoration: 'none', display: 'inline-block' }, onClick: function (e) { e.stopPropagation(); } }, '原地址 ↗'),
-            ),
-          );
-        }));
-      }
-
-      // ───────────────────────── 详情 ─────────────────────────
-      function DetailView(props) {
-        var rpc = props.rpc, card = props.card, onBack = props.onBack, onInsert = props.onInsert, onDispatch = props.onDispatch;
-        var detail = useState(null), err = useState(null);
-        useEffect(function () {
-          var alive = true;
-          err[1](null); detail[1](null);
-          Promise.resolve(rpc('zentao.detail', { kind: card.kind, id: card.id }))
-            .then(function (r) { if (!alive) return; if (r && r.ok) detail[1](r.value); else err[1](r && r.error && r.error.message || '详情加载失败'); })
-            .catch(function (e) { if (alive) err[1](String(e && e.message || e)); });
-          return function () { alive = false; };
-        }, [card.kind, card.id]);
-        var kc = KIND_COLOR[card.kind] || {};
-        return h('div', null,
-          h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 } },
-            h('button', { className: 'ztp-back', onClick: onBack }, '‹ 返回列表'),
-            h('a', { href: card.url, target: '_blank', rel: 'noreferrer', style: { fontSize: 12, color: 'var(--dsw-alias-brand-primary,#4f6ef7)', textDecoration: 'none', marginLeft: 'auto' } }, '在禅道打开 ↗'),
-          ),
-          h('div', { className: 'ztp-card', style: { cursor: 'default' } },
-            h('div', { className: 'ztp-card-title' },
-              h('span', { className: 'ztp-badge', style: { background: kc.bg, color: kc.fg, marginRight: 6 } }, KIND_LABEL[card.kind] || card.kind),
-              '#' + card.id + ' ' + card.title,
-            ),
-            h('div', { className: 'ztp-card-meta' },
-              h('span', null, statusLabel(card.status)),
-              card.pri != null ? h('span', null, 'P' + card.pri) : null,
-              card.severity != null ? h('span', null, '严重' + card.severity) : null,
-              card.openedBy ? h('span', null, '来自 ' + card.openedBy) : null,
-              card.assignedTo ? h('span', null, '指派给 ' + card.assignedTo) : null,
-              card.deadline ? h('span', null, '截止 ' + fmtDate(card.deadline)) : null,
-            ),
-            h('div', { style: { display: 'flex', gap: 6, marginTop: 10 } },
-              h('button', { className: 'ztp-btn primary', style: { fontSize: 12 }, title: '新建会话并自动发送任务背景', onClick: function () { onDispatch(card, detail[0]); } }, '▶ 处理（新会话下发）'),
-              h('button', { className: 'ztp-btn', style: { fontSize: 12 }, onClick: function () { onInsert(card, detail[0]); } }, '⤵ 插入到对话输入框'),
-            ),
-          ),
-          err[0] ? h('div', { className: 'ztp-err' }, err[0]) : null,
-          detail[0] && detail[0].desc
-            ? h('div', { className: 'ztp-detail-desc' }, detail[0].desc)
-            : h('div', { className: 'ztp-empty', style: { padding: 16 } }, detail[0] ? '无描述' : '加载描述中…'),
-        );
-      }
-
-      // ───────────────────────── 面板主体 ─────────────────────────
-      function Panel(props) {
-        var ctx = props.ctx, close = props.close;
-        var tab = useState('task');
-        var status = useState(null); // {configured, account, baseUrl, loggedIn, cacheAt}
-        var mine = useState(null); // {cards, cached, at}
-        var loading = useState(false), err = useState(null);
-        var detailCard = useState(null); // 详情视图
-        var toast = useState(null);
-
-        var rpc = useCallback(function (endpoint, payload) {
-          return ctx.connection.rpc.call(CHANNEL, endpoint, payload || {});
-        }, []);
-
-        // toast 自动消失
-        useEffect(function () {
-          if (!toast[0]) return;
-          var t = setTimeout(function () { toast[1](null); }, 2200);
-          return function () { clearTimeout(t); };
-        }, [toast[0]]);
-
-        var loadStatus = useCallback(function () {
-          Promise.resolve(rpc('zentao.status')).then(function (r) {
-            if (r && r.ok) status[1](r.value);
-          }).catch(function () { /* 面板未连接 */ });
-        }, [rpc]);
-
-        var loadMine = useCallback(function (refresh) {
-          if (loading[0]) return;
-          loading[1](true); err[1](null);
-          Promise.resolve(rpc('zentao.mine', refresh ? { refresh: true } : {}))
-            .then(function (r) {
-              loading[1](false);
-              if (r && r.ok) { mine[1](r.value); status[1](function (s) { return s ? Object.assign({}, s, { cacheAt: r.value.at }) : s; }); }
-              else err[1](r && r.error && r.error.message || '数据加载失败');
-            })
-            .catch(function (e) { loading[1](false); err[1](String(e && e.message || e)); });
-        }, [rpc, loading[0]]);
-
-        // 打开面板即拉状态+数据
-        useEffect(function () { loadStatus(); }, [loadStatus]);
-        useEffect(function () {
-          if (status[0] && status[0].configured) loadMine(false);
-        }, [status[0] && status[0].configured]);
-
-        // 插入到输入框（M3：优先服务层 setDraft，再 DOM composer，失败则复制剪贴板）
-        var insertToChat = useCallback(function (card, detail) {
-          var md = cardToMarkdown(card, detail);
-          // 优先：当前主视图会话的服务级 setDraft（dsh-rewind composerFacade 模式）
-          var filled = false;
-          try {
-            var sessions = lookupService('sessions');
-            var conversation = lookupService('conversation');
-            var cur = sessions && typeof currentSessionId === 'function' ? currentSessionId(sessions) : null;
-            var scope = cur ? sessions.scope(cur) : null;
-            if (conversation && conversation.input && scope) {
-              var facade = conversation.input.for(scope);
-              if (facade && typeof facade.setDraft === 'function') {
-                facade.setDraft(md);
-                try { facade.focus(); } catch (e) { /* 忽略 */ }
-                filled = true;
-              }
-            }
-          } catch (e) { filled = false; }
-          if (!filled) {
-            try { filled = insertIntoComposer(md); } catch (e) { filled = false; }
-          }
-          if (filled) { toast[1]('已插入对话输入框'); close(); return; }
-          // 兜底：复制到剪贴板
-          try {
-            root.navigator.clipboard.writeText(md).then(function () { toast[1]('已复制 Markdown（可粘贴到输入框）'); }, function () { toast[1]('复制失败，请手动复制'); });
-          } catch (e) { toast[1]('复制失败'); }
-        }, [close]);
-
-        // M3「处理」：新会话自动下发（失败降级插入当前会话 → 剪贴板）
-        var dispatchCard = useCallback(function (card, detail) {
-          var md = cardToMarkdown(card, detail);
-          Promise.resolve(dispatchToNewSession(md)).then(function (r) {
-            if (r && r.ok) { toast[1](r.message); if (r.mode === 'dispatched' || r.mode === 'draft') close(); return; }
-            // 服务层失败 → 降级插入当前会话输入框
-            var msg = r && r.message ? r.message + '，已改为插入当前会话' : '新会话不可用，已改为插入当前会话';
-            var ok = false;
-            try { ok = insertIntoComposer(md); } catch (e) { ok = false; }
-            if (ok) { toast[1](msg); close(); return; }
-            try {
-              root.navigator.clipboard.writeText(md).then(function () { toast[1](msg + '（剪贴板）'); }, function () { toast[1]('复制失败，请手动复制'); });
-            } catch (e) { toast[1]('复制失败'); }
-          }).catch(function (e) {
-            toast[1]('下发失败：' + String(e && e.message || e));
-          });
-        }, [close]);
-
-        var logout = useCallback(function () {
-          Promise.resolve(rpc('zentao.logout')).then(function () {
-            mine[1](null); status[1](null); detailCard[1](null);
-            loadStatus();
-          });
-        }, [rpc, loadStatus]);
-
-        var cards = mine[0] ? mine[0].cards : [];
-        var filtered = useMemo(function () { return cards.filter(function (c) { return c.kind === tab[0]; }); }, [cards, tab[0]]);
-        var counts = useMemo(function () {
-          var m = { task: 0, bug: 0, story: 0 };
-          for (var i = 0; i < cards.length; i++) m[cards[i].kind] = (m[cards[i].kind] || 0) + 1;
-          return m;
-        }, [cards]);
-
-        var st = status[0];
-        var unconfigured = st && !st.configured;
-
-        return h('div', null,
-          h('div', { className: 'ztp-mask', onClick: close }),
-          h('div', { className: 'ztp-panel' },
-            // 头部
-            h('div', { className: 'ztp-head' },
-              h('span', { className: 'ztp-title' }, '禅道工作台', st && st.account ? h('span', { style: { fontWeight: 400, fontSize: 12, color: 'var(--dsw-alias-label-secondary,#6b7280)', marginLeft: 6 } }, '· ' + st.account) : null),
-              loading[0] ? h('span', { className: 'ztp-spin' }) : null,
-              h('button', { className: 'ztp-btn', style: { fontSize: 12, padding: '3px 10px' }, onClick: function () { loadMine(true); }, title: '重新拉取' }, '刷新'),
-              st && st.configured ? h('button', { className: 'ztp-btn', style: { fontSize: 12, padding: '3px 10px' }, onClick: logout, title: '清除本机凭据' }, '退出') : null,
-              h('button', { className: 'ztp-btn', style: { fontSize: 12, padding: '3px 10px' }, onClick: close }, '✕'),
-            ),
-            unconfigured
-              ? h(LoginForm, { rpc: rpc, init: { baseUrl: '', account: '' }, onDone: function (s) { status[1](s); loadMine(true); } })
-              : h('div', { style: { display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 } },
-                  // 标签页
-                  h('div', { className: 'ztp-tabs' },
-                    ['task', 'bug', 'story'].map(function (k) {
-                      return h('button', {
-                        key: k, className: 'ztp-tab' + (tab[0] === k ? ' on' : ''),
-                        onClick: function () { tab[1](k); detailCard[1](null); },
-                      }, (KIND_LABEL[k] || k) + (counts[k] ? ' ' + counts[k] : ''));
-                    }),
-                  ),
-                  err[0] ? h('div', { className: 'ztp-err' }, err[0]) : null,
-                  // 主体：列表 / 详情
-                  h('div', { className: 'ztp-body' },
-                    detailCard[0]
-                      ? h(DetailView, { rpc: rpc, card: detailCard[0], onBack: function () { detailCard[1](null); }, onInsert: insertToChat, onDispatch: dispatchCard })
-                      : h(CardList, { cards: filtered, kind: tab[0], onOpen: function (c) { detailCard[1](c); }, onInsert: insertToChat, onDispatch: dispatchCard }),
-                  ),
-                  mine[0] ? h('div', { style: { padding: '6px 14px', borderTop: '1px solid var(--dsw-alias-border-subtle,#e4e7ec)', fontSize: 11, color: 'var(--dsw-alias-label-secondary,#6b7280)' } },
-                    '共 ' + cards.length + ' 条指派给我 · ' + (mine[0].cached ? '缓存于 ' + new Date(mine[0].at).toLocaleTimeString() : '刚刚拉取'),
-                  ) : null,
-                ),
-          ),
-          toast[0] ? h('div', { style: { position: 'fixed', left: '50%', bottom: '40px', transform: 'translateX(-50%)', zIndex: Z + 2, background: 'rgba(17,24,39,.92)', color: '#fff', borderRadius: 8, padding: '8px 16px', fontSize: 13 } }, toast[0]) : null,
-        );
-      }
-
-      // ───────────────────────── 悬浮按钮 + 装载 ─────────────────────────
-      // DSH 的 composer 是 contenteditable（textarea → contenteditable 迁移过），
-      // 稳定挂点是 [data-composer-input]（dsh-rewind-plugin 在 0.2.1-rc.2 同款用法）。
-      // React/Lexical 受控：必须走 execCommand insertText（或兜底 textContent + input 事件），
-      // 直接改 DOM 不会同步内部状态。
+      // ───────────────────────── composer 写入（M3）─────────────────────────
+      // DSH 的 composer 是 contenteditable（Lexical 受控），稳定挂点是 [data-composer-input]。
+      // 必须走 execCommand insertText（或 textContent + input 事件），直接改 DOM 不会同步内部状态。
       function fillComposerEditable(text) {
         var editable = document.querySelector('[data-composer-input]');
         if (!editable) return false;
@@ -404,18 +290,17 @@
         }
         return false;
       }
-      var insertIntoComposer = tryInsertIntoComposer;
 
       // ─────────────── 服务懒查找（dsh-notify-me lookupService 模式）───────────────
       // cordis inject 是硬门槛（服务不就绪插件就不激活），这里用 ctx.get() 懒解析：
-      // 服务缺失时面板照常工作，「处理」按钮降级。
+      // 服务缺失时面板照常工作，只有「处理」降级。
       function lookupService(name) {
         var svc = null;
-        try { if (overlayCtx && typeof overlayCtx.get === 'function') svc = overlayCtx.get(name) || null; } catch (e) { svc = null; }
+        try { if (appCtx && typeof appCtx.get === 'function') svc = appCtx.get(name) || null; } catch (e) { svc = null; }
         if (svc) return svc;
-        try { if (overlayCtx && overlayCtx.reflect && typeof overlayCtx.reflect.get === 'function') svc = overlayCtx.reflect.get(name) || null; } catch (e) { svc = null; }
+        try { if (appCtx && appCtx.reflect && typeof appCtx.reflect.get === 'function') svc = appCtx.reflect.get(name) || null; } catch (e) { svc = null; }
         if (svc) return svc;
-        try { if (overlayCtx && name in overlayCtx) svc = overlayCtx[name] || null; } catch (e) { svc = null; }
+        try { if (appCtx && name in appCtx) svc = appCtx[name] || null; } catch (e) { svc = null; }
         return svc;
       }
 
@@ -435,13 +320,8 @@
 
       /**
        * M3「处理」：新会话自动下发。
-       * 链路（均在本机 DSH Desktop 0.2.1-rc.2 源码验证过）：
-       *   sessions.create({cwd})               → 新会话 id（dsh-api-session-controller）
-       *   uiWorkspace.openSession(id)          → 切主视图（内部同步 retain，scope 即刻可用）
-       *   conversation.input.for(scope)        → 会话级输入 facade（dsh-rewind 同款）
-       *     .setDraft(md) / .focus() / .submit()
+       *   sessions.create({cwd}) → uiWorkspace.openSession(id) → conversation.input.for(scope).setDraft/submit
        * 任一环失败 → 降级插入当前会话 composer；再失败 → 剪贴板。
-       * @returns {Promise<{ok:boolean, mode:string, message:string}>}
        */
       function dispatchToNewSession(md) {
         var sessions = lookupService('sessions');
@@ -450,7 +330,6 @@
         if (!sessions || typeof sessions.create !== 'function') {
           return Promise.resolve({ ok: false, mode: 'unavailable', message: 'sessions 服务不可用（DSH 版本过旧？）' });
         }
-        // 继承当前会话的工作目录，让新会话落在同一个项目里；取不到就交给 host 默认值
         var opts = {};
         try {
           var cur = currentSessionId(sessions);
@@ -475,16 +354,12 @@
               if (facade && typeof facade.setDraft === 'function') {
                 facade.setDraft(md);
                 try { facade.focus(); } catch (e) { /* 忽略 */ }
-                // 自动发送：等 React 把 composer 挂到新会话后提交
                 setTimeout(function () {
-                  try {
-                    if (typeof facade.submit === 'function') facade.submit();
-                  } catch (e) { /* 已填草稿，发送交给用户按 Enter */ }
+                  try { if (typeof facade.submit === 'function') facade.submit(); } catch (e) { /* 已填草稿，发送交给用户 */ }
                 }, 250);
                 return { ok: true, mode: 'dispatched', message: '已在新会话发送任务背景', sessionId: sessionId };
               }
             }
-            // scope/facade 不可用：降级为 DOM 填充（此时主视图可能已切过去）
             setTimeout(function () {
               try { fillComposerEditable(md); } catch (e) { /* 忽略 */ }
             }, 250);
@@ -495,6 +370,377 @@
           });
       }
 
+      // ───────────────────────── 组件 ─────────────────────────
+      function KindTag(props) {
+        return h('span', { className: 'ztp-tag ' + props.kind }, KIND_LABEL[props.kind] || props.kind);
+      }
+
+      function StatusChip(props) {
+        return h('span', { className: 'ztp-st ztp-st-' + statusTone(props.status) },
+          h('i', { className: 'ztp-dot' }),
+          statusLabel(props.status));
+      }
+
+      function CardItem(props) {
+        var c = props.card;
+        var urgent = isUrgent(c.deadline);
+        return h('div', {
+          className: 'ztp-card ztp-k-' + c.kind,
+          draggable: true,
+          title: '点击查看详情，可拖拽到对话输入框',
+          onDragStart: function (e) {
+            try {
+              e.dataTransfer.setData('text/plain', cardToMarkdown(c));
+              e.dataTransfer.effectAllowed = 'copy';
+            } catch (err) { /* 忽略 */ }
+          },
+          onClick: function () { props.onOpen(c); },
+        },
+          h('div', { className: 'ztp-row' },
+            h(KindTag, { kind: c.kind }),
+            h('span', { className: 'ztp-id' }, '#' + c.id)),
+          h('div', { className: 'ztp-card-title' }, c.title || ''),
+          h('div', { className: 'ztp-meta' },
+            h(StatusChip, { status: c.status }),
+            c.pri != null ? h('span', { className: 'ztp-pri p' + c.pri }, 'P' + c.pri) : null,
+            c.severity != null ? h('span', null, '严重 ' + c.severity) : null,
+            c.deadline ? h('span', { className: urgent ? 'ztp-warn' : '' }, '截止 ' + fmtDate(c.deadline)) : null,
+            c.openedBy ? h('span', null, c.openedBy + ' 创建') : null),
+          h('div', { className: 'ztp-acts' },
+            h('button', {
+              className: 'ztp-btn', type: 'button',
+              onClick: function (e) { e.stopPropagation(); props.onInsert(c, null); },
+            }, '插入对话'),
+            h('button', {
+              className: 'ztp-btn primary', type: 'button',
+              title: '新建会话并自动发送任务背景',
+              onClick: function (e) { e.stopPropagation(); props.onDispatch(c, null); },
+            }, '处理')),
+        );
+      }
+
+      function DetailView(props) {
+        var card = props.card;
+        var detail = useState(null), err = useState(null);
+        useEffect(function () {
+          var alive = true;
+          detail[1](null); err[1](null);
+          Promise.resolve(props.rpc('zentao.detail', { kind: card.kind, id: card.id }))
+            .then(function (r) {
+              if (!alive) return;
+              if (r && r.ok) detail[1](r.value);
+              else err[1]((r && r.error && r.error.message) || '详情加载失败');
+            })
+            .catch(function (e) { if (alive) err[1](String((e && e.message) || e)); });
+          return function () { alive = false; };
+        }, [card.kind, card.id]);
+
+        var d = detail[0] || {};
+        var urgent = isUrgent(card.deadline || d.deadline);
+        var desc = d.desc || card.descBrief || '';
+        return h('div', null,
+          h('div', { className: 'ztp-detail-bar' },
+            h('button', { className: 'ztp-back', type: 'button', onClick: props.onBack }, h(BackIcon), '返回'),
+            h('a', { className: 'ztp-link', href: card.url, target: '_blank', rel: 'noreferrer' },
+              '在禅道打开', h(LinkIcon))),
+
+          h('div', { className: 'ztp-panel-card ztp-k-' + card.kind },
+            h('div', { className: 'ztp-row' },
+              h(KindTag, { kind: card.kind }),
+              h('span', { className: 'ztp-id' }, '#' + card.id)),
+            h('div', { className: 'ztp-detail-title' }, card.title || ''),
+            h('div', { className: 'ztp-meta' },
+              h(StatusChip, { status: card.status }),
+              card.pri != null ? h('span', { className: 'ztp-pri p' + card.pri }, 'P' + card.pri) : null,
+              card.severity != null ? h('span', null, '严重 ' + card.severity) : null,
+              (card.deadline || d.deadline) ? h('span', { className: urgent ? 'ztp-warn' : '' }, '截止 ' + fmtDate(card.deadline || d.deadline)) : null),
+
+            h('dl', { className: 'ztp-kv' },
+              h('dt', null, '指派给'), h('dd', null, card.assignedTo || '—'),
+              h('dt', null, '创建人'), h('dd', null, card.openedBy || '—'),
+              d.type ? h('dt', null, '类型') : null, d.type ? h('dd', null, String(d.type)) : null,
+              d.stage ? h('dt', null, '阶段') : null, d.stage ? h('dd', null, String(d.stage)) : null,
+              d.estStarted ? h('dt', null, '预计开始') : null, d.estStarted ? h('dd', null, fmtDate(d.estStarted)) : null,
+              d.resolvedBuild ? h('dt', null, '解决版本') : null, d.resolvedBuild ? h('dd', null, String(d.resolvedBuild)) : null),
+
+            h('div', { className: 'ztp-acts', style: { marginTop: '12px' } },
+              h('button', { className: 'ztp-btn', type: 'button', onClick: function () { props.onInsert(card, detail[0]); } }, '插入对话'),
+              h('button', { className: 'ztp-btn primary', type: 'button', title: '新建会话并自动发送任务背景', onClick: function () { props.onDispatch(card, detail[0]); } }, '处理'))),
+
+          err[0] ? h('div', { className: 'ztp-err' }, err[0]) : null,
+
+          h('div', { className: 'ztp-section' }, card.kind === 'bug' ? '重现步骤 / 描述' : '描述'),
+          desc
+            ? h('div', { className: 'ztp-desc' }, desc)
+            : h('div', { className: 'ztp-desc', style: { color: 'var(--dsw-alias-label-tertiary)' } }, detail[0] ? '无描述' : '加载中…'),
+        );
+      }
+
+      function LoginView(props) {
+        var baseUrl = useState(props.init.baseUrl || 'http://');
+        var account = useState(props.init.account || '');
+        var password = useState('');
+        var busy = useState(false), err = useState(null);
+
+        var submit = useCallback(function () {
+          if (busy[0]) return;
+          busy[1](true); err[1](null);
+          Promise.resolve(props.rpc('zentao.login', {
+            baseUrl: baseUrl[0].trim(), account: account[0].trim(), password: password[0],
+          }))
+            .then(function (r) {
+              busy[1](false);
+              if (r && r.ok) props.onDone(r.value);
+              else err[1]((r && r.error && r.error.message) || '登录失败');
+            })
+            .catch(function (e) { busy[1](false); err[1](String((e && e.message) || e)); });
+        }, [baseUrl[0], account[0], password[0], busy[0]]);
+
+        return h('div', { className: 'ztp-login' },
+          h('div', { className: 'ztp-login-mark' }, h(ZentaoGlyph, { size: 24 })),
+          h('div', { className: 'ztp-login-title' }, '连接禅道'),
+          h('div', { className: 'ztp-login-sub' }, '账号密码只保存在本机（~/.dsh/zentao-panel），换一次 30 天免登 cookie，不会上传。'),
+          err[0] ? h('div', { className: 'ztp-err' }, err[0]) : null,
+
+          h('label', { className: 'ztp-label' }, '禅道地址'),
+          h('input', {
+            className: 'ztp-input', value: baseUrl[0], spellCheck: false,
+            placeholder: 'http://zentao.example.com:8090',
+            onChange: function (e) { baseUrl[1](e.target.value); },
+          }),
+          h('label', { className: 'ztp-label' }, '账号'),
+          h('input', {
+            className: 'ztp-input', value: account[0], spellCheck: false, autoFocus: true,
+            placeholder: '禅道登录账号',
+            onChange: function (e) { account[1](e.target.value); },
+          }),
+          h('label', { className: 'ztp-label' }, '密码'),
+          h('input', {
+            className: 'ztp-input', type: 'password', value: password[0],
+            onChange: function (e) { password[1](e.target.value); },
+            onKeyDown: function (e) { if (e.key === 'Enter') submit(); },
+          }),
+          h('button', {
+            className: 'ztp-btn primary', type: 'button', disabled: busy[0],
+            style: { width: '100%', height: '32px', marginTop: '18px', justifyContent: 'center' },
+            onClick: submit,
+          }, busy[0] ? '登录中…' : '登录'),
+        );
+      }
+
+      // ───────────────────────── 主面板（右侧栏 tab body）─────────────────────────
+      function ZentaoPane(props) {
+        props = props || {};
+        var tab = useState('task');
+        var status = useState(null);   // {configured, account, baseUrl, loggedIn, cacheAt}
+        var mine = useState(null);     // {cards, cached, at}
+        var loading = useState(false);
+        var err = useState(null);
+        var detailCard = useState(null);
+        var toast = useState(null);
+
+        var rpc = useCallback(function (endpoint, payload) {
+          return appCtx.connection.rpc.call(CHANNEL, endpoint, payload || {});
+        }, []);
+
+        useEffect(injectCss, []);
+
+        useEffect(function () {
+          if (!toast[0]) return;
+          var t = setTimeout(function () { toast[1](null); }, 2200);
+          return function () { clearTimeout(t); };
+        }, [toast[0]]);
+
+        var loadStatus = useCallback(function () {
+          Promise.resolve(rpc('zentao.status'))
+            .then(function (r) { if (r && r.ok) status[1](r.value); })
+            .catch(function () { /* host 未就绪 */ });
+        }, [rpc]);
+
+        var loadMine = useCallback(function (refresh) {
+          loading[1](true); err[1](null);
+          Promise.resolve(rpc('zentao.mine', refresh ? { refresh: true } : {}))
+            .then(function (r) {
+              loading[1](false);
+              if (r && r.ok) {
+                mine[1](r.value);
+                status[1](function (s) { return s ? Object.assign({}, s, { cacheAt: r.value.at }) : s; });
+              } else {
+                err[1]((r && r.error && r.error.message) || '数据加载失败');
+              }
+            })
+            .catch(function (e) { loading[1](false); err[1](String((e && e.message) || e)); });
+        }, [rpc]);
+
+        useEffect(function () { loadStatus(); }, [loadStatus]);
+        useEffect(function () {
+          if (status[0] && status[0].configured) loadMine(false);
+        }, [status[0] && status[0].configured]);
+
+        // 插入到输入框：服务级 setDraft → DOM composer → 剪贴板
+        var insertToChat = useCallback(function (card, detail) {
+          var md = cardToMarkdown(card, detail);
+          var filled = false;
+          try {
+            var sessions = lookupService('sessions');
+            var conversation = lookupService('conversation');
+            var cur = sessions && typeof currentSessionId === 'function' ? currentSessionId(sessions) : null;
+            var scope = cur ? sessions.scope(cur) : null;
+            if (conversation && conversation.input && scope) {
+              var facade = conversation.input.for(scope);
+              if (facade && typeof facade.setDraft === 'function') {
+                facade.setDraft(md);
+                try { facade.focus(); } catch (e) { /* 忽略 */ }
+                filled = true;
+              }
+            }
+          } catch (e) { filled = false; }
+          if (!filled) {
+            try { filled = tryInsertIntoComposer(md); } catch (e) { filled = false; }
+          }
+          if (filled) { toast[1]('已插入对话输入框'); return; }
+          try {
+            root.navigator.clipboard.writeText(md).then(
+              function () { toast[1]('已复制 Markdown，可粘贴到输入框'); },
+              function () { toast[1]('复制失败，请手动复制'); });
+          } catch (e) { toast[1]('复制失败'); }
+        }, []);
+
+        // 「处理」：新会话自动下发（失败降级插入当前会话 → 剪贴板）
+        var dispatchCard = useCallback(function (card, detail) {
+          var md = cardToMarkdown(card, detail);
+          Promise.resolve(dispatchToNewSession(md)).then(function (r) {
+            if (r && r.ok) { toast[1](r.message); return; }
+            var msg = r && r.message ? r.message + '，已改为插入当前会话' : '新会话不可用，已改为插入当前会话';
+            var ok = false;
+            try { ok = tryInsertIntoComposer(md); } catch (e) { ok = false; }
+            if (ok) { toast[1](msg); return; }
+            try {
+              root.navigator.clipboard.writeText(md).then(
+                function () { toast[1](msg + '（已复制到剪贴板）'); },
+                function () { toast[1]('复制失败，请手动复制'); });
+            } catch (e) { toast[1]('复制失败'); }
+          }).catch(function (e) { toast[1]('下发失败：' + String((e && e.message) || e)); });
+        }, []);
+
+        var logout = useCallback(function () {
+          Promise.resolve(rpc('zentao.logout')).then(function () {
+            mine[1](null); detailCard[1](null); status[1](null);
+            loadStatus();
+          });
+        }, [rpc, loadStatus]);
+
+        var st = status[0];
+        var configured = Boolean(st && st.configured);
+        var cards = mine[0] ? mine[0].cards : [];
+        var filtered = useMemo(function () {
+          return cards.filter(function (c) { return c.kind === tab[0]; });
+        }, [cards, tab[0]]);
+        var counts = useMemo(function () {
+          var m = { task: 0, bug: 0, story: 0 };
+          for (var i = 0; i < cards.length; i++) m[cards[i].kind] = (m[cards[i].kind] || 0) + 1;
+          return m;
+        }, [cards]);
+
+        /** 状态未知时先占位，避免登录表单闪一下。 */
+        function renderLoading() {
+          return h('div', { className: 'ztp-empty' }, h('span', { className: 'ztp-spin', style: { display: 'inline-block' } }));
+        }
+
+        function renderBody() {
+          if (detailCard[0]) {
+            return h(DetailView, {
+              key: detailCard[0].kind + '-' + detailCard[0].id,
+              rpc: rpc, card: detailCard[0],
+              onBack: function () { detailCard[1](null); },
+              onInsert: insertToChat, onDispatch: dispatchCard,
+            });
+          }
+          if (loading[0] && !mine[0]) {
+            return h('div', null,
+              h('div', { className: 'ztp-skel' }),
+              h('div', { className: 'ztp-skel', style: { height: '62px' } }),
+              h('div', { className: 'ztp-skel' }));
+          }
+          if (err[0] && !mine[0]) {
+            return h('div', { className: 'ztp-err' },
+              h('div', { className: 'ztp-err-row' },
+                h('span', null, err[0]),
+                h('button', { className: 'ztp-err-retry', type: 'button', onClick: function () { loadMine(true); } }, '重试')));
+          }
+          if (!filtered.length) {
+            return h('div', { className: 'ztp-empty' },
+              '没有指派给你的' + (KIND_LABEL[tab[0]] || '内容'),
+              h('br'),
+              h('span', { className: 'ztp-foot-dim' }, '可点右上角 ⟳ 重新拉取'));
+          }
+          return h('div', null, filtered.map(function (c) {
+            return h(CardItem, {
+              key: c.kind + '-' + c.id, card: c,
+              onOpen: function (x) { detailCard[1](x); },
+              onInsert: insertToChat, onDispatch: dispatchCard,
+            });
+          }));
+        }
+
+        // 中段：登录态未知占位 / 未配置 → 登录 / 已配置 → 列表·详情
+        var middle = !st
+          ? h('div', { className: 'ztp-fill' }, renderLoading())
+          : (!configured
+            ? h('div', { className: 'ztp-fill' }, h(LoginView, {
+              rpc: rpc,
+              init: { baseUrl: st.baseUrl || '', account: st.account || '' },
+              onDone: function (s) { status[1](s); }, // 配置状态由下方 effect 触发首次拉取
+            }))
+            : h('div', { className: 'ztp-scroll' }, renderBody()));
+
+        return h('div', { className: 'ztp-root' },
+          h('div', { className: 'ztp-head' },
+            configured
+              ? h('div', { className: 'ztp-seg', role: 'tablist' }, KIND_ORDER.map(function (k) {
+                return h('button', {
+                  key: k, type: 'button', role: 'tab',
+                  'aria-selected': tab[0] === k ? 'true' : 'false',
+                  className: 'ztp-seg-btn',
+                  onClick: function () { tab[1](k); detailCard[1](null); },
+                }, KIND_LABEL[k], counts[k] ? h('span', { className: 'ztp-num' }, counts[k]) : null);
+              }))
+              : h('div', { className: 'ztp-head-title' }, '禅道'),
+            h('div', { className: 'ztp-grow' }),
+            loading[0]
+              ? h('span', { className: 'ztp-tool', 'aria-hidden': 'true' }, h('span', { className: 'ztp-spin' }))
+              : (configured ? h('button', {
+                className: 'ztp-tool', type: 'button', title: '重新拉取',
+                onClick: function () { loadMine(true); },
+              }, h(RefreshIcon)) : null),
+            configured ? h('button', {
+              className: 'ztp-tool', type: 'button', title: '退出登录（清除本机凭据）',
+              onClick: logout,
+            }, h(LogoutIcon)) : null,
+            props.onClose ? h('button', {
+              className: 'ztp-tool', type: 'button', title: '关闭', onClick: props.onClose,
+            }, h(CloseIcon)) : null),
+
+          middle,
+
+          configured && mine[0] ? h('div', { className: 'ztp-foot' },
+            h('span', null, '共 ' + cards.length + ' 条'),
+            h('span', { className: 'ztp-foot-dim' }, '·'),
+            h('span', { className: 'ztp-foot-dim' },
+              mine[0].cached ? new Date(mine[0].at).toLocaleTimeString() + ' 缓存' : '刚刚拉取'),
+            st && st.account ? h('span', { className: 'ztp-foot-dim', style: { marginLeft: 'auto' } }, st.account) : null) : null,
+
+          toast[0] ? h('div', { className: 'ztp-toast', role: 'status' }, toast[0]) : null,
+        );
+      }
+
+      /** 右侧栏 tab 标题（tab chip 上的图标 + 文字）。 */
+      function ZentaoTabTitle() {
+        return h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '5px' } },
+          h(ZentaoGlyph, { size: 14 }), '禅道');
+      }
+
+      // ───────────────────────── 兜底：悬浮入口（旧版 DSH 没有 sidebarRightTabs）─────────────────────────
       function ZentaoOverlay() {
         var open = useState(false);
         useEffect(injectCss, []);
@@ -504,28 +750,98 @@
           return function () { document.removeEventListener('keydown', onKey); };
         }, []);
         return h('div', null,
-          open[0] ? h(Panel, { ctx: overlayCtx, close: function () { open[1](false); } }) : null,
-          h('div', { className: 'ztp-fab', onClick: function () { open[1](true); }, title: '禅道工作台' }, '禅道'),
-        );
+          open[0] ? h('div', null,
+            h('div', { className: 'ztp-mask', onClick: function () { open[1](false); } }),
+            h('div', { className: 'ztp-flyout' }, h(ZentaoPane, { onClose: function () { open[1](false); } }))) : null,
+          h('div', {
+            className: 'ztp-fab', role: 'button', title: '禅道工作台',
+            onClick: function () { open[1](true); },
+          }, h(ZentaoGlyph, { size: 18 })));
       }
 
-      var overlayCtx = null; // apply() 时注入
+      // ───────────────────────── 装载 ─────────────────────────
+      var appCtx = null; // apply() 时注入
 
-      var inject = ['slots', 'connection'];
+      /** 注册右侧栏 tab 类型 + 引导卡片 + tab body/title 三个挂点。 */
+      function registerRightSidebar(scope) {
+        var tabs = scope.sidebarRightTabs;
+        var slots = scope.slots || appCtx.slots;
+        var locale = null;
+        try { locale = appCtx.get('locale') || null; } catch (e) { locale = null; }
 
-      function apply(ctx) {
-        overlayCtx = ctx;
+        var registerTab = function () {
+          var dispose = tabs.register({
+            id: TAB_ID,
+            kind: TAB_KIND,
+            title: function () { return '禅道'; },
+            guide: [{
+              id: TAB_KIND,
+              order: 30,
+              title: function () { return '禅道'; },
+              description: function () { return '指派给我的任务、Bug 与需求'; },
+              icon: ZentaoGlyph,
+            }],
+          });
+          return function () { try { dispose(); } catch (e) { /* 忽略 */ } };
+        };
+        // 优先挂到我们的 effect 上（插件卸载时自动反注册）；scope 无 effect 时直接注册
+        if (typeof scope.effect === 'function') scope.effect(registerTab, 'dsh-zentao-panel: tab type');
+        else registerTab();
+
+        // 注意：sidebar-right 用 tab 类型的 id（不是 kind）做 slot 的 entryKey
+        // （TabSlot 里 entryKey = definition.id ?? tab.kind），dsh-context 里两者同名所以无感。
+        slots.inject('sidebar.right.pane.tab', function () {
+          return slots.register({ name: 'sidebar.right.pane.tab', key: TAB_ID, locale: locale || undefined }, function () {
+            return h(ZentaoPane, {});
+          });
+        });
+        slots.inject('sidebar.right.pane.tab.title', function () {
+          return slots.register({ name: 'sidebar.right.pane.tab.title', key: TAB_ID, locale: locale || undefined }, function () {
+            return h(ZentaoTabTitle, {});
+          });
+        });
+      }
+
+      /** 旧版 DSH：shell.overlay 悬浮按钮 + 侧滑面板。 */
+      function registerOverlay() {
+        // 右侧栏入口已经起来（例如服务晚于 2.5s 就绪）就不重复挂
+        if (lookupService('sidebarRightTabs')) return;
         try {
-          ctx.slots.inject('shell.overlay', function () {
-            return ctx.slots.register({
-              name: 'shell.overlay',
-              id: 'dsh-zentao-panel',
-              order: 20,
+          appCtx.slots.inject('shell.overlay', function () {
+            return appCtx.slots.register({
+              name: 'shell.overlay', id: TAB_ID, order: 20,
             }, function () { return h(ZentaoOverlay, {}); });
           });
         } catch (e) {
           try { console.error('[dsh-zentao-panel] overlay slot unavailable', e); } catch (e2) { /* 忽略 */ }
         }
+      }
+
+      var inject = ['slots', 'connection'];
+
+      function apply(ctx) {
+        appCtx = ctx;
+        injectCss();
+
+        var wired = false;
+        try {
+          ctx.inject(['sidebarRightTabs'], function (scope) {
+            wired = true;
+            try {
+              registerRightSidebar(scope);
+            } catch (e) {
+              wired = false;
+              try { console.error('[dsh-zentao-panel] register right-sidebar tab failed', e); } catch (e2) { /* 忽略 */ }
+            }
+          });
+        } catch (e) {
+          try { console.error('[dsh-zentao-panel] sidebarRightTabs unavailable', e); } catch (e2) { /* 忽略 */ }
+        }
+
+        // 2.5s 内拿不到 sidebarRightTabs（旧版 DSH）→ 退回悬浮入口
+        setTimeout(function () {
+          if (!wired) registerOverlay();
+        }, 2500);
       }
 
       exports.name = 'dsh-zentao-panel';

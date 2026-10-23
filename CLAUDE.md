@@ -21,16 +21,17 @@
 |---|---|
 | M0 禅道 API 探测 | ✅ 完成，结论在《计划书.md》附录 A（必读） |
 | M1 host 插件（登录/取数/RPC） | ✅ 代码完成，测试全绿，**已装入 desktop profile 加载树**（重启 DSH Desktop 激活） |
-| M2 client 侧边栏 UI | ✅ 代码完成，未经真实 DSH 界面验证 |
-| M3 插入输入框 + 新会话下发 | ⏳ 插入输入框有初版实现（composer 选择器是猜测，需真机适配）；新会话下发未开始 |
+| M2 client 右侧栏 tab + 引导卡片 | ✅ 已改为 `sidebarRightTabs` 入口（对齐 dsh-context「上下文」），样式走 DSH token 支持日/夜；注册契约有测试，待真机目视确认 |
+| M3 插入输入框 + 新会话下发 | ⏳ 插入输入框有初版实现（composer 选择器是猜测，需真机适配）；新会话下发代码已写待验证 |
 | M4 打磨 | ⏳ 未开始 |
 
-测试命令（**依赖内网禅道可达**）：
+测试命令：
 ```bash
-DSH_HOME=/tmp/zt-smoke node test/smoke.mjs   # 直连真实禅道验证 client/service 层
+node test/client.mjs                         # client 半边注册契约（无需 DSH / 禅道）
+DSH_HOME=/tmp/zt-smoke node test/smoke.mjs   # 直连真实禅道验证 client/service 层（需内网可达）
 DSH_HOME=/tmp/zt-host  node test/host.mjs    # apply() + RPC wire 协议端到端（mock ctx）
 ```
-测试文件里硬编码了禅道地址/账号/密码（用户提供的开发凭据）——**发布前必须参数化**，且永远不要把凭据提交到 git。
+凭据走 `ZENTAO_BASE`/`ZENTAO_ACCOUNT`/`ZENTAO_PASSWORD` 或 `~/.dsh/zentao-panel/config.json`——**永远不要把凭据提交到 git**。
 
 ## 文件结构
 
@@ -145,6 +146,29 @@ client-modules: <pkg> declares dsh.client but exports no "./client" bundle
 - 其他可用 slot（从已装插件 grep 到的）：`settings.section`（设置页）、`conversation.session.header.actions`（会话头部按钮）、`sidebar.footer.action`
 - 本机已装参照插件：`~/.dsh/profiles/desktop/node_modules/` 下 `dsh-pocket`（RPC + 覆盖层 + esbuild 构建路线）、`dsh-notify-me`（免构建手写 bundle 路线，本项目用的就是这种）、`dsh-office-tools`（ctx.tools.register 路线，本项目不需要）
 
+### 5.1 右侧栏 tab 入口与主题（2026-10-23 改版，源码确认）
+
+入口从「右缘悬浮按钮」改为 **右侧栏 tab + 「开始」页引导卡片**（对齐 dsh-context 的「上下文」）。
+`@deepseek-ai/dsh-client-ui-sidebar-right`（0.2.1-rc.2）源码事实：
+
+- 服务 `sidebarRightTabs`（`ctx.reflect.provide` 提供，用 `ctx.inject(['sidebarRightTabs'], cb)` 等它就绪）；
+  `tabs.register({ id, kind, title:()=>string, guide:[{ id, order, title, description, icon }] })`
+  —— `guide` 就是「开始」页里的那张卡片，`icon` 是接收 `{size, className}` 的 React 组件。
+- tab 正文/标题挂点：`slots.inject('sidebar.right.pane.tab', () => slots.register({name, key, locale}, Comp))`，
+  标题同理 `sidebar.right.pane.tab.title`。
+  **`key` 必须是 tab 类型的 `id`**（`TabSlot` 里 `entryKey = definition.id ?? tab.kind`）；
+  dsh-context 的 id 和 kind 同名所以看不出这个坑。
+- tab body 外层 `.tabBody` 是 `display:flex;flex-direction:column;height:100%;overflow:hidden`，
+  所以根的样式要 `height:100%;min-height:0;display:flex;flex-direction:column`。
+- **引导页最多 4 张卡片带描述**：`MAX_DESCRIBED_ENTRIES = 4`，`entries.length > 4` 时全部卡片都不显示 description
+  （加了我们这张后是 5 张 → 所有卡片只剩图标+标题，这是 DSH 自身行为）。
+- 主题：暗色是 `body[data-ds-dark-theme]`，颜色全走 `--dsw-alias-*`（bg-layer-1/2/3、border-l1..l4、
+  label-primary/secondary/tertiary/caption、interactive-bg-hover(-solid)、state-{business,error,success,warn}-*、
+  button-primary-fill + label-primary-foreground、toast-bg/label、bg-skeleton、radius-sm/md/lg、shadow-lv1..3）。
+  **旧代码里的 `--dsw-alias-border-subtle`、`--dsw-alias-bg-canvas-subtle`、`--dsw-alias-border-strong` 根本不存在**，
+  一直回落到 `#fff` 兜底色——这就是夜间模式错色的根因，改样式时不要再写这些名字。
+- 旧版 DSH 没有 `sidebarRightTabs` 时，插件 2.5s 后自动退回 `shell.overlay` 悬浮按钮 + 侧滑面板（同一套组件）。
+
 ### 6. 设计决策记录
 
 - **不做 npm 依赖**：host 侧纯 Node 内置（fetch/crypto/fs），避免 peerDependencies 版本地狱（dsh-zentao 的 README 专门警告过 semver 匹配拒绝安装的问题）
@@ -156,13 +180,15 @@ client-modules: <pkg> declares dsh.client but exports no "./client" bundle
 ## 剩余任务（按优先级）
 
 ### 1. 真机验证 M1+M2+M3（第一件事，代码全部完成）
-重启 DSH Desktop → 看右缘悬浮「禅道」按钮是否出现 → 登录 → 面板数据 → 详情 → 「⤵ 插入对话」/「▶ 处理」。
+重载 DSH Desktop（client 改动 ⌘R 即可；host 改动才需要重装 + 重启）→ 打开右侧栏「开始」页 →
+应看到「禅道」引导卡片（与「上下文」同款，图标 + 标题）→ 点开 tab → 登录 → 列表 → 详情 → 「插入对话」/「处理」。
 - host 侧如果没激活，看桌面版日志（插件加载警告会打在启动输出里）
-- client 侧如果没出现：检查 `dsh.client.inject` 声明（当前是 session-controller / connection / ui-conversation / ui-slots / ui-workspace 五个）与 slot 注册是否成功（console 有 `[dsh-zentao-panel]` 前缀的报错）
+- client 侧如果没出现：先 `node test/client.mjs` 确认注册契约没坏；再看 console 里 `[dsh-zentao-panel]` 前缀的报错；
+  悬浮按钮出现说明走的是兜底路径（没拿到 `sidebarRightTabs`）
 - M3 插入对话：服务级 setDraft 优先（当前主视图会话），DOM 兜底 `[data-composer-input]`（contenteditable + execCommand insertText），再兜底剪贴板
 - M3 处理（新会话下发）：`sessions.create({cwd})` 继承当前会话工作目录 → `uiWorkspace.openSession` → `conversation.input.for(scope).setDraft` + 延迟 250ms `submit()`；服务不可用时降级插入当前会话。真机重点验证：新会话 composer 挂载时序（250ms 是否够，不够就调大或改事件驱动）
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- M1 host 半边与 RPC 已在 test/host.mjs 全绿（13 项，2026-10-23 22:00 复跑通过）
+- M1 host 半边与 RPC 已在 test/host.mjs 全绿（13 项，2026-10-23 22:00 复跑通过）；client 注册契约在 test/client.mjs 全绿（22 项）
 
 ### 2. M4 打磨
 - 自动刷新（面板打开时轮询，间隔可选——计划书里定的 30s/1m/5m/10m/关闭）
