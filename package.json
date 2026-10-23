@@ -1,8 +1,16 @@
 {
   "name": "dsh-zentao-panel",
   "version": "0.1.0",
-  "description": "DeepSeek Harness 禅道工作台：悬浮面板查看指派给我的任务/Bug/需求，一键转为 DSH 对话上下文。",
+  "description": "DeepSeek Harness 禅道工作台：右侧栏查看指派给我的任务/Bug/需求，一键转为 DSH 对话上下文。",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/big-li99/dsh-zentao-panel.git"
+  },
+  "homepage": "https://github.com/big-li99/dsh-zentao-panel#readme",
+  "bugs": {
+    "url": "https://github.com/big-li99/dsh-zentao-panel/issues"
+  },
   "type": "module",
   "main": "lib/index.js",
   "exports": {

@@ -35,14 +35,15 @@ DSH_HOME=/tmp/zt-host  node test/host.mjs     # apply() + RPC wire 协议端到�
 （smoke/host 的禅道地址与账号来自 `ZENTAO_BASE`/`ZENTAO_ACCOUNT`/`ZENTAO_PASSWORD`
 环境变量或 `~/.dsh/zentao-panel/config.json`，不落 git。）
 
-## 安装（本地开发）
+## 安装
 
 ```bash
+git clone https://github.com/big-li99/dsh-zentao-panel.git
 DSH="/Applications/DeepSeekRuntime.app/Contents/Resources/runtime/cli/bin/dsh"
-"$DSH" plugin --profile desktop add /path/to/dsh-zentao-panel
+"$DSH" plugin --profile desktop add "$(pwd)/dsh-zentao-panel"
 ```
 
-重启 DSH Desktop 生效（client 侧改动一般 ⌘R 重载渲染进程即可）。
+重启 DSH Desktop 生效（client 侧改动一般 ⌘R 重载渲染进程即可；host 侧改动需重装插件后重启）。
 
 ## 卸载
 
