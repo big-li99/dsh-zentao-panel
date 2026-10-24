@@ -205,6 +205,13 @@ conversation.input.for(scope).addAttachments(ids)       // :15093，只收「已
   - **按会话设置**：`ctx.remote.session.selectModel({sessionId, provider, model, reasoningEffort?})`
     → `{selected: {...}}`（typert `session/selectModel`，wire 服务名 sessionController）。**创建会话时
     create 没有 provider/model 参数，模型必须在会话建好后 selectModel**。
+  - **⚠️⚠️ 真机踩坑（2026-10-24）**：`ctx.remote.session` 这种**点链访问只在 ctx 代理上有效**
+    （cordis 的 tracker.associate 会把 `ctx.remote.xxx` 转发成 `ctx['remote.xxx']` 服务查找，cordis/lib/index.js:130）。
+    但 **`ctx.get('remote')` 返回的 ClientRemoteService 裸实例上没有 `.session`/`.agentPresets` 属性**
+    （命名空间是独立注册的 cordis 服务，服务名 `remote.<namespace>`，api-gateway 的 RemoteNamespaceService，
+    方法 defineProperty 在命名空间服务实例上）。所以懒查找必须写 `lookupService('remote.session')`；
+    写 `lookupService('remote').session` 会拿到 undefined → modelCatalog 拿不到 → 弹层模型下拉只剩
+    「默认模型」（第一版真机 bug）。官方 `ModelDirectoryResolver` 也是 `inject: ["sessions", "remote", "remote.session"]`。
   - **当前会话在用模型**：client 服务 `modelDirectories`（`Service(ctx, "modelDirectories")`）的
     `directoryFor(sessionId)` → per-session `ModelDirectory`，`.load()` → snapshot（`.current` =
     会话投影的模型选择，composer 选择器显示的就是它）。directoryFor 要求会话已 retain（scope+binding），

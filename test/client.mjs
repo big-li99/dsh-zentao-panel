@@ -221,8 +221,11 @@ ctx.get = function (name) {
   if (name === 'modelDirectories') return {
     directoryFor: () => ({ load: async () => ({ current: { provider: 'custom', model: 'glm-4.6', reasoningEffort: 'mid' } }) }),
   };
-  if (name === 'remote') return {
-    session: { modelCatalog: async () => fakeCatalog, selectModel: async () => ({ ok: true, value: { selected: {} } }) },
+  // 真机形态：ctx.get('remote') 是 ClientRemoteService 裸实例（没有 .session 属性）；
+  // 命名空间方法是独立 cordis 服务 remote.session（官方 ModelDirectoryResolver inject 的同一名字）
+  if (name === 'remote') return { namespaces: new Map() };
+  if (name === 'remote.session') return {
+    modelCatalog: async () => fakeCatalog, selectModel: async () => ({ ok: true, value: { selected: {} } }),
   };
   return undefined;
 };
@@ -238,6 +241,8 @@ check('collectDispatchContext 解析模型目录（provider 分组 + efforts/def
 check('collectDispatchContext 读全局默认与当前会话在用模型',
   dc.modelDefault && dc.modelDefault.model === 'deepseek-chat'
   && dc.currentModel && dc.currentModel.provider === 'custom' && dc.currentModel.reasoningEffort === 'mid');
+check('mock 复现真机形态：ctx.get("remote") 裸实例上没有 .session 属性（2026-10-24 真机 bug 的前提）',
+  ctx.get('remote').session === undefined);
 
 // ── 「处理」下发：create 传所选工作区；selectModel 按会话设置所选模型/思考强度 ──
 let created = null, opened = null, selectedModel = null;
@@ -251,11 +256,10 @@ ctx.get = function (name) {
   };
   if (name === 'conversation') return fakeConversation;
   if (name === 'uiWorkspace') return { openSession(id) { opened = id; } };
-  if (name === 'remote') return {
-    session: {
-      modelCatalog: async () => fakeCatalog,
-      selectModel: async (req) => { selectedModel = req; return selectModelResult; },
-    },
+  if (name === 'remote') return { namespaces: new Map() };
+  if (name === 'remote.session') return {
+    modelCatalog: async () => fakeCatalog,
+    selectModel: async (req) => { selectedModel = req; return selectModelResult; },
   };
   return undefined;
 };

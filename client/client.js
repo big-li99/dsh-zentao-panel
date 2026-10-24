@@ -577,12 +577,15 @@
           }
         } catch (e) { /* 忽略：上下文收集失败就走默认 */ }
 
-        // 模型目录：官方用法 ctx.remote.session.modelCatalog()（RemoteResult 包装）
+        // 模型目录：命名空间服务 remote.session（⚠️ 不能写成 ctx.get('remote').session——
+        // ClientRemoteService 实例上没有命名空间属性；ctx.remote.session 点链访问只在
+        // ctx 代理上有效（cordis tracker.associate 转发成 ctx['remote.session']）。
+        // 官方 ModelDirectoryResolver 也是 inject "remote.session" 拿的同一服务）
         var catalogP = null;
         try {
-          var remote = lookupService('remote');
-          if (remote && remote.session && typeof remote.session.modelCatalog === 'function') {
-            catalogP = Promise.resolve(remote.session.modelCatalog());
+          var nsSession = lookupService('remote.session');
+          if (nsSession && typeof nsSession.modelCatalog === 'function') {
+            catalogP = Promise.resolve(nsSession.modelCatalog());
           }
         } catch (e) { /* 忽略 */ }
 
@@ -635,21 +638,21 @@
       }
 
       /**
-       * 给（新建的）会话设置模型：官方用法 ctx.remote.session.selectModel
+       * 给（新建的）会话设置模型：命名空间服务 remote.session 的 selectModel
        * （{sessionId, provider, model, reasoningEffort?} → RemoteResult）。
        * 显式拒绝（ok:false）返回 {ok:false, message}；服务缺失/网络异常返回 {ok:true}
        * （模型走会话默认，不拦截下发）。
        */
       function selectModelFor(sessionId, model) {
-        var remote = null;
-        try { remote = lookupService('remote'); } catch (e) { remote = null; }
-        if (!remote || !remote.session || typeof remote.session.selectModel !== 'function') {
+        var ns = null;
+        try { ns = lookupService('remote.session'); } catch (e) { ns = null; }
+        if (!ns || typeof ns.selectModel !== 'function') {
           return Promise.resolve({ ok: true, soft: true });
         }
         var req = { sessionId: sessionId, provider: model.provider, model: model.model };
         if (model.reasoningEffort) req.reasoningEffort = model.reasoningEffort;
         return Promise.resolve()
-          .then(function () { return remote.session.selectModel(req); })
+          .then(function () { return ns.selectModel(req); })
           .then(function (r) {
             if (r && r.ok === false) {
               var err = (r && r.error) || {};
