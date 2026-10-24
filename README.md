@@ -7,6 +7,8 @@ DeepSeekRuntime 的禅道（ZenTao）工作台插件：在 DSH 右侧栏「开�
 ## 功能
 
 - 右侧栏 tab：任务 / Bug / 需求三个分段标签，卡片列表 + 详情；
+- **多账号**：可保存多个禅道账号（同实例换账号、多实例混用都行），头部账号菜单一键切换，
+  切换即时生效不用重新登录（每账号独立 cookie/缓存），也可按账号移除；
 - 卡片拖拽/点击插入对话输入框（精简 Markdown：标题 + 描述/重现步骤，不带元信息/原地址/页脚）；
 - **描述里的截图变成真实图片**：插入时把禅道 `<img>`（含列表接口的 `{35861.png}` 占位符）
   下载下来，作为 DSH 图片附件挂到输入框，发送后模型真的能看到图；
@@ -23,13 +25,16 @@ DeepSeekRuntime 的禅道（ZenTao）工作台插件：在 DSH 右侧栏「开�
   旧版 DSH 没有 `sidebarRightTabs` 时自动退回悬浮按钮 + 侧滑面板
 - **M3** ✅ 插入输入框（服务级 setDraft + 真实图片附件 → composer DOM → 剪贴板兜底）+ 新会话下发
 - **M4** ⏳ 自动刷新、错误提示打磨
+- **M5** ✅ 多账号：配置 schema v2（accounts[] + activeId，旧单账号自动迁移）、
+  每账号独立 client/cookie/缓存、账号菜单切换/添加/按账号移除
 
 ## 测试
 
 ```bash
 node test/client.mjs                          # client 半边：bundle 装载 + 右侧栏注册契约（无需 DSH）
+node test/multi.mjs                           # 多账号：store 迁移/切换/缓存隔离/移除（mock，不打网络）
 DSH_HOME=/tmp/zt-smoke node test/smoke.mjs    # 直连真实禅道验证 client/service（需内网可达）
-DSH_HOME=/tmp/zt-host  node test/host.mjs     # apply() + RPC wire 协议端到端（mock ctx）
+DSH_HOME=/tmp/zt-host  node test/host.mjs     # apply() + RPC wire 协议端到端（mock ctx，真实禅道）
 ```
 
 （smoke/host 的禅道地址与账号来自 `ZENTAO_BASE`/`ZENTAO_ACCOUNT`/`ZENTAO_PASSWORD`
@@ -55,9 +60,18 @@ rm -rf ~/.dsh/zentao-panel
 
 ## 配置
 
-登录信息保存在 `~/.dsh/zentao-panel/config.json`（权限 0600，仅本机）：
-禅道地址、账号、密码（base64 混淆）、登录 cookie。卸载插件后不会自动删除，
-需要时手动清理。
+登录信息保存在 `~/.dsh/zentao-panel/config.json`（权限 0600，仅本机），schema v2：
+
+```jsonc
+{
+  "version": 2,
+  "accounts": [ /* { id, baseUrl, account, password(base64 混淆), cookies } */ ],
+  "activeId": "当前激活账号的 id"
+}
+```
+
+账号 id 由 `baseUrl + account` 哈希得到，同账号重复登录等于更新凭据；旧版单账号
+格式读取时自动迁移，无需手动处理。卸载插件后文件不会自动删除，需要时手动清理。
 
 ## 技术说明
 

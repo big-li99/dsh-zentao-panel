@@ -131,8 +131,7 @@
 
         // 登录
         '.ztp-fill{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;}',
-        '.ztp-login{flex:1;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;padding:24px 20px;}',
-        '.ztp-login-mark{width:44px;height:44px;border-radius:var(--dsw-radius-md);display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent);color:var(--dsw-alias-state-business-primary);margin-bottom:14px;}',
+        '.ztp-login{flex:1;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;padding:24px 20px;}',        '.ztp-login-mark{width:44px;height:44px;border-radius:var(--dsw-radius-md);display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent);color:var(--dsw-alias-state-business-primary);margin-bottom:14px;}',
         '.ztp-login-title{font-size:15px;font-weight:600;color:var(--dsw-alias-label-primary);}',
         '.ztp-login-sub{margin:6px 0 16px;font-size:12px;line-height:1.7;color:var(--dsw-alias-label-tertiary);}',
         '.ztp-label{display:block;font-size:12px;color:var(--dsw-alias-label-secondary);margin:12px 0 5px;}',
@@ -142,6 +141,26 @@
 
         // 轻提示
         '.ztp-toast{position:fixed;left:50%;bottom:44px;transform:translateX(-50%);z-index:2147483000;max-width:min(420px,80vw);background:var(--dsw-alias-toast-bg);color:var(--dsw-alias-toast-label);border-radius:var(--dsw-radius-md);padding:8px 14px;font-size:12.5px;line-height:1.5;box-shadow:var(--dsw-shadow-lv3);}',
+
+        // 多账号：头部账号 chip + 账号管理弹出层
+        '.ztp-acct{display:inline-flex;align-items:center;gap:4px;height:26px;padding:0 8px;border-radius:999px;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer;max-width:150px;flex:none;}',
+        '.ztp-acct:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
+        '.ztp-acct-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+        '.ztp-acct svg{width:11px;height:11px;flex:none;opacity:.7;}',
+        '.ztp-acct-layer{position:fixed;inset:0;z-index:2147482000;}',
+        '.ztp-acct-pop{position:absolute;right:8px;top:44px;z-index:2147482001;min-width:230px;max-width:300px;padding:6px;border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-2);border:.5px solid var(--dsw-alias-border-l3);box-shadow:var(--dsw-shadow-lv3);}',
+        '.ztp-acct-row{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;padding:7px 8px;border-radius:var(--dsw-radius-md);border:0;background:transparent;font:inherit;text-align:left;cursor:pointer;color:var(--dsw-alias-label-primary);}',
+        '.ztp-acct-row:hover{background:var(--dsw-alias-interactive-bg-hover);}',
+        '.ztp-acct-row.on{background:var(--dsw-alias-interactive-bg-hover-solid);}',
+        '.ztp-acct-main{flex:1;min-width:0;}',
+        '.ztp-acct-name{display:block;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+        '.ztp-acct-host{display:block;font-size:11px;color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+        '.ztp-acct-del{width:22px;height:22px;flex:none;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;}',
+        '.ztp-acct-del:hover{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 12%,transparent);color:var(--dsw-alias-state-error-primary);}',
+        '.ztp-acct-del svg{width:12px;height:12px;}',
+        '.ztp-acct-add{display:flex;align-items:center;gap:6px;width:100%;box-sizing:border-box;margin-top:3px;padding:7px 8px;border-radius:var(--dsw-radius-md);border:0;border-top:.5px solid var(--dsw-alias-border-l1);background:transparent;font:inherit;font-size:12.5px;color:var(--dsw-alias-label-secondary);cursor:pointer;}',
+        '.ztp-acct-add:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
+        '.ztp-acct-add svg{width:13px;height:13px;}',
 
         // 兜底：没有 sidebarRightTabs 的旧版 DSH 用悬浮入口
         '.ztp-fab{position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:9000;display:flex;align-items:center;justify-content:center;height:44px;padding:0 7px;border:.5px solid var(--dsw-alias-border-l3);border-right:none;border-radius:var(--dsw-radius-md) 0 0 var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);box-shadow:var(--dsw-shadow-lv2);cursor:pointer;}',
@@ -203,6 +222,21 @@
           h('path', { d: 'M7.2 4.6l1-1a2.6 2.6 0 0 1 3.7 3.7l-1 1M8.8 11.4l-1 1a2.6 2.6 0 0 1-3.7-3.7l1-1', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round' }),
         );
       }
+      function ChevronDownIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('path', { d: 'M4.2 6.2L8 10l3.8-3.8', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+        );
+      }
+      function PlusIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('path', { d: 'M8 3.4v9.2M3.4 8h9.2', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round' }),
+        );
+      }
+      function TrashIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('path', { d: 'M3 4.6h10M6.4 4.6V3.4h3.2v1.2M4.4 4.6l.5 8c.03.5.45.8.95.8h4.3c.5 0 .92-.3.95-.8l.5-8', stroke: 'currentColor', strokeWidth: 1.1, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+        );
+      }
 
       // ───────────────────────── 数据/文案工具 ─────────────────────────
       var KIND_LABEL = { task: '任务', bug: 'Bug', story: '需求' };
@@ -220,6 +254,12 @@
       function statusLabel(s) { return STATUS_LABEL[s] ?? s ?? ''; }
       function statusTone(s) { return STATUS_TONE[s] ?? 'idle'; }
       function fmtDate(d) { return d ? String(d).slice(0, 10) : ''; }
+      /** 禅道地址 → 短主机名（账号列表里区分不同实例用）。 */
+      function hostOf(baseUrl) {
+        try { return new URL(baseUrl).host; } catch (e) {
+          return String(baseUrl || '').replace(/^https?:\/\//, '').split('/')[0];
+        }
+      }
       /** 距截止 ≤3 天标黄。 */
       function isUrgent(d) {
         if (!d) return false;
@@ -654,8 +694,39 @@
         );
       }
 
+      /** 多账号：账号管理弹出层（切换 / 添加 / 按账号移除）。 */
+      function AccountSwitcher(props) {
+        var accounts = props.accounts || [];
+        return h('div', { className: 'ztp-acct-layer', onClick: props.onClose },
+          h('div', { className: 'ztp-acct-pop', onClick: function (e) { e.stopPropagation(); } },
+            accounts.map(function (a) {
+              return h('div', {
+                key: a.id,
+                className: 'ztp-acct-row' + (a.id === props.activeId ? ' on' : ''),
+                role: 'button', tabIndex: 0,
+                onClick: function () { props.onPick(a); },
+                onKeyDown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); props.onPick(a); } },
+              },
+                h('span', { className: 'ztp-acct-main' },
+                  h('span', { className: 'ztp-acct-name' }, a.account || '（未命名）'),
+                  h('span', { className: 'ztp-acct-host' }, hostOf(a.baseUrl))),
+                h('i', {
+                  className: 'ztp-dot',
+                  title: a.loggedIn ? '已登录' : '未登录',
+                  style: { color: a.loggedIn ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-label-caption)', flex: 'none' },
+                }),
+                h('button', {
+                  className: 'ztp-acct-del', type: 'button', title: '移除此账号（清除本机凭据）',
+                  onClick: function (e) { e.stopPropagation(); props.onRemove(a); },
+                }, h(TrashIcon)));
+            }),
+            h('button', { className: 'ztp-acct-add', type: 'button', onClick: props.onAdd },
+              h(PlusIcon), '添加账号…')));
+      }
+
       function LoginView(props) {
-        var baseUrl = useState(props.init.baseUrl || 'http://');
+        var isAdd = props.mode === 'add';
+        var baseUrl = useState(props.init.baseUrl && /^https?:\/\//.test(props.init.baseUrl) ? props.init.baseUrl : 'http://');
         var account = useState(props.init.account || '');
         var password = useState('');
         var busy = useState(false), err = useState(null);
@@ -676,8 +747,10 @@
 
         return h('div', { className: 'ztp-login' },
           h('div', { className: 'ztp-login-mark' }, h(ZentaoGlyph, { size: 24 })),
-          h('div', { className: 'ztp-login-title' }, '连接禅道'),
-          h('div', { className: 'ztp-login-sub' }, '账号密码只保存在本机（~/.dsh/zentao-panel），换一次 30 天免登 cookie，不会上传。'),
+          h('div', { className: 'ztp-login-title' }, isAdd ? '添加禅道账号' : '连接禅道'),
+          h('div', { className: 'ztp-login-sub' }, isAdd
+            ? '登录另一个禅道账号（同一台禅道换账号，或另一台禅道实例均可）；凭据只保存在本机，随时可在账号菜单里切换。'
+            : '账号密码只保存在本机（~/.dsh/zentao-panel），换一次 30 天免登 cookie，不会上传。支持保存多个账号、随时切换。'),
           err[0] ? h('div', { className: 'ztp-err' }, err[0]) : null,
 
           h('label', { className: 'ztp-label' }, '禅道地址'),
@@ -702,7 +775,12 @@
             className: 'ztp-btn primary', type: 'button', disabled: busy[0],
             style: { width: '100%', height: '32px', marginTop: '18px', justifyContent: 'center' },
             onClick: submit,
-          }, busy[0] ? '登录中…' : '登录'),
+          }, busy[0] ? '登录中…' : (isAdd ? '添加并登录' : '登录')),
+          isAdd && props.onCancel ? h('button', {
+            className: 'ztp-btn', type: 'button',
+            style: { width: '100%', height: '30px', marginTop: '8px', justifyContent: 'center' },
+            onClick: props.onCancel,
+          }, '取消') : null,
         );
       }
 
@@ -710,12 +788,14 @@
       function ZentaoPane(props) {
         props = props || {};
         var tab = useState('task');
-        var status = useState(null);   // {configured, account, baseUrl, loggedIn, cacheAt}
+        var status = useState(null);   // {configured, account, baseUrl, loggedIn, cacheAt, activeId, accounts[]}
         var mine = useState(null);     // {cards, cached, at}
         var loading = useState(false);
         var err = useState(null);
         var detailCard = useState(null);
         var toast = useState(null);
+        var acctOpen = useState(false);  // 账号管理弹出层
+        var adding = useState(false);    // 已有账号时再添加一个（LoginView 复用）
 
         var rpc = useCallback(function (endpoint, payload) {
           return appCtx.connection.rpc.call(CHANNEL, endpoint, payload || {});
@@ -751,9 +831,10 @@
         }, [rpc]);
 
         useEffect(function () { loadStatus(); }, [loadStatus]);
+        // 激活账号变化（登录/切换/移除）→ 清旧数据重新拉取
         useEffect(function () {
           if (status[0] && status[0].configured) loadMine(false);
-        }, [status[0] && status[0].configured]);
+        }, [status[0] && status[0].configured, status[0] && status[0].activeId]);
 
         // 插入到输入框：服务级 setDraft（+ 真实图片附件）→ DOM composer → 剪贴板
         var insertToChat = useCallback(function (card, detail) {
@@ -791,9 +872,27 @@
 
         var logout = useCallback(function () {
           Promise.resolve(rpc('zentao.logout')).then(function () {
-            mine[1](null); detailCard[1](null); status[1](null);
+            mine[1](null); detailCard[1](null); status[1](null); adding[1](false); acctOpen[1](false);
             loadStatus();
           });
+        }, [rpc, loadStatus]);
+
+        // 切换激活账号：cookie 已持久化在 host 侧，切换即时生效
+        var switchAccount = useCallback(function (id) {
+          acctOpen[1](false);
+          mine[1](null); detailCard[1](null); err[1](null);
+          Promise.resolve(rpc('zentao.switch', { id: id }))
+            .then(function (r) { if (r && r.ok) status[1](r.value); })
+            .catch(function () { /* host 未就绪 */ });
+        }, [rpc]);
+
+        // 移除指定账号（登出该账号、清它的本机凭据）
+        var removeAccount = useCallback(function (a) {
+          acctOpen[1](false);
+          mine[1](null); detailCard[1](null); err[1](null); adding[1](false);
+          Promise.resolve(rpc('zentao.logout', { id: a.id }))
+            .then(function (r) { if (r && r.ok) status[1](r.value); })
+            .catch(function () { loadStatus(); });
         }, [rpc, loadStatus]);
 
         var st = status[0];
@@ -849,14 +948,16 @@
           }));
         }
 
-        // 中段：登录态未知占位 / 未配置 → 登录 / 已配置 → 列表·详情
+        // 中段：登录态未知占位 / 未配置或正在添加账号 → 登录 / 已配置 → 列表·详情
         var middle = !st
           ? h('div', { className: 'ztp-fill' }, renderLoading())
-          : (!configured
+          : (!configured || adding[0]
             ? h('div', { className: 'ztp-fill' }, h(LoginView, {
               rpc: rpc,
-              init: { baseUrl: st.baseUrl || '', account: st.account || '' },
-              onDone: function (s) { status[1](s); }, // 配置状态由下方 effect 触发首次拉取
+              mode: configured ? 'add' : 'first',
+              init: { baseUrl: st.baseUrl || '', account: '' },
+              onDone: function (s) { adding[1](false); status[1](s); }, // 新账号自动激活，由 effect 触发拉取
+              onCancel: configured ? function () { adding[1](false); } : null,
             }))
             : h('div', { className: 'ztp-scroll' }, renderBody()));
 
@@ -873,6 +974,11 @@
               }))
               : h('div', { className: 'ztp-head-title' }, '禅道'),
             h('div', { className: 'ztp-grow' }),
+            configured ? h('button', {
+              className: 'ztp-acct', type: 'button',
+              title: '当前账号：' + (st.account || '') + ' @ ' + hostOf(st.baseUrl) + '（点击切换/管理账号）',
+              onClick: function () { acctOpen[1](!acctOpen[0]); },
+            }, h('span', { className: 'ztp-acct-label' }, st.account || '未命名'), h(ChevronDownIcon)) : null,
             loading[0]
               ? h('span', { className: 'ztp-tool', 'aria-hidden': 'true' }, h('span', { className: 'ztp-spin' }))
               : (configured ? h('button', {
@@ -880,7 +986,7 @@
                 onClick: function () { loadMine(true); },
               }, h(RefreshIcon)) : null),
             configured ? h('button', {
-              className: 'ztp-tool', type: 'button', title: '退出登录（清除本机凭据）',
+              className: 'ztp-tool', type: 'button', title: '退出当前账号（清除本机凭据）',
               onClick: logout,
             }, h(LogoutIcon)) : null,
             props.onClose ? h('button', {
@@ -894,7 +1000,16 @@
             h('span', { className: 'ztp-foot-dim' }, '·'),
             h('span', { className: 'ztp-foot-dim' },
               mine[0].cached ? new Date(mine[0].at).toLocaleTimeString() + ' 缓存' : '刚刚拉取'),
-            st && st.account ? h('span', { className: 'ztp-foot-dim', style: { marginLeft: 'auto' } }, st.account) : null) : null,
+            st && st.account ? h('span', { className: 'ztp-foot-dim', style: { marginLeft: 'auto' } },
+              (st.accounts || []).length > 1 ? st.account + ' @ ' + hostOf(st.baseUrl) : st.account) : null) : null,
+
+          acctOpen[0] && st && (st.accounts || []).length ? h(AccountSwitcher, {
+            accounts: st.accounts,
+            activeId: st.activeId,
+            onPick: function (a) { if (a.id !== st.activeId) switchAccount(a.id); else acctOpen[1](false); },
+            onRemove: removeAccount,
+            onAdd: function () { acctOpen[1](false); adding[1](true); },
+          }) : null,
 
           toast[0] ? h('div', { className: 'ztp-toast', role: 'status' }, toast[0]) : null,
         );

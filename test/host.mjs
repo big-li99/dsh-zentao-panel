@@ -83,6 +83,15 @@ check('status before config', s0.ok === true && s0.value.configured === false);
 const s1 = await rpc('zentao.login', { baseUrl: BASE, account: ACCOUNT, password: PASSWORD });
 check('login via rpc', s1.ok === true && s1.value.loggedIn === true, `account=${s1.value?.account}`);
 
+// 多账号：status 带账号列表；同账号重复登录 = upsert；switch 未知 id 拒绝
+check('status 带账号列表', s1.ok === true && Array.isArray(s1.value.accounts) && s1.value.accounts.length === 1
+  && s1.value.accounts[0].account === s1.value.account && s1.value.activeId === s1.value.accounts[0].id);
+const s1b = await rpc('zentao.login', { baseUrl: BASE, account: ACCOUNT, password: PASSWORD });
+check('同账号重复登录 = 更新（upsert）', s1b.ok === true && s1b.value.accounts.length === 1 && s1b.value.account === ACCOUNT);
+const swBad = await rpc('zentao.switch', { id: 'no-such-id' });
+check('switch 未知账号被拒绝', swBad.ok === false);
+check('switch 缺参被拒绝', (await rpc('zentao.switch', {})).ok === false);
+
 // mine
 const m = await rpc('zentao.mine', {});
 check('mine via rpc', m.ok === true && Array.isArray(m.value.cards) && m.value.cards.length >= 3, `${m.value?.cards?.length} 张卡片`);

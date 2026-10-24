@@ -24,10 +24,12 @@
 | M2 client 右侧栏 tab + 引导卡片 | ✅ 已改为 `sidebarRightTabs` 入口（对齐 dsh-context「上下文」），样式走 DSH token 支持日/夜；注册契约有测试，待真机目视确认 |
 | M3 插入输入框 + 新会话下发 | ✅ 服务级 `setDraft` 真机可用；**描述里的截图改为真实图片附件**（`conversation.createDrafts` + `facade.addAttachments`，见 §4.1）；新会话下发待真机复验 |
 | M4 打磨 | ⏳ 未开始 |
+| M5 多账号 | ✅ 2026-10-24 完成：schema v2（accounts[]+activeId，旧格式自动迁移）、每账号独立 client/cookie/缓存、账号菜单切换/添加/按账号移除；测试全绿（multi 25 项 + host 新增 4 项），待真机目视确认 |
 
 测试命令：
 ```bash
 node test/client.mjs                         # client 半边注册契约（无需 DSH / 禅道）
+node test/multi.mjs                          # 多账号：迁移/切换/缓存隔离/移除（mock client，不打网络）
 DSH_HOME=/tmp/zt-smoke node test/smoke.mjs   # 直连真实禅道验证 client/service 层（需内网可达）
 DSH_HOME=/tmp/zt-host  node test/host.mjs    # apply() + RPC wire 协议端到端（mock ctx）
 ```
@@ -45,14 +47,16 @@ dsh-zentao-panel/
 ├── lib/                 # host 半边（Node ESM，零 npm 依赖）
 │   ├── index.js         # 插件入口 apply(ctx) —— inject: ['webServer', 'connection']
 │   ├── zentao-client.mjs# 禅道 HTTP 客户端（登录协议/cookie jar/my-work/v1 详情）
-│   ├── service.mjs      # 聚合层（卡片模型/缓存/自动重登）
-│   ├── store.mjs        # ~/.dsh/zentao-panel/config.json 持久化（0600）
+│   ├── service.mjs      # 聚合层（多账号会话：每账号独立 client/缓存/自动重登）
+│   ├── store.mjs        # ~/.dsh/zentao-panel/config.json 持久化（0600，schema v2）
 │   └── rpc.mjs          # /dsh-zentao-panel loopback RPC（wire 协议复刻 dsh-pocket）
 ├── client/
 │   └── client.js        # client 半边（免构建手写 bundle，React 经 DSH 模块系统）
 └── test/
     ├── smoke.mjs        # 真实禅道集成测试
-    └── host.mjs         # host 插件端到端测试（mock cordis ctx）
+    ├── host.mjs         # host 插件端到端测试（mock cordis ctx）
+    ├── multi.mjs        # 多账号（mock client，不打网络）
+    └── client.mjs       # client 半边注册契约（免渲染）
 ```
 
 ## 关键技术事实（省你重新踩坑）
@@ -224,6 +228,14 @@ conversation.input.for(scope).addAttachments(ids)       // :15093，只收「已
 - **RPC 通道选型**：直接挂自己 inject 的 webServer（dsh-pocket v2 模式），回退 `ctx.connection.rpc.handle`；不复刻浏览器 cookie 认证（loopback-only 信任栅栏足够）
 - **缓存 60s**：面板展开不重复打禅道；「刷新」按钮带 `refresh:true` 强刷
 - **卡片统一模型**：`{kind, id, title, status, pri, severity, deadline, assignedTo, openedBy, execution, product, url, descBrief, images}`，Markdown 生成在 client 的 `cardToMarkdown()`
+- **多账号（M5，2026-10-24）**：
+  - 配置 schema v2：`config.json` = `{version:2, accounts:[{id, baseUrl, account, password(b64), cookies, savedAt}], activeId}`；
+    **旧单账号格式读取时自动迁移**（`store.readConfig()` 里做，不在读取时改写文件），`readConfig()` 同时保留 `baseUrl/account/password/cookies` 兼容字段（取激活账号），smoke/host 测试不用改
+  - 账号 id = `sha1(baseUrl + '\n' + account)` 前 12 位 → 同地址同账号重复登录 = upsert（更新凭据重置登录态），不是新增
+  - `service.mjs`：`createAccountSession()` 每账号独立 client/cookie jar/缓存/登录去重/探活节流；service 层持有 `Map<id, session>` + `activeId`，所有取数只作用于激活账号；登录成功经 `onLoginSaved` 回调整体落盘
+  - RPC：新增 `zentao.switch {id}`；`zentao.logout {id?}`（不传 = 移除激活账号）；`zentao.status` 返回值多 `activeId` + `accounts[]`
+  - client：头部账号 chip（`.ztp-acct`）点开 `AccountSwitcher` 弹层（切换/添加/按账号移除）；切换用持久化 cookie 即时生效；`LoginView` 复用（`mode:'add'` 带取消按钮）；切换/移除后 `mine`/`detail` 先清空再由 effect（依赖 `activeId`）重拉
+  - 移除激活账号 → 自动切到剩余第一个；最后一个移除 → `clearConfig()`
 
 ## 剩余任务（按优先级）
 
