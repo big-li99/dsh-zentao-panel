@@ -824,10 +824,15 @@
                 mine[1](r.value);
                 status[1](function (s) { return s ? Object.assign({}, s, { cacheAt: r.value.at }) : s; });
               } else {
-                err[1]((r && r.error && r.error.message) || '数据加载失败');
+                var m = (r && r.error && r.error.message) || '数据加载失败';
+                err[1](m); toast[1](m);
               }
             })
-            .catch(function (e) { loading[1](false); err[1](String((e && e.message) || e)); });
+            .catch(function (e) {
+              loading[1](false);
+              var m = String((e && e.message) || e);
+              err[1](m); toast[1](m);
+            });
         }, [rpc]);
 
         useEffect(function () { loadStatus(); }, [loadStatus]);
@@ -927,7 +932,9 @@
               h('div', { className: 'ztp-skel', style: { height: '62px' } }),
               h('div', { className: 'ztp-skel' }));
           }
-          if (err[0] && !mine[0]) {
+          // 有错误且没有可展示的数据（含空列表）→ 显示错误视图；
+          // 之前 err 只在 mine 为空时展示，刷新失败会被旧空列表掩盖成「没有指派给你」
+          if (err[0] && (!mine[0] || !(mine[0].cards || []).length)) {
             return h('div', { className: 'ztp-err' },
               h('div', { className: 'ztp-err-row' },
                 h('span', null, err[0]),

@@ -23,13 +23,14 @@
 | M1 host 插件（登录/取数/RPC） | ✅ 代码完成，测试全绿，**已装入 desktop profile 加载树**（重启 DSH Desktop 激活） |
 | M2 client 右侧栏 tab + 引导卡片 | ✅ 已改为 `sidebarRightTabs` 入口（对齐 dsh-context「上下文」），样式走 DSH token 支持日/夜；注册契约有测试，待真机目视确认 |
 | M3 插入输入框 + 新会话下发 | ✅ 服务级 `setDraft` 真机可用；**描述里的截图改为真实图片附件**（`conversation.createDrafts` + `facade.addAttachments`，见 §4.1）；新会话下发待真机复验 |
-| M4 打磨 | ⏳ 未开始 |
+| M4 打磨 | 🔄 进行中：2026-10-24 修会话超时静默空白（超时信封识别→自动重登）+ 拉取失败 toast/错误视图；其余未做 |
 | M5 多账号 | ✅ 2026-10-24 完成：schema v2（accounts[]+activeId，旧格式自动迁移）、每账号独立 client/cookie/缓存、账号菜单切换/添加/按账号移除；测试全绿（multi 25 项 + host 新增 4 项），待真机目视确认 |
 
 测试命令：
 ```bash
 node test/client.mjs                         # client 半边注册契约（无需 DSH / 禅道）
 node test/multi.mjs                          # 多账号：迁移/切换/缓存隔离/移除（mock client，不打网络）
+node test/protocol.mjs                       # 禅道响应信封协议 + 自动重登（stub fetch，不打网络）
 DSH_HOME=/tmp/zt-smoke node test/smoke.mjs   # 直连真实禅道验证 client/service 层（需内网可达）
 DSH_HOME=/tmp/zt-host  node test/host.mjs    # apply() + RPC wire 协议端到端（mock ctx）
 ```
@@ -56,6 +57,7 @@ dsh-zentao-panel/
     ├── smoke.mjs        # 真实禅道集成测试
     ├── host.mjs         # host 插件端到端测试（mock cordis ctx）
     ├── multi.mjs        # 多账号（mock client，不打网络）
+    ├── protocol.mjs     # 禅道响应信封协议 + 自动重登（stub fetch，不打网络）
     └── client.mjs       # client 半边注册契约（免渲染）
 ```
 
@@ -92,7 +94,9 @@ User-Agent: <常规浏览器 UA>
 ```
 用 python urllib 或 curl 少了 Referer/Origin/UA 都失败过——`lib/zentao-client.mjs` 里 `BROWSER_HEADERS` 是已验证的正确组合。
 
-**登录成功后**获得长期 cookie：`za`（账号）、`zp`（免密 hash）、`keepLogin=on`——**30 天免登**。只需持久化 cookie 即可，之后 `GET /my-work-*.json` 直接口令通。会话失效的特征：响应里出现 `user-login` 字样（lib 里的 SESSION_EXPIRED 错误码）。
+**登录成功后**获得长期 cookie：`za`（账号）、`zp`（免密 hash）、`keepLogin=on`——**30 天免登**。只需持久化 cookie 即可，之后 `GET /my-work-*.json` 直接口令通。会话失效有**两种形态**，都必须识别成 SESSION_EXPIRED（lib/zentao-client.mjs 的错误码）才会触发自动重登：
+1. 响应体被重定向到 `user-login`（body 出现 `user-login` 字样）；
+2. **HTTP 200 + 失败信封** `{"result":false,"message":"登录已超时，请重新登入!"}`（content-type 仍是 text/html）——不重定向、body 无 `user-login` 字样。**2026-10-24 真机踩坑**：v0.1.0 只认形态 1，形态 2 被 `fetchMyWork` 当成空列表 → 面板静默显示「没有指派给你的任务」，点刷新也无效（探活走同一通道，永远"成功"，到不了自动重登分支）。已修：`result` 为 false/'fail' 且期望数据键缺席时，消息匹配 登录/登入/超时/未登 → SESSION_EXPIRED，否则抛「禅道接口返回失败：<msg>」；回归见 `test/protocol.mjs`。
 
 ### 3. 数据接口（登录态 cookie 下）
 
@@ -251,12 +255,13 @@ conversation.input.for(scope).addAttachments(ids)       // :15093，只收「已
   若只看到文本 + toast「图片未能附加」，说明 host 还是旧代码（`zentao.image` 404）或禅道图片下载失败，看 console/日志
 - M3 处理（新会话下发）：`sessions.create({cwd})` 继承当前会话工作目录 → `uiWorkspace.openSession` → `conversation.input.for(scope).setDraft` + 延迟 250ms `submit()`；服务不可用时降级插入当前会话。真机重点验证：新会话 composer 挂载时序（250ms 是否够，不够就调大或改事件驱动）
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-23 23:5x 复跑）：`test/host.mjs` 全绿（19 项，含 `zentao.image` 真图下载 + SSRF 拒绝）；
-  `test/smoke.mjs` 全绿（含 `extractImageRefs` / `fetchImage` 真图下载）；`test/client.mjs` 全绿（33 项，含图片附件管线 + 精简插入模板）
+- 测试现状（2026-10-24 复跑，全绿）：`test/host.mjs` 19 项（真机 20 张卡片：task 2 / bug 8 / story 10）、
+  `test/smoke.mjs`（含 `extractImageRefs` / `fetchImage` 真图下载）、`test/client.mjs` 33 项、
+  `test/multi.mjs` 25 项、`test/protocol.mjs` 9 项（新增：会话超时信封识别 + 自动重登）
 
 ### 2. M4 打磨
 - 自动刷新（面板打开时轮询，间隔可选——计划书里定的 30s/1m/5m/10m/关闭）
-- 错误提示完善（禅道不可达/密码改了/会话失效重登失败）
+- 错误提示完善（✅ 2026-10-24 已做「会话失效」这条：超时信封识别 → 自动重登；拉取失败 toast + 空列表时优先显示错误视图。禅道不可达/密码改了的文案还没专门做）
 - 登出按钮清理 `~/.dsh/zentao-panel/`（已实现，验证即可）
 - 拖拽：卡片 `draggable` 已实现（dragStart 里塞 Markdown），真机验证 DSH 输入框是否接受 drop
 
