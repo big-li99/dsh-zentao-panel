@@ -23,7 +23,7 @@
 | M1 host 插件（登录/取数/RPC） | ✅ 代码完成，测试全绿，**已装入 desktop profile 加载树**（重启 DSH Desktop 激活） |
 | M2 client 右侧栏 tab + 引导卡片 | ✅ 已改为 `sidebarRightTabs` 入口（对齐 dsh-context「上下文」），样式走 DSH token 支持日/夜；注册契约有测试，待真机目视确认 |
 | M3 插入输入框 + 新会话下发 | ✅ 服务级 `setDraft` 真机可用；**描述里的截图改为真实图片附件**（`conversation.createDrafts` + `facade.addAttachments`，见 §4.1）；新会话下发待真机复验 |
-| M4 打磨 | 🔄 进行中：2026-10-24 修会话超时静默空白（超时信封识别→自动重登）+ 拉取失败 toast/错误视图；其余未做 |
+| M4 打磨 | 🔄 进行中：2026-10-24 修会话超时静默空白（超时信封识别→自动重登）+ 拉取失败 toast/错误视图；同日改「处理」为**弹层确认式**（先选工作区与模型再下发，见 §4.2，待真机目视确认）；其余未做 |
 | M5 多账号 | ✅ 2026-10-24 完成：schema v2（accounts[]+activeId，旧格式自动迁移）、每账号独立 client/cookie/缓存、账号菜单切换/添加/按账号移除；测试全绿（multi 25 项 + host 新增 4 项），待真机目视确认 |
 
 测试命令：
@@ -186,6 +186,35 @@ conversation.input.for(scope).addAttachments(ids)       // :15093，只收「已
   → `interface.addAttachments`；`addAttachments` 返回 false 时 `releaseDraftAttachments` 清理。
   超大图（>8192 边长 / >64MP / >20MB）先用 `createImageBitmap` + canvas 缩到 2048 长边再附加。
 
+### 4.2 「处理」弹层：工作区/模型选择（2026-10-24 新增，DSH 0.2.1-rc.2 源码确认）
+
+用户反馈「处理」直接下发没法选工作区和模型。改为：点「处理」→ `DispatchDialog` 弹层
+（选工作区 + 模型）→ `sessions.create({workspaceId|cwd, agentPreset})` 下发。源码事实：
+
+- **`sessions.create` 参数**（dsh-api-session-controller client.js :3309）：`{workspaceId?|cwd?, agentPreset?, sessionId?}`。
+  **workspaceId 与 cwd 互斥**（host 侧 `session.create accepts workspaceId or cwd, not both`，:756）；
+  workspaceId 经 `workspaceRegistry.get(id).path` 折算成 cwd。agentPreset 不传 = 默认预设。
+- **工作区列表**：client 服务 `workspaces`（dsh-api-workspace-controller，`Service(ctx, "workspaces")`），
+  `workspaces.list.getSnapshot()` → `{items:[{workspaceId, path, title, sessionIds, createdAt, updatedAt}], phase, ...}`。
+  当前会话归属的工作区 = `items.find(w => w.sessionIds.includes(cur))`（uiWorkspace.startSession 同款算法）。
+- **模型预设列表**：官方用法 `ctx.remote.agentPresets.list()`（dsh-client-ui-agent-preset/lib/client.js :1112），
+  返回 **RemoteResult 包装** `{ok:true, value:{presets:[{id, isDefault, name, description, broken?}]}}`；
+  `ok:false` 且 `error.code === 'gateway/invocation-unavailable'` 要当成空表而不是报错。
+  服务也可按名 inject：`remote` / `remote.agentPresets`（cordis 点路径服务名，preset UI 的 inject 数组里有）。
+  `broken` 的预设仍会列出但要禁选。
+- **当前会话在用的模型**：`sessions.list.getSnapshot().byId[id].projectionValues.agentPreset`
+  （preset UI 的 `AgentPresetLabel` 就是这么读的，:1003）。作为模型下拉的默认选中项。
+- `agentPresets.select(sessionId, presetId)` 还能**会话创建后**切换模型（composer 切换器就是它），
+  本项目暂用不到（创建时一步到位）。
+- `uiWorkspace.startSession(workspaceId, {agentPreset, prompt})`（:1499）是 DSH「新建会话」按钮的路径，
+  内部 connectBlank + prepareDraft（`requestDraftInitialization` 只填草稿不发送）——本项目没用它，
+  因为要在发送前附加图片附件（需要 facade），保持 create→openSession→addAttachments→setDraft→submit 链。
+
+实现要点（client/client.js）：`collectDispatchContext()` 懒查找 workspaces/remote（缺失时对应列表为空，
+弹层退化但可发送）；`DispatchDialog` 两个 `<select>`（工作区默认=当前会话归属→「继承当前目录」→第一个；
+模型默认=当前会话在用→isDefault→第一个可用）；Esc/遮罩关闭；busy 期间禁交互。
+`dispatchToNewSession(md, images, choice)` 第三参由弹层给出，choice 缺省时保持旧的「继承当前 cwd」行为。
+
 ### 5. DSH 插件体系（本机实测）
 
 - DSH Desktop **0.2.1-rc.2**，desktop profile，macOS
@@ -253,11 +282,17 @@ conversation.input.for(scope).addAttachments(ids)       // :15093，只收「已
 - M3 图片附件（2026-10-23 新增，host 有改动 → **必须重启桌面版**才生效）：列表卡片或详情点「插入对话」→
   输入框上方应出现图片缩略图（附件 rail），发送后消息里是真实图片；「处理」新会话同理。
   若只看到文本 + toast「图片未能附加」，说明 host 还是旧代码（`zentao.image` 404）或禅道图片下载失败，看 console/日志
-- M3 处理（新会话下发）：`sessions.create({cwd})` 继承当前会话工作目录 → `uiWorkspace.openSession` → `conversation.input.for(scope).setDraft` + 延迟 250ms `submit()`；服务不可用时降级插入当前会话。真机重点验证：新会话 composer 挂载时序（250ms 是否够，不够就调大或改事件驱动）
+- M3 处理（新会话下发，2026-10-24 已改弹层式）：点「处理」→ `DispatchDialog` 弹层选工作区与模型（见 §4.2）
+  → `sessions.create({workspaceId|cwd, agentPreset})` → `uiWorkspace.openSession` → `conversation.input.for(scope).setDraft`
+  + 延迟 250ms `submit()`；服务不可用时降级插入当前会话。真机重点验证：弹层两个下拉有值且默认项合理
+  （工作区=当前会话归属；模型=当前会话在用）、选不同工作区/模型后新会话确实落在所选位置和模型上、
+  新会话 composer 挂载时序（250ms 是否够，不够就调大或改事件驱动）。**本次仅 client 改动，⌘R 即可生效，无需重装**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-24 复跑，全绿）：`test/host.mjs` 19 项（真机 20 张卡片：task 2 / bug 8 / story 10）、
-  `test/smoke.mjs`（含 `extractImageRefs` / `fetchImage` 真图下载）、`test/client.mjs` 33 项、
-  `test/multi.mjs` 25 项、`test/protocol.mjs` 9 项（新增：会话超时信封识别 + 自动重登）
+- 测试现状（2026-10-24 复跑）：`test/client.mjs` 42 项（含「处理」弹层上下文收集 + workspaceId/agentPreset 传参）、
+  `test/multi.mjs` 25 项、`test/protocol.mjs` 9 项全绿；`test/host.mjs` 19 项（真机 20 张卡片：task 2 / bug 8 / story 10）、
+  `test/smoke.mjs`（含 `extractImageRefs` / `fetchImage` 真图下载）需真实禅道凭据。
+  注意：沙箱会话里跑 host.mjs 读不了 `~/.dsh/zentao-panel/config.json`（EPERM），需把凭据文件拷进
+  `$DSH_HOME/zentao-panel/`，此时「status before config」一项会因预置配置而假失败（该测试项假设初始无配置）
 
 ### 2. M4 打磨
 - 自动刷新（面板打开时轮询，间隔可选——计划书里定的 30s/1m/5m/10m/关闭）

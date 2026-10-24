@@ -162,6 +162,16 @@
         '.ztp-acct-add:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
         '.ztp-acct-add svg{width:13px;height:13px;}',
 
+        // 「处理」确认弹层：先选工作区与模型，再新建会话下发
+        '.ztp-disp-layer{position:fixed;inset:0;z-index:2147482000;display:flex;align-items:center;justify-content:center;background:var(--dsw-alias-bg-mask-2);}',
+        '.ztp-disp-pop{width:min(360px,92vw);box-sizing:border-box;padding:16px;border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-2);border:.5px solid var(--dsw-alias-border-l3);box-shadow:var(--dsw-shadow-lv3);animation:ztp-pop .14s ease-out;}',
+        '@keyframes ztp-pop{from{transform:scale(.97);opacity:.6}to{transform:none;opacity:1}}',
+        '.ztp-disp-title{font-size:13.5px;font-weight:600;color:var(--dsw-alias-label-primary);}',
+        '.ztp-disp-sub{margin:5px 0 2px;font-size:12px;line-height:1.6;color:var(--dsw-alias-label-tertiary);word-break:break-word;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}',
+        '.ztp-disp-acts{display:flex;gap:8px;margin-top:16px;}',
+        '.ztp-disp-acts .ztp-btn{flex:1;height:30px;justify-content:center;}',
+        '.ztp-disp-note{margin-top:10px;font-size:11px;color:var(--dsw-alias-label-caption);line-height:1.6;}',
+
         // 兜底：没有 sidebarRightTabs 的旧版 DSH 用悬浮入口
         '.ztp-fab{position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:9000;display:flex;align-items:center;justify-content:center;height:44px;padding:0 7px;border:.5px solid var(--dsw-alias-border-l3);border-right:none;border-radius:var(--dsw-radius-md) 0 0 var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);box-shadow:var(--dsw-shadow-lv2);cursor:pointer;}',
         '.ztp-fab:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
@@ -254,6 +264,15 @@
       function statusLabel(s) { return STATUS_LABEL[s] ?? s ?? ''; }
       function statusTone(s) { return STATUS_TONE[s] ?? 'idle'; }
       function fmtDate(d) { return d ? String(d).slice(0, 10) : ''; }
+
+      /** 下拉里的目录缩短显示：保留首段 + 尾两段。 */
+      function shortenPath(p) {
+        p = String(p || '');
+        if (p.length <= 38) return p;
+        var parts = p.split('/');
+        if (parts.length <= 3) return p;
+        return parts[0] + '/…/' + parts.slice(-2).join('/');
+      }
       /** 禅道地址 → 短主机名（账号列表里区分不同实例用）。 */
       function hostOf(baseUrl) {
         try { return new URL(baseUrl).host; } catch (e) {
@@ -528,11 +547,72 @@
       }
 
       /**
+       * 「处理」弹层的上下文：工作区列表（workspaces 服务）+ 模型预设列表
+       * （remote.agentPresets）+ 当前会话的归属/目录/模型（作为下拉默认值）。
+       * 全部懒查找，任何服务缺失都只是对应列表为空，不抛错。
+       */
+      function collectDispatchContext() {
+        var out = { workspaces: [], presets: [], currentWorkspaceId: null, currentPreset: null, cwd: null };
+        try {
+          var sessions = lookupService('sessions');
+          var cur = sessions ? currentSessionId(sessions) : null;
+          if (cur) {
+            var row = sessions.list.getSnapshot().byId[cur];
+            if (row && row.cwd) out.cwd = row.cwd;
+            // 官方 preset UI 同款读法：byId[id].projectionValues.agentPreset
+            var pv = row && row.projectionValues;
+            if (pv && typeof pv.agentPreset === 'string' && pv.agentPreset) out.currentPreset = pv.agentPreset;
+          }
+          var workspaces = lookupService('workspaces');
+          if (workspaces && workspaces.list && typeof workspaces.list.getSnapshot === 'function') {
+            var snap = workspaces.list.getSnapshot();
+            var items = (snap && snap.items) || [];
+            for (var i = 0; i < items.length; i++) {
+              var w = items[i];
+              if (!w || !w.workspaceId) continue;
+              out.workspaces.push({ id: w.workspaceId, title: w.title || w.path || w.workspaceId, path: w.path || '' });
+              if (cur && (w.sessionIds || []).indexOf(cur) >= 0) out.currentWorkspaceId = w.workspaceId;
+            }
+          }
+        } catch (e) { /* 忽略：上下文收集失败就走默认 */ }
+
+        // 模型预设：官方用法 ctx.remote.agentPresets.list()（RemoteResult 包装 {ok, value:{presets}}）
+        var listP = null;
+        try {
+          var remote = lookupService('remote');
+          if (remote && remote.agentPresets && typeof remote.agentPresets.list === 'function') listP = remote.agentPresets.list();
+        } catch (e) { /* 忽略 */ }
+        if (!listP) {
+          try {
+            var ap = lookupService('remote.agentPresets') || lookupService('agentPresets');
+            if (ap && typeof ap.list === 'function') listP = ap.list();
+          } catch (e) { /* 忽略 */ }
+        }
+        return Promise.resolve(listP)
+          .then(function (r) {
+            // 兼容 RemoteResult 包装与裸 roster 两种形态；ok:false / gateway 不可用都视为空表
+            var roster = null;
+            if (r && r.ok === false) roster = null;
+            else if (r && r.value && Array.isArray(r.value.presets)) roster = r.value.presets;
+            else if (r && Array.isArray(r.presets)) roster = r.presets;
+            if (roster) {
+              out.presets = roster.map(function (p) {
+                return { id: p.id, name: p.name || p.id, isDefault: Boolean(p.isDefault), broken: p.broken || null };
+              });
+            }
+            return out;
+          })
+          .catch(function () { return out; });
+      }
+
+      /**
        * M3「处理」：新会话自动下发。
-       *   sessions.create({cwd}) → uiWorkspace.openSession(id) → conversation.input.for(scope).setDraft/submit
+       *   sessions.create({workspaceId|cwd, agentPreset}) → uiWorkspace.openSession(id)
+       *   → conversation.input.for(scope).setDraft/submit
+       * choice 由「处理」弹层给出：{workspaceId?|cwd?, agentPreset?}；缺省时继承当前会话目录。
        * 任一环失败 → 降级插入当前会话 composer；再失败 → 剪贴板。
        */
-      function dispatchToNewSession(md, images) {
+      function dispatchToNewSession(md, images, choice) {
         var sessions = lookupService('sessions');
         var ws = lookupService('uiWorkspace');
         var conversation = lookupService('conversation');
@@ -540,13 +620,19 @@
           return Promise.resolve({ ok: false, mode: 'unavailable', message: 'sessions 服务不可用（DSH 版本过旧？）' });
         }
         var opts = {};
-        try {
-          var cur = currentSessionId(sessions);
-          if (cur) {
-            var row = sessions.list.getSnapshot().byId[cur];
-            if (row && row.cwd) opts = { cwd: row.cwd };
-          }
-        } catch (e) { /* 忽略 */ }
+        if (choice && choice.workspaceId) opts.workspaceId = choice.workspaceId;
+        else if (choice && choice.cwd) opts.cwd = choice.cwd;
+        else {
+          // 未指定位置 → 继承当前会话工作目录（旧版行为）
+          try {
+            var cur = currentSessionId(sessions);
+            if (cur) {
+              var row = sessions.list.getSnapshot().byId[cur];
+              if (row && row.cwd) opts = { cwd: row.cwd };
+            }
+          } catch (e) { /* 忽略 */ }
+        }
+        if (choice && choice.agentPreset) opts.agentPreset = choice.agentPreset;
 
         return Promise.resolve()
           .then(function () { return sessions.create(opts); })
@@ -627,7 +713,7 @@
             }, '插入对话'),
             h('button', {
               className: 'ztp-btn primary', type: 'button',
-              title: '新建会话并自动发送任务背景',
+              title: '选择工作区与模型，新建会话发送任务背景',
               onClick: function (e) { e.stopPropagation(); props.onDispatch(c, null); },
             }, '处理')),
         );
@@ -679,7 +765,7 @@
 
             h('div', { className: 'ztp-acts', style: { marginTop: '12px' } },
               h('button', { className: 'ztp-btn', type: 'button', onClick: function () { props.onInsert(card, detail[0]); } }, '插入对话'),
-              h('button', { className: 'ztp-btn primary', type: 'button', title: '新建会话并自动发送任务背景', onClick: function () { props.onDispatch(card, detail[0]); } }, '处理'))),
+              h('button', { className: 'ztp-btn primary', type: 'button', title: '选择工作区与模型，新建会话发送任务背景', onClick: function () { props.onDispatch(card, detail[0]); } }, '处理'))),
 
           err[0] ? h('div', { className: 'ztp-err' }, err[0]) : null,
 
@@ -722,6 +808,108 @@
             }),
             h('button', { className: 'ztp-acct-add', type: 'button', onClick: props.onAdd },
               h(PlusIcon), '添加账号…')));
+      }
+
+      /**
+       * 「处理」确认弹层：先选工作区与模型，再新建会话自动下发。
+       * 服务不可用/列表为空时对应下拉退化为单项说明，仍可直接发送（走默认）。
+       */
+      function DispatchDialog(props) {
+        var card = props.card;
+        var ctx0 = useState(null);   // collectDispatchContext 结果
+        var wsSel = useState(null);  // 选中 workspaceId | '__cwd__' | null
+        var modelSel = useState(null); // 选中 preset id | null
+        var busy = useState(false);
+
+        useEffect(function () {
+          var alive = true;
+          collectDispatchContext().then(function (o) {
+            if (!alive) return;
+            ctx0[1](o);
+            // 工作区默认：当前会话归属 → 继承当前目录 → 第一个工作区
+            wsSel[1](o.currentWorkspaceId
+              || (o.cwd ? '__cwd__' : null)
+              || (o.workspaces[0] ? o.workspaces[0].id : null));
+            // 模型默认：当前会话在用的 → 默认预设 → 第一个可用
+            var def = null, first = null;
+            for (var i = 0; i < o.presets.length; i++) {
+              var p = o.presets[i];
+              if (p.broken) continue;
+              if (first === null) first = p.id;
+              if (p.isDefault) def = p.id;
+            }
+            modelSel[1](o.currentPreset || def || first);
+          });
+          return function () { alive = false; };
+        }, []);
+
+        useEffect(function () {
+          var onKey = function (e) { if (e.key === 'Escape' && !busy[0]) props.onClose(); };
+          document.addEventListener('keydown', onKey);
+          return function () { document.removeEventListener('keydown', onKey); };
+        }, [busy[0]]);
+
+        var close = function () { if (!busy[0]) props.onClose(); };
+        var send = function () {
+          if (busy[0]) return;
+          busy[1](true);
+          var o = ctx0[0] || {};
+          var choice = {};
+          if (wsSel[0] && wsSel[0] !== '__cwd__') choice.workspaceId = wsSel[0];
+          else if (wsSel[0] === '__cwd__' && o.cwd) choice.cwd = o.cwd;
+          if (modelSel[0]) choice.agentPreset = modelSel[0];
+          props.onSend(choice);
+        };
+
+        var o = ctx0[0];
+        var wsOptions = o ? o.workspaces : [];
+        var models = o ? o.presets : [];
+
+        return h('div', { className: 'ztp-disp-layer', onClick: close },
+          h('div', { className: 'ztp-disp-pop', onClick: function (e) { e.stopPropagation(); } },
+            h('div', { className: 'ztp-disp-title' },
+              '处理 ' + (KIND_LABEL[card.kind] || card.kind) + ' #' + card.id),
+            h('div', { className: 'ztp-disp-sub' }, card.title || ''),
+
+            h('label', { className: 'ztp-label' }, '工作区'),
+            h('select', {
+              className: 'ztp-input', value: wsSel[0] || '', disabled: busy[0],
+              onChange: function (e) { wsSel[1](e.target.value); },
+            },
+              o === null
+                ? h('option', { value: '' }, '正在读取工作区…')
+                : (wsOptions.length || (o && o.cwd)
+                  ? (o && o.cwd && !o.currentWorkspaceId
+                    ? h('option', { value: '__cwd__' }, '继承当前目录（' + shortenPath(o.cwd) + '）')
+                    : null)
+                  : h('option', { value: '' }, '默认位置')),
+              wsOptions.map(function (w) {
+                return h('option', { key: w.id, value: w.id },
+                  w.title + (o && o.currentWorkspaceId === w.id ? '（当前）' : ''));
+              })),
+
+            h('label', { className: 'ztp-label' }, '模型'),
+            h('select', {
+              className: 'ztp-input', value: modelSel[0] || '', disabled: busy[0],
+              onChange: function (e) { modelSel[1](e.target.value); },
+            },
+              o === null
+                ? h('option', { value: '' }, '正在读取模型…')
+                : (models.length
+                  ? models.map(function (p) {
+                    return h('option', {
+                      key: p.id, value: p.id, disabled: Boolean(p.broken),
+                    }, p.name + (p.isDefault ? '（默认）' : '') + (p.broken ? '（不可用）' : ''));
+                  })
+                  : h('option', { value: '' }, '默认模型'))),
+
+            h('div', { className: 'ztp-disp-note' },
+              '将在新会话发送任务背景' + (props.images && props.images.length ? '，含 ' + props.images.length + ' 张图片附件' : '') + '。'),
+
+            h('div', { className: 'ztp-disp-acts' },
+              h('button', { className: 'ztp-btn', type: 'button', disabled: busy[0], onClick: close }, '取消'),
+              h('button', { className: 'ztp-btn primary', type: 'button', disabled: busy[0], onClick: send },
+                busy[0] ? '创建中…' : '发送'))));
       }
 
       function LoginView(props) {
@@ -796,6 +984,7 @@
         var toast = useState(null);
         var acctOpen = useState(false);  // 账号管理弹出层
         var adding = useState(false);    // 已有账号时再添加一个（LoginView 复用）
+        var dispatch = useState(null);   // 「处理」确认弹层：{card, md, images}
 
         var rpc = useCallback(function (endpoint, payload) {
           return appCtx.connection.rpc.call(CHANNEL, endpoint, payload || {});
@@ -858,14 +1047,20 @@
           });
         }, []);
 
-        // 「处理」：新会话自动下发（失败降级插入当前会话 → 剪贴板）
+        // 「处理」：先弹确认层选工作区与模型，确认后新建会话下发（失败降级插入当前会话 → 剪贴板）
         var dispatchCard = useCallback(function (card, detail) {
-          var md = cardToMarkdown(card, detail);
-          var images = imagesOf(card, detail);
-          Promise.resolve(dispatchToNewSession(md, images)).then(function (r) {
+          dispatch[1]({ card: card, md: cardToMarkdown(card, detail), images: imagesOf(card, detail) });
+        }, []);
+
+        // 弹层「发送」：按所选工作区/模型建会话（choice 见 dispatchToNewSession）
+        var sendDispatch = useCallback(function (choice) {
+          var d = dispatch[0];
+          if (!d) return;
+          dispatch[1](null);
+          Promise.resolve(dispatchToNewSession(d.md, d.images, choice)).then(function (r) {
             if (r && r.ok) { toast[1](r.message); return; }
             var msg = r && r.message ? r.message + '，已改为插入当前会话' : '新会话不可用，已改为插入当前会话';
-            insertToCurrentChat(md, images).then(function (x) {
+            insertToCurrentChat(d.md, d.images).then(function (x) {
               if (x.mode === 'clipboard') {
                 toast[1](msg + (x.failed ? '（复制失败，请手动复制）' : '（已复制到剪贴板）'));
               } else {
@@ -1018,6 +1213,13 @@
             onAdd: function () { acctOpen[1](false); adding[1](true); },
           }) : null,
 
+          dispatch[0] ? h(DispatchDialog, {
+            card: dispatch[0].card,
+            images: dispatch[0].images,
+            onSend: sendDispatch,
+            onClose: function () { dispatch[1](null); },
+          }) : null,
+
           toast[0] ? h('div', { className: 'ztp-toast', role: 'status' }, toast[0]) : null,
         );
       }
@@ -1143,6 +1345,8 @@
         attachImagesToDraft: attachImagesToDraft,
         imagesOf: imagesOf,
         bytesFromBase64: bytesFromBase64,
+        collectDispatchContext: collectDispatchContext,
+        dispatchToNewSession: dispatchToNewSession,
       };
       return module.exports;
     },

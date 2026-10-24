@@ -182,5 +182,72 @@ const ins = await mod._test.insertToCurrentChat('## 卡片', images);
 check('insertToCurrentChat 服务级插入 + 图片附件',
   ins.mode === 'service' && ins.attached === 2 && fakeFacade.draft === '## 卡片');
 
+// ── 「处理」弹层：工作区/模型上下文收集（懒查找，缺服务不抛错）──
+// 先回到「无 sessions/workspaces/remote」的环境验证兜底
+ctx.get = function (name) { return name === 'sidebarRightTabs' ? fakeTabs : undefined; };
+const bare = await mod._test.collectDispatchContext();
+check('collectDispatchContext 服务缺失时返回空结构且不抛错',
+  bare.workspaces.length === 0 && bare.presets.length === 0
+  && bare.currentWorkspaceId === null && bare.currentPreset === null && bare.cwd === null);
+
+ctx.get = function (name) {
+  if (name === 'sidebarRightTabs') return fakeTabs;
+  if (name === 'sessions') return {
+    list: { getSnapshot: () => ({ current: 's1', byId: { s1: { cwd: '/tmp/proj', projectionValues: { agentPreset: 'preset-b' } } } }) },
+    scope: () => ({}),
+  };
+  if (name === 'conversation') return fakeConversation;
+  if (name === 'workspaces') return {
+    list: { getSnapshot: () => ({ items: [
+      { workspaceId: 'w1', title: '业财中台', path: '/Users/x/yewu', sessionIds: ['s1'] },
+      { workspaceId: 'w2', title: '电子档案', path: '/Users/x/archive', sessionIds: [] },
+    ] }) },
+  };
+  if (name === 'remote') return {
+    agentPresets: { list: async () => ({ ok: true, value: { presets: [
+      { id: 'preset-a', name: '快速', isDefault: true },
+      { id: 'preset-b', name: '深度' },
+      { id: 'preset-x', name: '坏预设', broken: 'boom' },
+    ] } }) },
+  };
+  return undefined;
+};
+const dc = await mod._test.collectDispatchContext();
+check('collectDispatchContext 收集工作区列表', dc.workspaces.length === 2 && dc.workspaces[0].title === '业财中台');
+check('collectDispatchContext 识别当前会话归属的工作区', dc.currentWorkspaceId === 'w1');
+check('collectDispatchContext 读当前会话目录与在用模型',
+  dc.cwd === '/tmp/proj' && dc.currentPreset === 'preset-b');
+check('collectDispatchContext 解析 RemoteResult 包装的预设表',
+  dc.presets.length === 3 && dc.presets[0].name === '快速' && dc.presets[0].isDefault === true
+  && dc.presets[2].broken === 'boom');
+
+// ── 「处理」下发：sessions.create 收到所选工作区/模型（workspaceId 与 cwd 互斥）──
+let created = null, opened = null;
+ctx.get = function (name) {
+  if (name === 'sidebarRightTabs') return fakeTabs;
+  if (name === 'sessions') return {
+    list: { getSnapshot: () => ({ current: 's1', byId: { s1: { cwd: '/tmp/proj' } } }) },
+    scope: () => ({}),
+    create(opts) { created = opts; return 's-new'; },
+  };
+  if (name === 'conversation') return fakeConversation;
+  if (name === 'uiWorkspace') return { openSession(id) { opened = id; } };
+  return undefined;
+};
+let dr = await mod._test.dispatchToNewSession('## 卡片', [], { workspaceId: 'w2', agentPreset: 'preset-b' });
+check('dispatchToNewSession 传所选工作区与模型（不掺 cwd）',
+  created && created.workspaceId === 'w2' && created.agentPreset === 'preset-b' && !('cwd' in created));
+check('dispatchToNewSession 打开新会话并填草稿',
+  opened === 's-new' && dr.ok && dr.mode === 'dispatched' && dr.sessionId === 's-new' && fakeFacade.draft === '## 卡片');
+
+dr = await mod._test.dispatchToNewSession('## 卡片', [], { cwd: '/other/dir' });
+check('dispatchToNewSession 选「继承目录」时只传 cwd',
+  created && created.cwd === '/other/dir' && !('workspaceId' in created) && !('agentPreset' in created));
+
+created = null;
+dr = await mod._test.dispatchToNewSession('## 卡片', []);
+check('dispatchToNewSession 未选择时保持旧行为（继承当前 cwd）',
+  created && created.cwd === '/tmp/proj');
+
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);
