@@ -476,13 +476,29 @@
       }
 
       /**
+       * 预取禅道图片字节（host→禅道下载，通常是最慢的一环）。
+       * 「处理」在点击发送的瞬间就发起，与 sessions.create 并行——等会话建好、
+       * 视图切过去时字节多半已就绪，附件注册不再额外等待。单张失败得 null，不拦整体。
+       */
+      function prefetchImageBytes(images) {
+        if (!images || !images.length) return null;
+        return Promise.all(images.slice(0, 20).map(function (img) {
+          if (!img || typeof img.url !== 'string' || !img.url) return Promise.resolve(null);
+          return rpcCall('zentao.image', { url: img.url }).then(function (r) {
+            return (r && r.ok && r.value && r.value.base64) ? r.value : null;
+          }, function () { return null; });
+        }));
+      }
+
+      /**
        * 真实图片附件：禅道图片 bytes → 浏览器 File → DSH 草稿附件 → addAttachments。
        * DSH 0.2.1-rc.2 的会话服务契约（app.asar 源码确认）：
        *   conversation.createDrafts(sessionId, File[]) → [{id, kind:'image', previewUrl}]
        *   conversation.input.for(scope).addAttachments(ids) → 挂到当前草稿（发送后成为模型可见图片）
+       * prefetched 传入 prefetchImageBytes 的结果时跳过 RPC 直接用（「处理」路径已提前预取）。
        * 任意一环不可用（旧版 DSH / 无 conversation 服务）就返回 {ok:false}，文本仍已插入。
        */
-      function attachImagesToDraft(images, target) {
+      function attachImagesToDraft(images, target, prefetched) {
         if (!images || !images.length || !target || !target.conversation || !target.facade) {
           return Promise.resolve({ ok: false, reason: 'unavailable', count: 0 });
         }
@@ -493,12 +509,13 @@
           return Promise.resolve({ ok: false, reason: 'unsupported', count: 0 });
         }
         var picked = images.slice(0, 20);
-        return Promise.all(picked.map(function (img) {
+        var bytesP = prefetched ? Promise.resolve(prefetched) : Promise.all(picked.map(function (img) {
           return rpcCall('zentao.image', { url: img.url }).then(function (r) {
             if (!r || !r.ok || !r.value || !r.value.base64) return null;
             return r.value;
           }, function () { return null; });
-        })).then(function (values) {
+        }));
+        return bytesP.then(function (values) {
           var files = [];
           for (var i = 0; i < values.length; i++) {
             var v = values[i];
@@ -676,10 +693,13 @@
       }
 
       /**
-       * M3「处理」：新会话自动下发。
-       *   sessions.create({workspaceId|cwd}) → uiWorkspace.openSession(id)
-       *   → remote.session.selectModel（按所选 provider/模型/思考强度）
-       *   → conversation.input.for(scope).setDraft/submit
+       * M3「处理」：新会话自动下发。时序（2026-10-24 优化：消除「切过去空白约 2 秒」）：
+       *   点击发送瞬间：prefetchImageBytes 与 sessions.create 并行（host 拉禅道图最慢，提前开始）
+       *   → create 完成：openSession 切视图 + 立即 facade.setDraft（视图切过来输入框就有内容）
+       *   → selectModel 与附件注册并行等待（互不阻塞）
+       *   → 全部就绪才 submit（留 250ms 等 composer 挂载）。
+       * 旧的串行链（create → 视图 → selectModel → 图片下载 → setDraft → submit）里用户
+       * 看到的是空白会话干等；现在文本即刻可见，只有附件缩略图/发送稍晚。
        * choice 由「处理」弹层给出：{workspaceId?|cwd?, model?: {provider, model, reasoningEffort?}}；
        * 缺省时继承当前会话目录、模型走默认。
        * 任一环失败 → 降级插入当前会话 composer；再失败 → 剪贴板。
@@ -705,6 +725,9 @@
           } catch (e) { /* 忽略 */ }
         }
 
+        // 图片字节预取：与建会话并行（字节只依赖卡片，不依赖会话）
+        var prefetch = prefetchImageBytes(images);
+
         return Promise.resolve()
           .then(function () { return sessions.create(opts); })
           .then(function (sessionId) {
@@ -722,25 +745,24 @@
               try { facade = conversation.input.for(scope); } catch (e) { facade = null; }
               if (facade && typeof facade.setDraft === 'function') {
                 var target = { sessionId: sessionId, scope: scope, facade: facade, conversation: conversation };
-                // 先设置所选模型（成功才自动发送；显式失败则只填草稿，交用户在 composer 确认）
+                // 文本草稿立即挂上——视图刚切过来输入框就有内容，不再空白等待
+                facade.setDraft(md);
+                try { facade.focus(); } catch (e) { /* 忽略 */ }
+                // 模型设置与附件注册并行等待（成功才自动发送；模型显式失败则只填草稿，交用户确认）
                 var modelStep = (choice && choice.model)
                   ? selectModelFor(sessionId, choice.model)
                   : Promise.resolve({ ok: true });
-                return modelStep.then(function (mres) {
-                  // 再挂图片附件、填文本并发送（图片下载失败也照常发送）
-                  return attachImagesToDraft(images, target).then(function (att) {
-                    facade.setDraft(md);
-                    try { facade.focus(); } catch (e) { /* 忽略 */ }
-                    if (mres && mres.ok === false) {
-                      return { ok: true, mode: 'draft', sessionId: sessionId,
-                        message: '已新建会话并填入输入框（模型设置失败：' + mres.message + '，请确认后手动发送）' };
-                    }
-                    setTimeout(function () {
-                      try { if (typeof facade.submit === 'function') facade.submit(); } catch (e) { /* 已填草稿，发送交给用户 */ }
-                    }, 250);
-                    var suffix = att && att.ok ? '（含 ' + att.count + ' 张图片）' : '';
-                    return { ok: true, mode: 'dispatched', sessionId: sessionId, message: '已在新会话发送任务背景' + suffix };
-                  });
+                return Promise.all([modelStep, attachImagesToDraft(images, target, prefetch)]).then(function (rs) {
+                  var mres = rs[0], att = rs[1];
+                  if (mres && mres.ok === false) {
+                    return { ok: true, mode: 'draft', sessionId: sessionId,
+                      message: '已新建会话并填入输入框（模型设置失败：' + mres.message + '，请确认后手动发送）' };
+                  }
+                  setTimeout(function () {
+                    try { if (typeof facade.submit === 'function') facade.submit(); } catch (e) { /* 已填草稿，发送交给用户 */ }
+                  }, 250);
+                  var suffix = att && att.ok ? '（含 ' + att.count + ' 张图片）' : '';
+                  return { ok: true, mode: 'dispatched', sessionId: sessionId, message: '已在新会话发送任务背景' + suffix };
                 });
               }
             }
@@ -1313,9 +1335,11 @@
         useEffect(injectCss, []);
 
         useEffect(function () {
-          if (!toast[0]) return;
-          var t = setTimeout(function () { toast[1](null); }, 2200);
-          return function () { clearTimeout(t); };
+          var t = toast[0];
+          // sticky 提示（「处理」等图片的过程提示）常驻，直到被下一条非 sticky toast 替换
+          if (!t || t.sticky) return;
+          var timer = setTimeout(function () { toast[1](null); }, 2200);
+          return function () { clearTimeout(timer); };
         }, [toast[0]]);
 
         // 面板数据同步进模块级缓存：tab 卸载（切会话/关 tab）后重挂时用它秒恢复
@@ -1388,6 +1412,11 @@
         var sendDispatch = useCallback(function (choice, d) {
           if (!d || !d.card) return;
           dispatch[1](null);
+          // 过程提示（sticky）：图片还在预取/注册、模型还在设置，让用户知道在等什么；
+          // 完成后由下方结果 toast（非 sticky，自动消失）替换
+          toast[1]((d.images && d.images.length)
+            ? { text: '正在准备 ' + d.images.length + ' 张图片附件，随后自动发送…', sticky: true }
+            : { text: '正在新建会话…', sticky: true });
           Promise.resolve(dispatchToNewSession(d.md || '', d.images || [], choice)).then(function (r) {
             if (r && r.ok) {
               // 新会话建好即记录关联（draft 模式也算：内容已填进那个会话）
@@ -1587,7 +1616,11 @@
             onClose: function () { dispatch[1](null); },
           }) : null,
 
-          toast[0] ? h('div', { className: 'ztp-toast', role: 'status' }, toast[0]) : null,
+          toast[0] ? h('div', { className: 'ztp-toast', role: 'status' },
+            (typeof toast[0] === 'object' && toast[0].sticky)
+              ? h('span', { className: 'ztp-spin', style: { width: '12px', height: '12px', display: 'inline-block', verticalAlign: '-2px' } })
+              : null,
+            typeof toast[0] === 'string' ? toast[0] : (toast[0] && toast[0].text) || '') : null,
         );
       }
 
@@ -1714,6 +1747,7 @@
         tryInsertIntoComposer: tryInsertIntoComposer,
         insertToCurrentChat: insertToCurrentChat,
         attachImagesToDraft: attachImagesToDraft,
+        prefetchImageBytes: prefetchImageBytes,
         imagesOf: imagesOf,
         bytesFromBase64: bytesFromBase64,
         collectDispatchContext: collectDispatchContext,

@@ -432,5 +432,62 @@ await sleep(10);
 check('openSessionLink 跳转成功后面板跟随（openSession + sidebarRight.openTab）',
   rLink.ok === true && openedLink === 's-live' && srOpened && srOpened.kind === 'zentao');
 
+// ── 「处理」时序优化：图片预取与建会话并行；切视图后草稿立即写入；模型/附件互不阻塞 ──
+const evLog = [];
+const evFacade = {
+  draft: '',
+  setDraft(t) { evLog.push('setDraft'); this.draft = t; },
+  focus() {}, submit() {},
+  addAttachments() { evLog.push('attach'); return true; },
+};
+const evConversation = {
+  input: { for: () => evFacade },
+  createDrafts(sid, files) { evLog.push('drafts'); return files.map((f, i) => ({ id: 'd' + (i + 1), kind: 'image' })); },
+};
+const order = [];
+let slowSelectResolve = null;
+ctx.connection.rpc.call = async (channel, endpoint) => {
+  order.push(endpoint);
+  if (endpoint === 'zentao.image') {
+    return { ok: true, value: { name: '1.png', mediaType: 'image/png', base64: base64Png, bytes: 10 } };
+  }
+  return { ok: false, error: { message: 'unexpected ' + endpoint } };
+};
+ctx.get = function (name) {
+  if (name === 'sidebarRightTabs') return fakeTabs;
+  if (name === 'sessions') return {
+    list: { getSnapshot: () => ({ current: 's1', byId: { s1: { cwd: '/tmp' } } }) },
+    scope: () => ({}),
+    create() { order.push('create'); return 's-xy'; },
+  };
+  if (name === 'conversation') return evConversation;
+  if (name === 'uiWorkspace') return { openSession() { order.push('open'); } };
+  if (name === 'remote.session') return {
+    selectModel: () => new Promise((res) => { slowSelectResolve = res; order.push('selectModel'); }),
+  };
+  return undefined;
+};
+const imgs2 = [{ url: 'http://z/file-read-1.png' }, { url: 'http://z/file-read-2.png' }];
+const drSlow = mod._test.dispatchToNewSession('## 快', imgs2, { model: { provider: 'p', model: 'm' } });
+await sleep(8);
+check('图片字节预取在 sessions.create 之前发起（与建会话并行）',
+  order.indexOf('zentao.image') !== -1 && order.indexOf('zentao.image') < order.indexOf('create'));
+check('视图切换后文本草稿立即写入（setDraft 先于附件注册，不空白等待）',
+  evLog.indexOf('setDraft') !== -1 && evLog.indexOf('setDraft') < evLog.indexOf('drafts'));
+check('selectModel 未完成时附件照常注册（并行不互等）',
+  evLog.indexOf('drafts') !== -1 && evLog.indexOf('attach') !== -1 && slowSelectResolve !== null);
+slowSelectResolve({ ok: true, value: { selected: {} } });
+const rSlow = await drSlow;
+check('并行等待全部完成后走自动发送路径',
+  rSlow.ok && rSlow.mode === 'dispatched' && rSlow.sessionId === 's-xy'
+  && rSlow.message.includes('2 张图片') && evFacade.draft === '## 快');
+
+const rpcBefore = order.filter((e) => e === 'zentao.image').length;
+const attPre = await mod._test.attachImagesToDraft(imgs2, { sessionId: 's', facade: evFacade, conversation: evConversation },
+  imgs2.map(() => ({ name: 'p.png', mediaType: 'image/png', base64: base64Png })));
+const rpcAfter = order.filter((e) => e === 'zentao.image').length;
+check('attachImagesToDraft 带预取结果时跳过 zentao.image RPC',
+  attPre.ok === true && attPre.count === 2 && rpcAfter === rpcBefore);
+
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);

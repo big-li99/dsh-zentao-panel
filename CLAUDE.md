@@ -243,6 +243,17 @@ defaultEffort 缺席加「提供商默认」）。`dispatchToNewSession(md, imag
   setter（`xxx[1]`）引用稳定，旧闭包里调用没问题。LoginView 的 `useCallback(fn, [baseUrl[0],…])` 是
   正确对照写法（deps 声明了所读的值，值变则回调重建）。
 
+- **下发时序优化（2026-10-24 晚，真机反馈「切到新会话后空白约 2 秒才填充执行」）**：旧链路是
+  create → openSession（空白）→ selectModel → 图片下载 → setDraft → submit 全串行，空白期 =
+  selectModel + 图片 + 250ms。优化后：① `prefetchImageBytes` 在点击发送瞬间发起（与 create 并行，
+  字节只依赖卡片不依赖会话），`attachImagesToDraft` 第三参复用预取结果跳过 RPC；② openSession 后
+  **立即 `facade.setDraft`**（视图切过来输入框就有内容）；③ selectModel 与附件注册 `Promise.all`
+  并行等待，互不阻塞；submit 前仍留 250ms 等 composer 挂载（M3 验证过的值，勿贸然缩短）。
+  用户感知从「空白 2 秒」变为「文本即刻可见，附件/发送稍后」。测试：`test/client.mjs`「时序优化」
+  块（预取先于 create / setDraft 先于 drafts / selectModel pending 时附件照常 / 预取复用不再发 RPC）。
+  过程提示：toast 支持 `{text, sticky:true}`（不自动消失、带转圈图标），`sendDispatch` 发起时挂
+  「正在准备 N 张图片附件，随后自动发送…」/「正在新建会话…」，结果 toast（string）到达即替换并恢复自动消失。
+
 ### 4.3 关联会话 chip：处理过的卡片可跳回会话（2026-10-24，DSH 0.2.1-rc.2 源码确认）
 
 用户要求：点了「处理」后，右侧面板卡片上能看到关联的 DSH 会话并快速跳转。实现与源码事实：
@@ -372,9 +383,9 @@ getSessionLink/saveSessionLink/removeSessionLink/sessionLinkView/openSessionLink
   追加而不替换；③ 切回旧会话，禅道面板状态原样（tab 位置/详情页保留）；④ 旧版 DSH 无 `sidebarRight`
   服务时跳转正常、只是面板不跟随（控制台无报错）。**仅 client 改动，⌘R 生效**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-24 复跑）：`test/client.mjs` 69 项（含「处理」弹层上下文收集 + workspaceId 传参
+- 测试现状（2026-10-24 复跑）：`test/client.mjs` 74 项（含「处理」弹层上下文收集 + workspaceId 传参
   + selectModel 按会话设置 provider/model/思考强度 + 被拒时不自动发送 + 会话关联存取/三态视图/跳转清理
-  + 面板跟随 openTab 的 replaceTab/reveal/无服务三态）、
+  + 面板跟随 openTab 的 replaceTab/reveal/无服务三态 + 下发时序优化 5 项）、
   `test/multi.mjs` 25 项、`test/protocol.mjs` 9 项全绿；`test/host.mjs` 19 项（真机 20 张卡片：task 2 / bug 8 / story 10）、
   `test/smoke.mjs`（含 `extractImageRefs` / `fetchImage` 真图下载）需真实禅道凭据。
   注意：沙箱会话里跑 host.mjs 读不了 `~/.dsh/zentao-panel/config.json`（EPERM），需把凭据文件拷进
