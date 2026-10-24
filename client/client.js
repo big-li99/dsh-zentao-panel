@@ -547,21 +547,22 @@
       }
 
       /**
-       * 「处理」弹层的上下文：工作区列表（workspaces 服务）+ 模型预设列表
-       * （remote.agentPresets）+ 当前会话的归属/目录/模型（作为下拉默认值）。
-       * 全部懒查找，任何服务缺失都只是对应列表为空，不抛错。
+       * 「处理」弹层的上下文：工作区列表（workspaces 服务）+ 模型目录
+       * （remote.session.modelCatalog：provider 分组 + 思考强度）+ 当前会话的
+       * 归属工作区 / 目录 / 在用模型（模型经 modelDirectories.directoryFor 读取，
+       * 与 composer 模型选择器同一数据源）。全部懒查找，任何服务缺失都只是
+       * 对应列表为空，不抛错。
        */
       function collectDispatchContext() {
-        var out = { workspaces: [], presets: [], currentWorkspaceId: null, currentPreset: null, cwd: null };
+        var out = { workspaces: [], currentWorkspaceId: null, cwd: null,
+                    modelGroups: [], modelDefault: null, currentModel: null };
+        var cur = null;
         try {
           var sessions = lookupService('sessions');
-          var cur = sessions ? currentSessionId(sessions) : null;
+          cur = sessions ? currentSessionId(sessions) : null;
           if (cur) {
             var row = sessions.list.getSnapshot().byId[cur];
             if (row && row.cwd) out.cwd = row.cwd;
-            // 官方 preset UI 同款读法：byId[id].projectionValues.agentPreset
-            var pv = row && row.projectionValues;
-            if (pv && typeof pv.agentPreset === 'string' && pv.agentPreset) out.currentPreset = pv.agentPreset;
           }
           var workspaces = lookupService('workspaces');
           if (workspaces && workspaces.list && typeof workspaces.list.getSnapshot === 'function') {
@@ -576,40 +577,96 @@
           }
         } catch (e) { /* 忽略：上下文收集失败就走默认 */ }
 
-        // 模型预设：官方用法 ctx.remote.agentPresets.list()（RemoteResult 包装 {ok, value:{presets}}）
-        var listP = null;
+        // 模型目录：官方用法 ctx.remote.session.modelCatalog()（RemoteResult 包装）
+        var catalogP = null;
         try {
           var remote = lookupService('remote');
-          if (remote && remote.agentPresets && typeof remote.agentPresets.list === 'function') listP = remote.agentPresets.list();
+          if (remote && remote.session && typeof remote.session.modelCatalog === 'function') {
+            catalogP = Promise.resolve(remote.session.modelCatalog());
+          }
         } catch (e) { /* 忽略 */ }
-        if (!listP) {
+
+        // 当前会话在用模型：modelDirectories.directoryFor(cur).load() 的 current
+        // （= 会话投影的模型选择，composer 选择器显示的就是它）；失败 → null（弹层回退全局默认）
+        var currentP = Promise.resolve(null);
+        if (cur) {
           try {
-            var ap = lookupService('remote.agentPresets') || lookupService('agentPresets');
-            if (ap && typeof ap.list === 'function') listP = ap.list();
+            var md = lookupService('modelDirectories');
+            if (md && typeof md.directoryFor === 'function') {
+              var dir = md.directoryFor(cur); // 会话未被 retain 时会 throw，catch 兜底
+              if (dir && typeof dir.load === 'function') {
+                currentP = Promise.resolve(dir.load())
+                  .then(function (s) { return (s && s.current) || null; })
+                  .catch(function () { return null; });
+              }
+            }
           } catch (e) { /* 忽略 */ }
         }
-        return Promise.resolve(listP)
-          .then(function (r) {
-            // 兼容 RemoteResult 包装与裸 roster 两种形态；ok:false / gateway 不可用都视为空表
-            var roster = null;
-            if (r && r.ok === false) roster = null;
-            else if (r && r.value && Array.isArray(r.value.presets)) roster = r.value.presets;
-            else if (r && Array.isArray(r.presets)) roster = r.presets;
-            if (roster) {
-              out.presets = roster.map(function (p) {
-                return { id: p.id, name: p.name || p.id, isDefault: Boolean(p.isDefault), broken: p.broken || null };
+
+        return Promise.all([Promise.resolve(catalogP).catch(function () { return null; }), currentP])
+          .then(function (rs) {
+            out.currentModel = rs[1];
+            var r = rs[0];
+            // 兼容 RemoteResult 包装与裸 catalog 两种形态；ok:false 视为无目录
+            var cat = null;
+            if (r && r.ok === false) cat = null;
+            else if (r && r.value && Array.isArray(r.value.groups)) cat = r.value;
+            else if (r && Array.isArray(r.groups)) cat = r;
+            if (cat) {
+              out.modelDefault = cat.default || null;
+              out.modelGroups = (cat.groups || []).map(function (g) {
+                return {
+                  id: g.id,
+                  name: g.name || g.id,
+                  models: (g.models || []).map(function (m) {
+                    var reason = m.reasoning || {};
+                    return {
+                      id: m.id,
+                      name: m.name || m.id,
+                      efforts: reason.efforts || [],
+                      defaultEffort: reason.defaultEffort != null ? reason.defaultEffort : null,
+                    };
+                  }),
+                };
               });
             }
             return out;
+          });
+      }
+
+      /**
+       * 给（新建的）会话设置模型：官方用法 ctx.remote.session.selectModel
+       * （{sessionId, provider, model, reasoningEffort?} → RemoteResult）。
+       * 显式拒绝（ok:false）返回 {ok:false, message}；服务缺失/网络异常返回 {ok:true}
+       * （模型走会话默认，不拦截下发）。
+       */
+      function selectModelFor(sessionId, model) {
+        var remote = null;
+        try { remote = lookupService('remote'); } catch (e) { remote = null; }
+        if (!remote || !remote.session || typeof remote.session.selectModel !== 'function') {
+          return Promise.resolve({ ok: true, soft: true });
+        }
+        var req = { sessionId: sessionId, provider: model.provider, model: model.model };
+        if (model.reasoningEffort) req.reasoningEffort = model.reasoningEffort;
+        return Promise.resolve()
+          .then(function () { return remote.session.selectModel(req); })
+          .then(function (r) {
+            if (r && r.ok === false) {
+              var err = (r && r.error) || {};
+              return { ok: false, message: String(err.code || err.message || '未知错误') };
+            }
+            return { ok: true };
           })
-          .catch(function () { return out; });
+          .catch(function () { return { ok: true, soft: true }; });
       }
 
       /**
        * M3「处理」：新会话自动下发。
-       *   sessions.create({workspaceId|cwd, agentPreset}) → uiWorkspace.openSession(id)
+       *   sessions.create({workspaceId|cwd}) → uiWorkspace.openSession(id)
+       *   → remote.session.selectModel（按所选 provider/模型/思考强度）
        *   → conversation.input.for(scope).setDraft/submit
-       * choice 由「处理」弹层给出：{workspaceId?|cwd?, agentPreset?}；缺省时继承当前会话目录。
+       * choice 由「处理」弹层给出：{workspaceId?|cwd?, model?: {provider, model, reasoningEffort?}}；
+       * 缺省时继承当前会话目录、模型走默认。
        * 任一环失败 → 降级插入当前会话 composer；再失败 → 剪贴板。
        */
       function dispatchToNewSession(md, images, choice) {
@@ -632,7 +689,6 @@
             }
           } catch (e) { /* 忽略 */ }
         }
-        if (choice && choice.agentPreset) opts.agentPreset = choice.agentPreset;
 
         return Promise.resolve()
           .then(function () { return sessions.create(opts); })
@@ -648,15 +704,25 @@
               try { facade = conversation.input.for(scope); } catch (e) { facade = null; }
               if (facade && typeof facade.setDraft === 'function') {
                 var target = { sessionId: sessionId, scope: scope, facade: facade, conversation: conversation };
-                // 先把真实图片挂成草稿附件，再填文本并发送（图片下载失败也照常发送）
-                return attachImagesToDraft(images, target).then(function (att) {
-                  facade.setDraft(md);
-                  try { facade.focus(); } catch (e) { /* 忽略 */ }
-                  setTimeout(function () {
-                    try { if (typeof facade.submit === 'function') facade.submit(); } catch (e) { /* 已填草稿，发送交给用户 */ }
-                  }, 250);
-                  var suffix = att && att.ok ? '（含 ' + att.count + ' 张图片）' : '';
-                  return { ok: true, mode: 'dispatched', message: '已在新会话发送任务背景' + suffix, sessionId: sessionId };
+                // 先设置所选模型（成功才自动发送；显式失败则只填草稿，交用户在 composer 确认）
+                var modelStep = (choice && choice.model)
+                  ? selectModelFor(sessionId, choice.model)
+                  : Promise.resolve({ ok: true });
+                return modelStep.then(function (mres) {
+                  // 再挂图片附件、填文本并发送（图片下载失败也照常发送）
+                  return attachImagesToDraft(images, target).then(function (att) {
+                    facade.setDraft(md);
+                    try { facade.focus(); } catch (e) { /* 忽略 */ }
+                    if (mres && mres.ok === false) {
+                      return { ok: true, mode: 'draft', sessionId: sessionId,
+                        message: '已新建会话并填入输入框（模型设置失败：' + mres.message + '，请确认后手动发送）' };
+                    }
+                    setTimeout(function () {
+                      try { if (typeof facade.submit === 'function') facade.submit(); } catch (e) { /* 已填草稿，发送交给用户 */ }
+                    }, 250);
+                    var suffix = att && att.ok ? '（含 ' + att.count + ' 张图片）' : '';
+                    return { ok: true, mode: 'dispatched', sessionId: sessionId, message: '已在新会话发送任务背景' + suffix };
+                  });
                 });
               }
             }
@@ -810,15 +876,48 @@
               h(PlusIcon), '添加账号…')));
       }
 
+      // 模型下拉的 value：'provider\u0000model'（原生 select 单值，\u0000 防与 id 内分隔符冲突）
+      function modelKeyOf(groups, sel) {
+        if (!sel || !sel.provider || !sel.model) return null;
+        for (var i = 0; i < (groups || []).length; i++) {
+          var g = groups[i];
+          if (g.id !== sel.provider) continue;
+          for (var j = 0; j < g.models.length; j++) {
+            if (g.models[j].id === sel.model) return g.id + '\u0000' + g.models[j].id;
+          }
+        }
+        return null;
+      }
+      function firstModelKey(groups) {
+        for (var i = 0; i < (groups || []).length; i++) {
+          if (groups[i].models.length) return groups[i].id + '\u0000' + groups[i].models[0].id;
+        }
+        return null;
+      }
+      function findModelByKey(groups, key) {
+        if (!key) return null;
+        var sep = key.indexOf('\u0000');
+        var pid = key.slice(0, sep), mid = key.slice(sep + 1);
+        for (var i = 0; i < (groups || []).length; i++) {
+          var g = groups[i];
+          if (g.id !== pid) continue;
+          for (var j = 0; j < g.models.length; j++) {
+            if (g.models[j].id === mid) return g.models[j];
+          }
+        }
+        return null;
+      }
+
       /**
-       * 「处理」确认弹层：先选工作区与模型，再新建会话自动下发。
+       * 「处理」确认弹层：先选工作区与模型（provider/模型 + 思考强度），再新建会话自动下发。
        * 服务不可用/列表为空时对应下拉退化为单项说明，仍可直接发送（走默认）。
        */
       function DispatchDialog(props) {
         var card = props.card;
         var ctx0 = useState(null);   // collectDispatchContext 结果
         var wsSel = useState(null);  // 选中 workspaceId | '__cwd__' | null
-        var modelSel = useState(null); // 选中 preset id | null
+        var modelKey = useState(null); // 选中 'provider\u0000model' | null
+        var effortSel = useState(null); // 选中思考强度 id | ''（提供商默认）| null
         var busy = useState(false);
 
         useEffect(function () {
@@ -830,18 +929,25 @@
             wsSel[1](o.currentWorkspaceId
               || (o.cwd ? '__cwd__' : null)
               || (o.workspaces[0] ? o.workspaces[0].id : null));
-            // 模型默认：当前会话在用的 → 默认预设 → 第一个可用
-            var def = null, first = null;
-            for (var i = 0; i < o.presets.length; i++) {
-              var p = o.presets[i];
-              if (p.broken) continue;
-              if (first === null) first = p.id;
-              if (p.isDefault) def = p.id;
-            }
-            modelSel[1](o.currentPreset || def || first);
+            // 模型默认：当前会话在用的 → 全局默认 → 第一个
+            var key = modelKeyOf(o.modelGroups, o.currentModel)
+              || modelKeyOf(o.modelGroups, o.modelDefault)
+              || firstModelKey(o.modelGroups);
+            modelSelDefault(o, key, effortSel);
           });
           return function () { alive = false; };
         }, []);
+
+        // 初始化默认值（modelKey + effortSel 一起设；闭包里没有 setState，直接用两个 setter）
+        function modelSelDefault(o, key, setters) {
+          if (!key) { setters[1] && setters[1](''); return; }
+          modelKey[1](key);
+          var m = findModelByKey(o.modelGroups, key);
+          var cur = o.currentModel && modelKeyOf(o.modelGroups, o.currentModel) === key ? o.currentModel : null;
+          // 思考强度默认：当前会话的 effort → 该模型默认 → 提供商默认
+          var eff = (cur && cur.reasoningEffort) || (m && m.defaultEffort) || '';
+          setters[1] && setters[1](m && m.efforts.length ? String(eff || '') : '');
+        }
 
         useEffect(function () {
           var onKey = function (e) { if (e.key === 'Escape' && !busy[0]) props.onClose(); };
@@ -857,13 +963,19 @@
           var choice = {};
           if (wsSel[0] && wsSel[0] !== '__cwd__') choice.workspaceId = wsSel[0];
           else if (wsSel[0] === '__cwd__' && o.cwd) choice.cwd = o.cwd;
-          if (modelSel[0]) choice.agentPreset = modelSel[0];
+          if (modelKey[0]) {
+            var sep = modelKey[0].indexOf('\u0000');
+            choice.model = { provider: modelKey[0].slice(0, sep), model: modelKey[0].slice(sep + 1) };
+            if (effortSel[0]) choice.model.reasoningEffort = effortSel[0];
+          }
           props.onSend(choice);
         };
 
         var o = ctx0[0];
-        var wsOptions = o ? o.workspaces : [];
-        var models = o ? o.presets : [];
+        var groups = o ? o.modelGroups : [];
+        var selModel = modelKey[0] ? findModelByKey(groups, modelKey[0]) : null;
+        var efforts = selModel ? selModel.efforts : [];
+        var hasProviderDefault = Boolean(selModel) && (selModel.defaultEffort == null);
 
         return h('div', { className: 'ztp-disp-layer', onClick: close },
           h('div', { className: 'ztp-disp-pop', onClick: function (e) { e.stopPropagation(); } },
@@ -878,30 +990,46 @@
             },
               o === null
                 ? h('option', { value: '' }, '正在读取工作区…')
-                : (wsOptions.length || (o && o.cwd)
-                  ? (o && o.cwd && !o.currentWorkspaceId
+                : (o.workspaces.length || o.cwd
+                  ? (o.cwd && !o.currentWorkspaceId
                     ? h('option', { value: '__cwd__' }, '继承当前目录（' + shortenPath(o.cwd) + '）')
                     : null)
                   : h('option', { value: '' }, '默认位置')),
-              wsOptions.map(function (w) {
+              (o ? o.workspaces : []).map(function (w) {
                 return h('option', { key: w.id, value: w.id },
                   w.title + (o && o.currentWorkspaceId === w.id ? '（当前）' : ''));
               })),
 
             h('label', { className: 'ztp-label' }, '模型'),
             h('select', {
-              className: 'ztp-input', value: modelSel[0] || '', disabled: busy[0],
-              onChange: function (e) { modelSel[1](e.target.value); },
+              className: 'ztp-input', value: modelKey[0] || '', disabled: busy[0],
+              onChange: function (e) {
+                modelKey[1](e.target.value);
+                // 换模型 → 思考强度重置为该模型的默认（当前会话 effort 只跟随原模型）
+                var m = findModelByKey(groups, e.target.value);
+                effortSel[1](m && m.efforts.length ? String(m.defaultEffort || '') : '');
+              },
             },
               o === null
                 ? h('option', { value: '' }, '正在读取模型…')
-                : (models.length
-                  ? models.map(function (p) {
-                    return h('option', {
-                      key: p.id, value: p.id, disabled: Boolean(p.broken),
-                    }, p.name + (p.isDefault ? '（默认）' : '') + (p.broken ? '（不可用）' : ''));
+                : (groups.length
+                  ? groups.map(function (g) {
+                    return h('optgroup', { key: g.id, label: g.name },
+                      g.models.map(function (m) {
+                        return h('option', { key: g.id + '\u0000' + m.id, value: g.id + '\u0000' + m.id }, m.name);
+                      }));
                   })
                   : h('option', { value: '' }, '默认模型'))),
+
+            efforts.length ? h('label', { className: 'ztp-label' }, '思考强度') : null,
+            efforts.length ? h('select', {
+              className: 'ztp-input', value: effortSel[0] || '', disabled: busy[0],
+              onChange: function (e) { effortSel[1](e.target.value); },
+            },
+              hasProviderDefault ? h('option', { value: '' }, '提供商默认') : null,
+              efforts.map(function (e) {
+                return h('option', { key: e.id, value: e.id }, e.name);
+              })) : null,
 
             h('div', { className: 'ztp-disp-note' },
               '将在新会话发送任务背景' + (props.images && props.images.length ? '，含 ' + props.images.length + ' 张图片附件' : '') + '。'),
