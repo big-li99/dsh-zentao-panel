@@ -23,7 +23,7 @@
 | M1 host 插件（登录/取数/RPC） | ✅ 代码完成，测试全绿，**已装入 desktop profile 加载树**（重启 DSH Desktop 激活） |
 | M2 client 右侧栏 tab + 引导卡片 | ✅ 已改为 `sidebarRightTabs` 入口（对齐 dsh-context「上下文」），样式走 DSH token 支持日/夜；注册契约有测试，待真机目视确认 |
 | M3 插入输入框 + 新会话下发 | ✅ 服务级 `setDraft` 真机可用；**描述里的截图改为真实图片附件**（`conversation.createDrafts` + `facade.addAttachments`，见 §4.1）；新会话下发待真机复验 |
-| M4 打磨 | 🔄 进行中：2026-10-24 修会话超时静默空白（超时信封识别→自动重登）+ 拉取失败 toast/错误视图；同日改「处理」为**弹层确认式**（先选工作区、接入模型与思考强度再下发，见 §4.2，待真机目视确认）；其余未做 |
+| M4 打磨 | 🔄 进行中：2026-10-24 修会话超时静默空白（超时信封识别→自动重登）+ 拉取失败 toast/错误视图；同日改「处理」为**弹层确认式**（先选工作区、接入模型与思考强度再下发，见 §4.2，待真机目视确认）；同日新增**关联会话 chip：处理过的卡片可看会话标题并一键跳回**（见 §4.3，待真机目视确认）；同日晚修复弹层卡「创建中」闭包 bug（§4.2 末）并做**面板固定/跟随**（跳转或处理后禅道面板跟到目标会话且不闪，keepMounted + sidebarRight.openTab + paneCache，见 §5.1 末，待真机目视确认）；其余未做 |
 | M5 多账号 | ✅ 2026-10-24 完成：schema v2（accounts[]+activeId，旧格式自动迁移）、每账号独立 client/cookie/缓存、账号菜单切换/添加/按账号移除；测试全绿（multi 25 项 + host 新增 4 项），待真机目视确认 |
 
 测试命令：
@@ -231,6 +231,42 @@ defaultEffort 缺席加「提供商默认」）。`dispatchToNewSession(md, imag
 **selectModel 显式拒绝（ok:false）→ 只填草稿不自动 submit**（用户选的模型没生效不该代发），
 服务缺失/网络异常 → 照常自动发（模型走默认）。choice 缺省时保持旧的「继承当前 cwd、不动模型」行为。
 
+- **⚠️⚠️⚠️ 真机踩坑（2026-10-24，弹层卡「创建中…」）**：`useCallback(fn, [])` 的闭包捕获的是
+  **初次 render 的组件函数调用作用域**，而 `var dispatch = useState(null)` 每次 render 返回**新数组**——
+  在 `useCallback([])` 回调里读 `dispatch[0]`/`status[0]` 拿到的永远是初次值（null）。
+  症状：弹层「发送」→ `busy[1](true)` 生效（按钮变「创建中…」）→ `sendDispatch` 里
+  `var d = dispatch[0]` 恒为 null → `if (!d) return` 直接返回 → 弹层永远停在 busy、会话也没建
+  （Escape 也关不掉：close 检查 `!busy[0]`，只能 ⌘R 恢复）。修复模式：**回调不读 state 快照**——
+  需要的数据（card/md/images/activeAcct）由 DispatchDialog 的 `send` 随 `props.onSend(choice, data)` 回传
+  （props 组装于当前 render 作用域）；计数 bump 一律函数式 `linkRev[1](v => v+1)`（`linkRev[0]+1` 同样
+  会因旧闭包恒 0 而只生效一次）；`props.onSend` 外包 try/catch，发起异常时 `busy[1](false)` 让弹层可恢复。
+  setter（`xxx[1]`）引用稳定，旧闭包里调用没问题。LoginView 的 `useCallback(fn, [baseUrl[0],…])` 是
+  正确对照写法（deps 声明了所读的值，值变则回调重建）。
+
+### 4.3 关联会话 chip：处理过的卡片可跳回会话（2026-10-24，DSH 0.2.1-rc.2 源码确认）
+
+用户要求：点了「处理」后，右侧面板卡片上能看到关联的 DSH 会话并快速跳转。实现与源码事实：
+
+- **会话标题不用自己算**：`sessions.list.getSnapshot().byId[id]` 的行自带 **`displayTitle`**
+  （dsh-api-session-controller client.js `projectList()` :4153 构造），降级链源码已做好：
+  durable title → `cwd` 目录 basename（`displayTitleOf` :3700）→ 裸 sessionId。行上还有
+  `running/blank/updatedAt/retainedBy/cwd/parentId/origin`；初始快照 `{ids:[], byId:{}, phase:'pending'}`。
+- **关联存 localStorage**（key `dsh-zentao-panel.links.v1`，map 形态）：DSH 会话本来就只在本机，跨设备无意义。
+  key = `<禅道账号activeId>/<kind>-<id>`（多账号下同 id 不是同一张卡片）；值 `{sessionId, at}`。
+  标题不落盘，每次渲染从 sessions.list 快照现读（会话改名/删除自动跟进）。
+- **`ZentaoPane.sendDispatch` 成功即 `saveSessionLink`**（`r.sessionId` 存在时，draft 模式也算——内容已填进那个会话）；
+  同卡片再次处理 → 覆盖为最新会话。
+- **跳转** = `uiWorkspace.openSession(sessionId)`（与「处理」建会话后的打开路径一致，retain + replaceMain）。
+  跳转前用 byId 校验会话存活：byId 非空但无该行 → 判定已删，清关联 + toast「关联的会话已不存在」；
+  **byId 为空（列表 phase 未就绪）时不删不拦，直接尝试打开**（防止 DSH 刚启动时误清全部关联）。
+- 卡片/详情 actions 行左侧渲染 chip（`.ztp-slink`，live=会话标题、dead=「会话已删除」点击清除、
+  unknown=「已处理 · M月d日 HH:mm」）；纯函数 `sessionLinkView(link, byId)` 产出三态，`openSessionLink()` 负责跳转+清理。
+- 本地存储不可用时（测试替身/极端环境）退进程内对象兜底，读坏 JSON 自愈为空表。
+
+实现要点（client/client.js「会话关联」块）：纯函数全部进 `exports._test`（`sessionLinkKey/readLinkMap/
+getSessionLink/saveSessionLink/removeSessionLink/sessionLinkView/openSessionLink/fmtLinkAt`），
+`test/client.mjs` 用挂在 window 上的 localStorage 替身直测。
+
 ### 5. DSH 插件体系（本机实测）
 
 - DSH Desktop **0.2.1-rc.2**，desktop profile，macOS
@@ -254,7 +290,8 @@ defaultEffort 缺席加「提供商默认」）。`dispatchToNewSession(md, imag
 
 - 服务 `sidebarRightTabs`（`ctx.reflect.provide` 提供，用 `ctx.inject(['sidebarRightTabs'], cb)` 等它就绪）；
   `tabs.register({ id, kind, title:()=>string, guide:[{ id, order, title, description, icon }] })`
-  —— `guide` 就是「开始」页里的那张卡片，`icon` 是接收 `{size, className}` 的 React 组件。
+  —— `guide` 就是「开始」页里那张卡片，`icon` 是接收 `{size, className}` 的 React 组件。
+  registry 把 definition **原样透传**（无字段白名单），所以可带 `keepMounted: true`（见下）。
 - tab 正文/标题挂点：`slots.inject('sidebar.right.pane.tab', () => slots.register({name, key, locale}, Comp))`，
   标题同理 `sidebar.right.pane.tab.title`。
   **`key` 必须是 tab 类型的 `id`**（`TabSlot` 里 `entryKey = definition.id ?? tab.kind`）；
@@ -269,6 +306,26 @@ defaultEffort 缺席加「提供商默认」）。`dispatchToNewSession(md, imag
   **旧代码里的 `--dsw-alias-border-subtle`、`--dsw-alias-bg-canvas-subtle`、`--dsw-alias-border-strong` 根本不存在**，
   一直回落到 `#fff` 兜底色——这就是夜间模式错色的根因，改样式时不要再写这些名字。
 - 旧版 DSH 没有 `sidebarRightTabs` 时，插件 2.5s 后自动退回 `shell.overlay` 悬浮按钮 + 侧滑面板（同一套组件）。
+- **⚠️ 右侧栏是 per-session 的（2026-10-24 真机踩坑：「跳转会话时面板刷新一下」）**：
+  侧栏 surface 存在 `store.bySession[sessionId]`，`SidebarSessionViews.select(uiSession.adapter.current)`
+  跟随主视图会话——`uiWorkspace.openSession` 切会话后，右侧栏整体换成新会话自己的（空）surface，
+  旧会话面板被换掉（这就是"刷新"）。三层修法（都已实现）：
+  - **`keepMounted: true`**（tab 类型 definition 上声明，registry 原样透传）：TabSlot 会对该 tab
+    `retainTab`（occurrence 计数持有），`SidebarSessionViews.prune` 对 `hasRetainedTabs` 的 view 不
+    retire → 旧会话面板保持挂载（hidden，`.irMxjq_session[hidden]{display:none}`），切回时 state 原样；
+    DockLayout 也收到 `keepMounted` 回调 → dock 内 tab 切换不卸载。
+  - **面板跟随**：公开服务 `ctx.sidebarRight`（SidebarRightController，`ctx.reflect.provide('sidebarRight')`）：
+    `openTab(kind, opts)` 作用于**屏幕会话**（`require()` 取 mounted；无屏幕会话时 throw，要 catch）；
+    `tabsIn(sessionId)` 读该会话已开 tab（返回 `[{id, kind, ...}]`）。跳转/处理 `openSession` 后调
+    `followZentaoTabTo(sessionId)`：目标会话已有禅道 tab → `openTab(kind, {})` 幂等 reveal；没有（新会话
+    只有 guide）→ `{replaceTab: true}` 替换 guide（guide 自己打开 tab 也这么传）。`replaceTab` 传 `true`
+    在 place 层查 `layout.tabs[true]` 为 undefined、由 store action 解释为替换激活 tab——**只在确认目标是
+    guide 时才用**，否则会替换用户已开的别的 tab。`openTab` 落在 on-screen 会话，openSession 后要
+    `setTimeout(0)` 让同步 store 链先走完（没跟上时开回旧会话，幂等无害）。
+  - **paneCache**（模块级快照 `{tab, status, mine, detailCard}`）：per-session 重开的禅道 tab 是新组件
+    实例，初始 state 取缓存秒恢复（不闪 loading/骨架），后台 RPC 照常静默刷新；登出/切账号置 null 的
+    state 同步进缓存，下次重挂正确走登录/重拉。同步用 effect 依赖四个值（deps 变化即最新 render 作用域，
+    无闭包陷阱）。
 
 ### 6. 设计决策记录
 
@@ -305,9 +362,19 @@ defaultEffort 缺席加「提供商默认」）。`dispatchToNewSession(md, imag
   服务不可用时降级插入当前会话。真机重点验证：弹层三个下拉有值且默认项合理（工作区=当前会话归属；
   模型/思考强度=当前会话在用）、选不同工作区/模型后新会话确实落在所选位置和模型上（看 composer 模型显示）、
   新会话 composer 挂载时序（250ms 是否够，不够就调大或改事件驱动）。**本次仅 client 改动，⌘R 即可生效，无需重装**
+- M4 关联会话 chip（2026-10-24，见 §4.3）：「处理」成功 → 卡片 actions 行左侧出现会话 chip（显示
+  `sessions.list` 的 `displayTitle`）→ 切到别的会话后点 chip 应回到处理时创建的那个会话；再点一次「处理」
+  → chip 更新为最新会话；把该会话删掉 → chip 显示「会话已删除」，点击清除并 toast。**仅 client 改动，⌘R 生效**
+- M4 面板固定/跟随（2026-10-24 晚，见 §5.1 末）：点 chip 跳转或「处理」发送后，主视图切到目标会话，
+  右侧栏的禅道面板应**跟随切过去且内容不闪**（keepMounted + followZentaoTabTo + paneCache 三层）。
+  真机重点验证：① 跳转后右侧栏仍显示禅道面板（不再是新会话的空「开始」页）、列表瞬间完整无骨架闪现；
+  ② 目标会话右侧栏原来只有「开始」guide → 被禅道 tab 替换；已有别的 tab（如「上下文」）→ 禅道 tab
+  追加而不替换；③ 切回旧会话，禅道面板状态原样（tab 位置/详情页保留）；④ 旧版 DSH 无 `sidebarRight`
+  服务时跳转正常、只是面板不跟随（控制台无报错）。**仅 client 改动，⌘R 生效**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-24 复跑）：`test/client.mjs` 45 项（含「处理」弹层上下文收集 + workspaceId 传参
-  + selectModel 按会话设置 provider/model/思考强度 + 被拒时不自动发送）、
+- 测试现状（2026-10-24 复跑）：`test/client.mjs` 69 项（含「处理」弹层上下文收集 + workspaceId 传参
+  + selectModel 按会话设置 provider/model/思考强度 + 被拒时不自动发送 + 会话关联存取/三态视图/跳转清理
+  + 面板跟随 openTab 的 replaceTab/reveal/无服务三态）、
   `test/multi.mjs` 25 项、`test/protocol.mjs` 9 项全绿；`test/host.mjs` 19 项（真机 20 张卡片：task 2 / bug 8 / story 10）、
   `test/smoke.mjs`（含 `extractImageRefs` / `fetchImage` 真图下载）需真实禅道凭据。
   注意：沙箱会话里跑 host.mjs 读不了 `~/.dsh/zentao-panel/config.json`（EPERM），需把凭据文件拷进

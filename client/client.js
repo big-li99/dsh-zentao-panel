@@ -100,6 +100,13 @@
         '.ztp-btn:disabled{opacity:.45;cursor:default;}',
         '.ztp-btn svg{width:13px;height:13px;}',
 
+        // 关联会话 chip（「处理」过的卡片左侧显示会话标题，点击跳回该会话）
+        '.ztp-slink{display:inline-flex;align-items:center;gap:4px;max-width:58%;height:22px;padding:0 8px;margin-right:auto;border-radius:999px;border:.5px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;cursor:pointer;box-sizing:border-box;min-width:0;}',
+        '.ztp-slink:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l4);}',
+        '.ztp-slink svg{width:11px;height:11px;flex:none;opacity:.8;}',
+        '.ztp-slink-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+        '.ztp-slink.dead{color:var(--dsw-alias-label-caption);border-style:dashed;}',
+
         // 空态 / 骨架 / 错误
         '.ztp-empty{padding:44px 16px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px;line-height:1.7;}',
         '.ztp-skel{height:76px;border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-skeleton);border:.5px solid var(--dsw-alias-border-l1);margin-bottom:8px;animation:ztp-pulse 1.5s ease-in-out infinite;}',
@@ -245,6 +252,11 @@
       function TrashIcon() {
         return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
           h('path', { d: 'M3 4.6h10M6.4 4.6V3.4h3.2v1.2M4.4 4.6l.5 8c.03.5.45.8.95.8h4.3c.5 0 .92-.3.95-.8l.5-8', stroke: 'currentColor', strokeWidth: 1.1, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+        );
+      }
+      function ChatIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('path', { d: 'M3 4.3c0-.72.58-1.3 1.3-1.3h7.4c.72 0 1.3.58 1.3 1.3v5c0 .72-.58 1.3-1.3 1.3H7.8L5.2 13.2v-2.6h-.9C3.58 10.6 3 10.02 3 9.3z', stroke: 'currentColor', strokeWidth: 1.1, strokeLinejoin: 'round' }),
         );
       }
 
@@ -698,7 +710,10 @@
           .then(function (sessionId) {
             if (!sessionId) throw new Error('session.create 未返回会话 id');
             if (ws && typeof ws.openSession === 'function') {
-              try { ws.openSession(sessionId); } catch (e) { /* 打开失败也继续尝试填草稿 */ }
+              try {
+                ws.openSession(sessionId);
+                followZentaoTabTo(sessionId); // 主视图切到新会话 → 禅道面板跟过去
+              } catch (e) { /* 打开失败也继续尝试填草稿 */ }
             }
             var scope = null;
             try { scope = sessions.scope(sessionId); } catch (e) { scope = null; }
@@ -739,6 +754,148 @@
           });
       }
 
+      // ───────────────── 会话关联（「处理」后卡片可跳回该会话）─────────────────
+      // 「处理」成功后把 禅道卡片 → DSH 会话 的映射存进 localStorage（DSH 会话
+      // 本来就只在本机，跨设备无意义）。key 带禅道账号前缀：不同账号/实例下
+      // 同一个 kind-id 不是同一张卡片。会话标题不落盘——每次渲染从 sessions.list
+      // 快照读 byId[sessionId].displayTitle（源码确认已做好 标题→目录名→id 降级），
+      // 会话被删后 byId 里没有该行也能当场发现。
+      var LINKS_KEY = 'dsh-zentao-panel.links.v1';
+      var linksFallback = null; // localStorage 不可用（测试替身/极端环境）时的进程内兜底
+
+      function linkStorage() {
+        try { return root.localStorage || null; } catch (e) { return null; }
+      }
+      function readLinkMap() {
+        var s = linkStorage();
+        if (s) {
+          try {
+            var v = s.getItem(LINKS_KEY) ? JSON.parse(s.getItem(LINKS_KEY)) : null;
+            if (v && typeof v === 'object') return v;
+          } catch (e) { /* 坏数据当空 */ }
+          return {};
+        }
+        return linksFallback || (linksFallback = {});
+      }
+      function writeLinkMap(map) {
+        var s = linkStorage();
+        if (s) {
+          try { s.setItem(LINKS_KEY, JSON.stringify(map)); return; } catch (e) { /* 配额满等 → 退内存 */ }
+        }
+        linksFallback = map;
+      }
+
+      function sessionLinkKey(activeId, card) {
+        return String(activeId || 'anon') + '/' + card.kind + '-' + card.id;
+      }
+      function getSessionLink(activeId, card) {
+        var v = readLinkMap()[sessionLinkKey(activeId, card)];
+        return (v && typeof v.sessionId === 'string' && v.sessionId) ? v : null;
+      }
+      /** 「处理」成功时记录关联；同卡片再次处理 → 覆盖为最新会话。 */
+      function saveSessionLink(activeId, card, sessionId) {
+        var key = sessionLinkKey(activeId, card);
+        var link = { sessionId: String(sessionId), at: Date.now() };
+        var map = readLinkMap();
+        map[key] = link;
+        writeLinkMap(map);
+        return link;
+      }
+      function removeSessionLink(activeId, card) {
+        var map = readLinkMap();
+        delete map[sessionLinkKey(activeId, card)];
+        writeLinkMap(map);
+      }
+
+      function fmtLinkAt(at) {
+        var t = Number(at);
+        if (!isFinite(t) || t <= 0) return '';
+        var d = new Date(t);
+        var now = new Date();
+        var md = (d.getMonth() + 1) + '月' + d.getDate() + '日';
+        var hm = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
+        return (d.getFullYear() === now.getFullYear() ? '' : d.getFullYear() + '年') + md + ' ' + hm;
+      }
+
+      /**
+       * 卡片上显示的关联状态：byId 有该行 → live（displayTitle）；
+       * byId 非空但没有该行 → dead（会话已删，点击清除标记）；
+       * 拿不到快照或 byId 为空（列表未就绪）→ unknown（显示处理时间，防误删）。
+       */
+      function sessionLinkView(link, byId) {
+        if (!link) return null;
+        if (byId) {
+          var row = byId[link.sessionId];
+          if (row) return { state: 'live', title: String(row.displayTitle || link.sessionId), at: link.at };
+          var hasAny = false;
+          for (var k in byId) { if (k !== '__proto__') { hasAny = true; break; } }
+          if (hasAny) return { state: 'dead', title: '', at: link.at };
+        }
+        return { state: 'unknown', title: '已处理 · ' + fmtLinkAt(link.at), at: link.at };
+      }
+
+      /**
+       * 主视图切到别的会话后，把禅道 tab 也开到（屏幕会话的）右侧栏。
+       * DSH 的右侧栏是 per-session 的（surface 存在 store.bySession[sessionId]，
+       * 跟随 uiSession 当前会话），不跟的话跳转后右侧栏会被新会话的空 sidebar
+       * 换掉——这就是「跳转会话时面板刷新一下」的根因。
+       * 公开服务 ctx.sidebarRight（dsh-client-ui-sidebar-right）：openTab(kind) 作用于
+       * 屏幕会话；tabsIn(sessionId) 读该会话已开的 tab（已有禅道 tab → 幂等 reveal
+       * 不带 replaceTab；新会话只有「开始」guide → replaceTab 替换它）。
+       * 时序：openSession 后 on-screen 会话的更新是同步 store 链，这里再让一个
+       * 宏任务，链没跟上时 openTab 落回旧会话（已有 tab，幂等无害）。
+       */
+      function followZentaoTabTo(sessionId) {
+        var sr = null;
+        try { sr = lookupService('sidebarRight'); } catch (e) { sr = null; }
+        if (!sr || typeof sr.openTab !== 'function') return;
+        setTimeout(function () {
+          try {
+            var has = false;
+            if (sessionId && typeof sr.tabsIn === 'function') {
+              var open = sr.tabsIn(sessionId) || [];
+              for (var i = 0; i < open.length; i++) {
+                if (open[i] && open[i].kind === TAB_KIND) { has = true; break; }
+              }
+            }
+            sr.openTab(TAB_KIND, has ? {} : { replaceTab: true });
+          } catch (e) { /* 旧版 DSH 无 sidebarRight 服务/会话未 adopt：右侧栏走默认，不影响跳转 */ }
+        }, 0);
+      }
+
+      /**
+       * 跳转到卡片关联的会话（uiWorkspace.openSession：retain + replaceMain，
+       * 与「处理」建会话后的打开路径一致）。会话已删（byId 非空且无该行）→
+       * 清除关联并返回 missing；列表未就绪时不清除，直接尝试打开。
+       */
+      function openSessionLink(activeId, card) {
+        var link = getSessionLink(activeId, card);
+        if (!link) return { ok: false, reason: 'nolink' };
+        var byId = null;
+        try {
+          var sessions = lookupService('sessions');
+          var snap = sessions && sessions.list && sessions.list.getSnapshot();
+          byId = (snap && snap.byId) || null;
+        } catch (e) { byId = null; }
+        if (byId && byId[link.sessionId] === undefined) {
+          var hasAny = false;
+          for (var k in byId) { if (k === '__proto__') continue; hasAny = true; break; }
+          if (hasAny) {
+            removeSessionLink(activeId, card);
+            return { ok: false, reason: 'missing' };
+          }
+        }
+        var ws = lookupService('uiWorkspace');
+        if (!ws || typeof ws.openSession !== 'function') return { ok: false, reason: 'unsupported' };
+        try {
+          ws.openSession(link.sessionId);
+        } catch (e) {
+          return { ok: false, reason: 'error', message: String((e && e.message) || e) };
+        }
+        followZentaoTabTo(link.sessionId); // 面板跟着切到目标会话，不被新会话的空 sidebar 换掉
+        return { ok: true, sessionId: link.sessionId };
+      }
+
       // ───────────────────────── 组件 ─────────────────────────
       function KindTag(props) {
         return h('span', { className: 'ztp-tag ' + props.kind }, KIND_LABEL[props.kind] || props.kind);
@@ -776,6 +933,15 @@
             c.deadline ? h('span', { className: urgent ? 'ztp-warn' : '' }, '截止 ' + fmtDate(c.deadline)) : null,
             c.openedBy ? h('span', null, c.openedBy + ' 创建') : null),
           h('div', { className: 'ztp-acts' },
+            props.linkView ? h('button', {
+              className: 'ztp-slink' + (props.linkView.state === 'dead' ? ' dead' : ''),
+              type: 'button',
+              title: props.linkView.state === 'live'
+                ? fmtLinkAt(props.linkView.at) + ' 处理 · 点击跳转到该会话'
+                : (props.linkView.state === 'dead' ? '关联的会话已删除，点击清除标记' : '点击跳转到处理时创建的会话'),
+              onClick: function (e) { e.stopPropagation(); props.onOpenSession(c); },
+            }, h(ChatIcon), h('span', { className: 'ztp-slink-t' },
+              props.linkView.state === 'dead' ? '会话已删除' : props.linkView.title)) : null,
             h('button', {
               className: 'ztp-btn', type: 'button',
               onClick: function (e) { e.stopPropagation(); props.onInsert(c, null); },
@@ -833,6 +999,15 @@
               d.resolvedBuild ? h('dt', null, '解决版本') : null, d.resolvedBuild ? h('dd', null, String(d.resolvedBuild)) : null),
 
             h('div', { className: 'ztp-acts', style: { marginTop: '12px' } },
+              props.linkView ? h('button', {
+                className: 'ztp-slink' + (props.linkView.state === 'dead' ? ' dead' : ''),
+                type: 'button',
+                title: props.linkView.state === 'live'
+                  ? fmtLinkAt(props.linkView.at) + ' 处理 · 点击跳转到该会话'
+                  : (props.linkView.state === 'dead' ? '关联的会话已删除，点击清除标记' : '点击跳转到处理时创建的会话'),
+                onClick: function (e) { e.stopPropagation(); props.onOpenSession(card); },
+              }, h(ChatIcon), h('span', { className: 'ztp-slink-t' },
+                props.linkView.state === 'dead' ? '会话已删除' : props.linkView.title)) : null,
               h('button', { className: 'ztp-btn', type: 'button', onClick: function () { props.onInsert(card, detail[0]); } }, '插入对话'),
               h('button', { className: 'ztp-btn primary', type: 'button', title: '选择工作区与模型，新建会话发送任务背景', onClick: function () { props.onDispatch(card, detail[0]); } }, '处理'))),
 
@@ -971,7 +1146,14 @@
             choice.model = { provider: modelKey[0].slice(0, sep), model: modelKey[0].slice(sep + 1) };
             if (effortSel[0]) choice.model.reasoningEffort = effortSel[0];
           }
-          props.onSend(choice);
+          // 数据随调用回传（card/md/images/activeAcct 来自当前 render 的 props），
+          // 接收方 useCallback 闭包里读不到最新 state（见 sendDispatch 注释）
+          try {
+            props.onSend(choice, { card: card, md: props.md, images: props.images, activeAcct: props.activeAcct });
+          } catch (e) {
+            busy[1](false); // 发起本身失败 → 至少让弹层可以再操作/关闭
+            try { console.error('[dsh-zentao-panel] dispatch send failed', e); } catch (e2) { /* 忽略 */ }
+          }
         };
 
         var o = ctx0[0];
@@ -1104,18 +1286,25 @@
       }
 
       // ───────────────────────── 主面板（右侧栏 tab body）─────────────────────────
+      // 面板快照缓存（模块级）：右侧栏是 per-session 的，跳转/处理切主会话后禅道 tab
+      // 会卸载重挂或在新会话重开（见 followZentaoTabTo）——初始 state 直接取缓存，
+      // 重挂瞬间就是完整列表，不闪 loading/骨架；后台 RPC 照常静默刷新。
+      // 登出/切账号时这些 state 被置 null，缓存同步为 null，下次重挂走登录/重拉。
+      var paneCache = { tab: 'task', status: null, mine: null, detailCard: null };
+
       function ZentaoPane(props) {
         props = props || {};
-        var tab = useState('task');
-        var status = useState(null);   // {configured, account, baseUrl, loggedIn, cacheAt, activeId, accounts[]}
-        var mine = useState(null);     // {cards, cached, at}
+        var tab = useState(paneCache.tab);
+        var status = useState(paneCache.status);   // {configured, account, baseUrl, loggedIn, cacheAt, activeId, accounts[]}
+        var mine = useState(paneCache.mine);       // {cards, cached, at}
         var loading = useState(false);
         var err = useState(null);
-        var detailCard = useState(null);
+        var detailCard = useState(paneCache.detailCard);
         var toast = useState(null);
         var acctOpen = useState(false);  // 账号管理弹出层
         var adding = useState(false);    // 已有账号时再添加一个（LoginView 复用）
         var dispatch = useState(null);   // 「处理」确认弹层：{card, md, images}
+        var linkRev = useState(0);       // 会话关联存储版本号（保存/清除后 bump 重读）
 
         var rpc = useCallback(function (endpoint, payload) {
           return appCtx.connection.rpc.call(CHANNEL, endpoint, payload || {});
@@ -1128,6 +1317,14 @@
           var t = setTimeout(function () { toast[1](null); }, 2200);
           return function () { clearTimeout(t); };
         }, [toast[0]]);
+
+        // 面板数据同步进模块级缓存：tab 卸载（切会话/关 tab）后重挂时用它秒恢复
+        useEffect(function () {
+          paneCache.tab = tab[0];
+          paneCache.status = status[0];
+          paneCache.mine = mine[0];
+          paneCache.detailCard = detailCard[0];
+        }, [tab[0], status[0], mine[0], detailCard[0]]);
 
         var loadStatus = useCallback(function () {
           Promise.resolve(rpc('zentao.status'))
@@ -1183,13 +1380,23 @@
           dispatch[1]({ card: card, md: cardToMarkdown(card, detail), images: imagesOf(card, detail) });
         }, []);
 
-        // 弹层「发送」：按所选工作区/模型建会话（choice 见 dispatchToNewSession）
-        var sendDispatch = useCallback(function (choice) {
-          var d = dispatch[0];
-          if (!d) return;
+        // 弹层「发送」：按所选工作区/模型建会话（choice 见 dispatchToNewSession）。
+        // ⚠️ 数据（card/md/images/activeAcct）由弹层回传：useCallback([]) 的闭包捕获
+        // 初次 render 的作用域，在里面读 dispatch[0]/status[0] 拿到的永远是旧值
+        // （2026-10-24 真机踩坑：dispatch[0] 恒为 null → sendDispatch 直接 return，
+        //  弹层永远卡在「创建中…」）。setState setter 引用稳定，可以直接调。
+        var sendDispatch = useCallback(function (choice, d) {
+          if (!d || !d.card) return;
           dispatch[1](null);
-          Promise.resolve(dispatchToNewSession(d.md, d.images, choice)).then(function (r) {
-            if (r && r.ok) { toast[1](r.message); return; }
+          Promise.resolve(dispatchToNewSession(d.md || '', d.images || [], choice)).then(function (r) {
+            if (r && r.ok) {
+              // 新会话建好即记录关联（draft 模式也算：内容已填进那个会话）
+              if (r.sessionId) {
+                saveSessionLink(d.activeAcct || null, d.card, r.sessionId);
+                linkRev[1](function (v) { return v + 1; });
+              }
+              toast[1](r.message); return;
+            }
             var msg = r && r.message ? r.message + '，已改为插入当前会话' : '新会话不可用，已改为插入当前会话';
             insertToCurrentChat(d.md, d.images).then(function (x) {
               if (x.mode === 'clipboard') {
@@ -1199,6 +1406,17 @@
               }
             });
           }).catch(function (e) { toast[1]('下发失败：' + String((e && e.message) || e)); });
+        }, []);
+
+        // 跳转到卡片关联的会话；会话已删 → 清除标记并提示（openSessionLink 内判定）。
+        // activeAcct 由调用方传当前 render 的值，理由同 sendDispatch 的闭包说明。
+        var openLinkedSession = useCallback(function (card, activeAcct) {
+          var r = openSessionLink(activeAcct, card);
+          if (r && r.ok) return;
+          if (r && r.reason === 'missing') toast[1]('关联的会话已不存在，已清除标记');
+          else if (r && r.reason === 'unsupported') toast[1]('当前 DSH 缺少跳转服务，无法打开会话');
+          else if (r && r.reason === 'error') toast[1]('打开会话失败：' + (r.message || ''));
+          linkRev[1](function (v) { return v + 1; });
         }, []);
 
         var logout = useCallback(function () {
@@ -1229,6 +1447,18 @@
         var st = status[0];
         var configured = Boolean(st && st.configured);
         var cards = mine[0] ? mine[0].cards : [];
+        var linkMap = useMemo(readLinkMap, [linkRev[0]]);
+        // 会话标题/存活判定：sessions.list 快照（有 sessions 服务的 DSH 才有；拿不到 → unknown 态）
+        var sessionRows = null;
+        try {
+          var sessionsSvc = lookupService('sessions');
+          var listSnap = sessionsSvc && sessionsSvc.list && sessionsSvc.list.getSnapshot();
+          sessionRows = (listSnap && listSnap.byId) || null;
+        } catch (e) { sessionRows = null; }
+        var activeAcct = (st && st.activeId) || null;
+        function linkViewOf(card) {
+          return sessionLinkView(linkMap[sessionLinkKey(activeAcct, card)] || null, sessionRows);
+        }
         var filtered = useMemo(function () {
           return cards.filter(function (c) { return c.kind === tab[0]; });
         }, [cards, tab[0]]);
@@ -1248,6 +1478,8 @@
             return h(DetailView, {
               key: detailCard[0].kind + '-' + detailCard[0].id,
               rpc: rpc, card: detailCard[0],
+              linkView: linkViewOf(detailCard[0]),
+              onOpenSession: function (c) { openLinkedSession(c, activeAcct); },
               onBack: function () { detailCard[1](null); },
               onInsert: insertToChat, onDispatch: dispatchCard,
             });
@@ -1275,6 +1507,8 @@
           return h('div', null, filtered.map(function (c) {
             return h(CardItem, {
               key: c.kind + '-' + c.id, card: c,
+              linkView: linkViewOf(c),
+              onOpenSession: function (c2) { openLinkedSession(c2, activeAcct); },
               onOpen: function (x) { detailCard[1](x); },
               onInsert: insertToChat, onDispatch: dispatchCard,
             });
@@ -1347,6 +1581,8 @@
           dispatch[0] ? h(DispatchDialog, {
             card: dispatch[0].card,
             images: dispatch[0].images,
+            md: dispatch[0].md,
+            activeAcct: activeAcct,
             onSend: sendDispatch,
             onClose: function () { dispatch[1](null); },
           }) : null,
@@ -1394,6 +1630,10 @@
           var dispose = tabs.register({
             id: TAB_ID,
             kind: TAB_KIND,
+            // 右侧栏视图跟随主会话切换；声明 keepMounted 后持有 retained tab 的
+            // view 不被 retire（SidebarSessionViews.prune），面板切回旧会话时
+            // 原样保留（state/滚动位置不丢），dock 内 tab 切换也不卸载。
+            keepMounted: true,
             title: function () { return '禅道'; },
             guide: [{
               id: TAB_KIND,
@@ -1478,6 +1718,16 @@
         bytesFromBase64: bytesFromBase64,
         collectDispatchContext: collectDispatchContext,
         dispatchToNewSession: dispatchToNewSession,
+        sessionLinkKey: sessionLinkKey,
+        readLinkMap: readLinkMap,
+        getSessionLink: getSessionLink,
+        saveSessionLink: saveSessionLink,
+        removeSessionLink: removeSessionLink,
+        sessionLinkView: sessionLinkView,
+        openSessionLink: openSessionLink,
+        followZentaoTabTo: followZentaoTabTo,
+        paneCache: paneCache,
+        fmtLinkAt: fmtLinkAt,
       };
       return module.exports;
     },

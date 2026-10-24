@@ -29,6 +29,13 @@ const window = { __ModuleLoader__: { load(def) { window.__def = def; } } };
 window.window = window;
 window.document = document;
 window.navigator = { clipboard: { writeText: () => Promise.resolve() } };
+// localStorage 替身（会话关联存储用）
+const lsBacking = new Map();
+window.localStorage = {
+  getItem: (k) => (lsBacking.has(k) ? lsBacking.get(k) : null),
+  setItem: (k, v) => lsBacking.set(k, String(v)),
+  removeItem: (k) => lsBacking.delete(k),
+};
 
 const React = {
   createElement: (type, props, ...children) => ({ type, props, children }),
@@ -290,6 +297,140 @@ created = null; selectedModel = null;
 dr = await mod._test.dispatchToNewSession('## 卡片', []);
 check('dispatchToNewSession 未选择时保持旧行为（继承当前 cwd、不动模型）',
   created && created.cwd === '/tmp/proj' && selectedModel === null && dr.mode === 'dispatched');
+
+// ── 会话关联：「处理」成功后卡片上显示关联会话，可一键跳转 ──
+const card123 = { kind: 'bug', id: 123, title: '登录页报错' };
+check('sessionLinkKey 带账号前缀 + kind-id（不同禅道账号互不混卡）',
+  mod._test.sessionLinkKey('acct1', card123) === 'acct1/bug-123');
+check('sessionLinkKey 无账号时用 anon 前缀', mod._test.sessionLinkKey(null, card123) === 'anon/bug-123');
+
+let link = mod._test.saveSessionLink('acct1', card123, 's-new');
+check('saveSessionLink 记录 sessionId 与处理时间', link.sessionId === 's-new' && typeof link.at === 'number');
+check('getSessionLink 读回关联', mod._test.getSessionLink('acct1', card123).sessionId === 's-new');
+mod._test.saveSessionLink('acct1', card123, 's-newer');
+check('同卡片再次处理 → 覆盖为最新会话', mod._test.getSessionLink('acct1', card123).sessionId === 's-newer');
+check('其它账号的卡片不受影响', mod._test.getSessionLink('acct2', card123) === null);
+mod._test.saveSessionLink('acct2', card123, 's-acct2');
+check('两个账号各自保留关联',
+  mod._test.getSessionLink('acct1', card123).sessionId === 's-newer'
+  && mod._test.getSessionLink('acct2', card123).sessionId === 's-acct2');
+mod._test.removeSessionLink('acct2', card123);
+check('removeSessionLink 只清对应账号',
+  mod._test.getSessionLink('acct2', card123) === null && mod._test.getSessionLink('acct1', card123) !== null);
+
+lsBacking.set('dsh-zentao-panel.links.v1', '{oops');
+check('存储损坏时读作空表不抛错', typeof mod._test.readLinkMap() === 'object');
+check('坏数据下关联读为空（自愈）', mod._test.getSessionLink('acct1', card123) === null);
+lsBacking.delete('dsh-zentao-panel.links.v1');
+
+check('fmtLinkAt 输出「M月d日 HH:mm」', /^\d+月\d+日 \d{2}:\d{2}$/.test(mod._test.fmtLinkAt(Date.now())));
+check('fmtLinkAt 无效时间为空串', mod._test.fmtLinkAt(NaN) === '' && mod._test.fmtLinkAt(undefined) === '');
+
+check('sessionLinkView 无关联 → null', mod._test.sessionLinkView(null, {}) === null);
+const vLive = mod._test.sessionLinkView(
+  { sessionId: 's-x', at: 1 }, { 's-x': { displayTitle: '处理 Bug #123', cwd: '/p' } });
+check('sessionLinkView 会话存在 → live + displayTitle', vLive.state === 'live' && vLive.title === '处理 Bug #123');
+const vDead = mod._test.sessionLinkView({ sessionId: 's-gone', at: 1 }, { 's-other': {} });
+check('sessionLinkView 会话已删（byId 非空无该行）→ dead', vDead.state === 'dead');
+check('sessionLinkView 无快照 / 列表未就绪 → unknown（显示处理时间）',
+  mod._test.sessionLinkView({ sessionId: 's', at: 1 }, null).state === 'unknown'
+  && mod._test.sessionLinkView({ sessionId: 's', at: 1 }, {}).state === 'unknown'
+  && mod._test.sessionLinkView({ sessionId: 's', at: 1 }, null).title.includes('已处理'));
+
+// openSessionLink：跳转 / 会话已删自动清 / 列表未就绪不误删 / 服务缺失降级
+let openedLink = null;
+ctx.get = function (name) {
+  if (name === 'sidebarRightTabs') return fakeTabs;
+  if (name === 'sessions') return {
+    list: { getSnapshot: () => ({ current: 's1', byId: { 's-newer': { displayTitle: '处理 Bug #123' }, s1: { cwd: '/tmp' } } }) },
+  };
+  if (name === 'uiWorkspace') return { openSession(id) { openedLink = id; } };
+  return undefined;
+};
+mod._test.saveSessionLink('acct1', card123, 's-newer');
+let rLink = mod._test.openSessionLink('acct1', card123);
+check('openSessionLink 跳到关联会话（uiWorkspace.openSession）', rLink.ok === true && openedLink === 's-newer');
+
+mod._test.saveSessionLink('acct1', card123, 's-gone');
+rLink = mod._test.openSessionLink('acct1', card123);
+check('会话已不存在 → 返回 missing 并清除关联',
+  rLink.ok === false && rLink.reason === 'missing' && mod._test.getSessionLink('acct1', card123) === null);
+
+mod._test.saveSessionLink('acct1', card123, 's-any');
+ctx.get = function (name) {
+  if (name === 'sessions') return { list: { getSnapshot: () => ({ current: null, byId: {} }) } };
+  if (name === 'uiWorkspace') return { openSession(id) { openedLink = id; } };
+  return undefined;
+};
+rLink = mod._test.openSessionLink('acct1', card123);
+check('列表未就绪（byId 空）时不误删关联、照常打开',
+  rLink.ok === true && openedLink === 's-any' && mod._test.getSessionLink('acct1', card123) !== null);
+
+ctx.get = function (name) {
+  if (name === 'sessions') return { list: { getSnapshot: () => ({ byId: { 's-any': {} } }) } };
+  return undefined;
+};
+rLink = mod._test.openSessionLink('acct1', card123);
+check('uiWorkspace 服务缺失 → unsupported（不清关联）',
+  rLink.ok === false && rLink.reason === 'unsupported' && mod._test.getSessionLink('acct1', card123) !== null);
+
+rLink = mod._test.openSessionLink('acct1', { kind: 'task', id: 999 });
+check('无关联卡片 → nolink', rLink.ok === false && rLink.reason === 'nolink');
+
+// ── 面板跟随：跳转/处理后把禅道 tab 开到目标（屏幕）会话的右侧栏 ──
+// DSH 右侧栏 per-session（store.bySession[sessionId]），不跟会被新会话空 sidebar 换掉
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+let srOpened = null;
+ctx.get = function (name) {
+  if (name === 'sidebarRightTabs') return fakeTabs;
+  if (name === 'sidebarRight') return {
+    openTab(kind, opts) { srOpened = { kind, opts }; },
+    tabsIn: () => [{ id: 't1', kind: 'guide' }],
+  };
+  return undefined;
+};
+mod._test.followZentaoTabTo('s-target');
+await sleep(10);
+check('followZentaoTabTo：目标会话无禅道 tab → openTab(replaceTab)（替换 guide）',
+  srOpened && srOpened.kind === 'zentao' && srOpened.opts && srOpened.opts.replaceTab === true);
+
+srOpened = null;
+ctx.get = function (name) {
+  if (name === 'sidebarRight') return {
+    openTab(kind, opts) { srOpened = { kind, opts }; },
+    tabsIn: () => [{ id: 't1', kind: 'context' }, { id: 't2', kind: 'zentao' }],
+  };
+  return undefined;
+};
+mod._test.followZentaoTabTo('s-target');
+await sleep(10);
+check('followZentaoTabTo：已有禅道 tab → 幂等 reveal（不带 replaceTab，不误关别的 tab）',
+  srOpened && srOpened.kind === 'zentao' && (!srOpened.opts || srOpened.opts.replaceTab === undefined));
+
+srOpened = null;
+ctx.get = function (name) { return name === 'sidebarRightTabs' ? fakeTabs : undefined; };
+mod._test.followZentaoTabTo('s-target');
+await sleep(10);
+check('followZentaoTabTo：无 sidebarRight 服务（旧版 DSH）不抛错', srOpened === null);
+
+// openSessionLink 跳转成功时顺带 follow（面板跟到目标会话）
+srOpened = null; openedLink = null;
+ctx.get = function (name) {
+  if (name === 'sessions') return {
+    list: { getSnapshot: () => ({ current: 's1', byId: { 's-live': { displayTitle: 'T' }, s1: { cwd: '/tmp' } } }) },
+  };
+  if (name === 'uiWorkspace') return { openSession(id) { openedLink = id; } };
+  if (name === 'sidebarRight') return {
+    openTab(kind, opts) { srOpened = { kind, opts }; },
+    tabsIn: () => [],
+  };
+  return undefined;
+};
+mod._test.saveSessionLink('acct1', card123, 's-live');
+rLink = mod._test.openSessionLink('acct1', card123);
+await sleep(10);
+check('openSessionLink 跳转成功后面板跟随（openSession + sidebarRight.openTab）',
+  rLink.ok === true && openedLink === 's-live' && srOpened && srOpened.kind === 'zentao');
 
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);
