@@ -1,5 +1,5 @@
 // client 半边免渲染测试：验证 bundle 能被 __ModuleLoader__ 加载、apply() 把
-//   sidebarRightTabs 类型（含引导卡片）+ sidebar.right.pane.tab(.title) 挂点都注册上。
+//   左侧栏全局面板（sidebar.panellist 图标行 + main keyed 面板，dsh-mnemon 同款）注册上。
 // 不依赖 DSH / 浏览器：用最小 window/document/React 替身执行真实 bundle。
 // 用法：node test/client.mjs
 import vm from 'node:vm';
@@ -46,7 +46,7 @@ const React = {
 };
 
 const sandbox = {
-  window, document, console, setTimeout, clearTimeout, Symbol, Object, Array, String, Number, Date, JSON, Math, Promise,
+  window, document, console, setTimeout, clearTimeout, setInterval, clearInterval, Symbol, Object, Array, String, Number, Date, JSON, Math, Promise,
   Event: class Event {}, HTMLTextAreaElement: class HTMLTextAreaElement {},
   // 真实图片附件管线用到的 Web API（Node vm 上下文里没有，需要显式提供）
   atob: (s) => Buffer.from(String(s), 'base64').toString('binary'),
@@ -68,59 +68,34 @@ check('bundle id = dsh-zentao-panel', window.__def && window.__def.id === 'dsh-z
 const mod = window.__def.factory((name) => (name === 'react' ? React : undefined));
 
 // ── 假 ctx / 服务 ─────────────────────────────────────────────
-const tabDefs = [];
 const slotRegs = [];
 const slotInjects = [];
-const injectCalls = [];
 const fakeSlots = {
   inject(name, cb) { slotInjects.push(name); return cb(); },
   register(opts, comp) { slotRegs.push({ opts, comp }); return () => {}; },
 };
-const fakeTabs = {
-  register(def) { tabDefs.push(def); return () => {}; },
-};
-const effects = [];
-const scope = {
-  slots: fakeSlots,
-  sidebarRightTabs: fakeTabs,
-  effect(fn, label) { effects.push(label); return fn(); },
-};
 const ctx = {
   slots: fakeSlots,
   connection: { rpc: { call: async () => ({ ok: true, value: {} }) } },
-  get(name) { return name === 'sidebarRightTabs' ? fakeTabs : undefined; },
-  inject(deps, cb) { injectCalls.push(deps); cb(scope); return () => {}; },
+  get(name) { return undefined; },
 };
 
 mod.apply(ctx);
 
 check('apply 通知 CSS 已注入', appended.length === 1 && appended[0].attrs['data-dsh-zentao-panel'] === '1');
-check('ctx.inject 请求 sidebarRightTabs', injectCalls.some((d) => d.includes('sidebarRightTabs')));
 
-// ── 右侧栏 tab 类型 / 引导卡片 ──────────────────────────────────
-const def = tabDefs[0];
-check('注册了一个右侧栏 tab 类型', tabDefs.length === 1);
-check('tab id = dsh-zentao-panel', def && def.id === 'dsh-zentao-panel');
-check('tab kind = zentao', def && def.kind === 'zentao');
-check('tab title() = 禅道', def && def.title() === '禅道');
-const guide = def && def.guide && def.guide[0];
-check('引导卡片存在', Boolean(guide));
-check('卡片标题 = 禅道', guide && guide.title() === '禅道');
-check('卡片描述非空', guide && typeof guide.description() === 'string' && guide.description().length > 0, guide && guide.description());
-check('卡片带图标组件', guide && typeof guide.icon === 'function');
-check('卡片排列在「上下文」(order 20) 之后', guide && guide.order > 20);
-check('tab 类型注册挂在 effect 上（可随插件卸载）', effects.some((l) => String(l).includes('tab type')));
-
-// ── tab body / title 挂点 ─────────────────────────────────────
-const bodyReg = slotRegs.find((r) => r.opts.name === 'sidebar.right.pane.tab');
-const titleReg = slotRegs.find((r) => r.opts.name === 'sidebar.right.pane.tab.title');
-check('slot: sidebar.right.pane.tab 已注册', Boolean(bodyReg));
-check('slot: sidebar.right.pane.tab.title 已注册', Boolean(titleReg));
-check('两个挂点 key 用 tab 类型 id（sidebar-right 的 entryKey 契约）',
-  bodyReg && titleReg && bodyReg.opts.key === 'dsh-zentao-panel' && titleReg.opts.key === 'dsh-zentao-panel');
-check('挂点通过 slots.inject 注册（keyed slot 契约）',
-  slotInjects.includes('sidebar.right.pane.tab') && slotInjects.includes('sidebar.right.pane.tab.title'));
-check('slot 组件可实例化', typeof bodyReg.comp === 'function' && typeof titleReg.comp === 'function');
+// ── 左侧栏全局面板（main keyed slot + sidebar.panellist 图标行）──
+const mainReg = slotRegs.find((r) => r.opts.name === 'main');
+const iconReg = slotRegs.find((r) => r.opts.name === 'sidebar.panellist');
+check('slot: main 已声明注入', slotInjects.includes('main'));
+check('slot: sidebar.panellist 已声明注入', slotInjects.includes('sidebar.panellist'));
+check('main 面板已注册，key = zentao（activePanelId 寻址）', mainReg && mainReg.opts.key === 'zentao');
+check('左侧栏图标行已注册，id = zentao（与 main key 同值，sidebar 契约）',
+  iconReg && iconReg.opts.id === 'zentao');
+check('图标 label() = 禅道（展开文字/无障碍名/收起 tooltip）', iconReg && iconReg.opts.label() === '禅道');
+check('图标排列在 dsh-mnemon（order 30 记忆 / 31 技能）之后', iconReg && iconReg.opts.order > 31);
+check('面板/图标组件可实例化', typeof mainReg.comp === 'function' && typeof iconReg.comp === 'function');
+check('左侧栏入口挂上后不挂悬浮兜底（shell.overlay）', !slotInjects.includes('shell.overlay'));
 
 // ── 卡片 → Markdown（精简模板：标题 + 描述/重现步骤，图片走真实附件）──
 const md = mod.cardToMarkdown({
@@ -177,7 +152,6 @@ check('旧版 DSH 无 createDrafts 时降级不报错', attOld.ok === false && a
 
 // insertToCurrentChat：服务级 setDraft + 图片附件（经 ctx.get 懒查找 sessions/conversation）
 ctx.get = function (name) {
-  if (name === 'sidebarRightTabs') return fakeTabs;
   if (name === 'sessions') return {
     list: { getSnapshot: () => ({ current: 's1', byId: { s1: { cwd: '/tmp' } } }) },
     scope: () => ({}),
@@ -191,7 +165,7 @@ check('insertToCurrentChat 服务级插入 + 图片附件',
 
 // ── 「处理」弹层：工作区/模型上下文收集（懒查找，缺服务不抛错）──
 // 先回到「无 sessions/workspaces/remote」的环境验证兜底
-ctx.get = function (name) { return name === 'sidebarRightTabs' ? fakeTabs : undefined; };
+ctx.get = function (name) { return undefined; };
 const bare = await mod._test.collectDispatchContext();
 check('collectDispatchContext 服务缺失时返回空结构且不抛错',
   bare.workspaces.length === 0 && bare.modelGroups.length === 0
@@ -213,7 +187,6 @@ const fakeCatalog = {
   },
 };
 ctx.get = function (name) {
-  if (name === 'sidebarRightTabs') return fakeTabs;
   if (name === 'sessions') return {
     list: { getSnapshot: () => ({ current: 's1', byId: { s1: { cwd: '/tmp/proj' } } }) },
     scope: () => ({}),
@@ -252,14 +225,16 @@ check('mock 复现真机形态：ctx.get("remote") 裸实例上没有 .session �
   ctx.get('remote').session === undefined);
 
 // ── 「处理」下发：create 传所选工作区；selectModel 按会话设置所选模型/思考强度 ──
-let created = null, opened = null, selectedModel = null;
+// 2026-10-24 用户要求「处理后不自动跳转新会话」：dispatch 只 retain（后台保活供
+// facade 填草稿/发送），绝不调 uiWorkspace.openSession（跳转来源，open 被调用即违规）
+let created = null, opened = null, retained = null, selectedModel = null;
 let selectModelResult = { ok: true, value: { selected: {} } };
 ctx.get = function (name) {
-  if (name === 'sidebarRightTabs') return fakeTabs;
   if (name === 'sessions') return {
     list: { getSnapshot: () => ({ current: 's1', byId: { s1: { cwd: '/tmp/proj' } } }) },
     scope: () => ({}),
     create(opts) { created = opts; return 's-new'; },
+    retain(id, opts) { retained = { id, opts }; return { sessionId: id, release() {} }; },
   };
   if (name === 'conversation') return fakeConversation;
   if (name === 'uiWorkspace') return { openSession(id) { opened = id; } };
@@ -279,8 +254,10 @@ check('dispatchToNewSession 传所选工作区（不掺 cwd）',
 check('dispatchToNewSession 按新会话 selectModel（provider/model/思考强度）',
   selectedModel && selectedModel.sessionId === 's-new' && selectedModel.provider === 'custom'
   && selectedModel.model === 'glm-4.6' && selectedModel.reasoningEffort === 'mid');
+check('dispatchToNewSession 不跳转：只 retain（zentao-panel 来源）不调 uiWorkspace.openSession',
+  retained && retained.id === 's-new' && retained.opts.source === 'zentao-panel' && opened === null);
 check('dispatchToNewSession 模型设置成功后自动发送',
-  opened === 's-new' && dr.ok && dr.mode === 'dispatched' && dr.sessionId === 's-new' && fakeFacade.draft === '## 卡片');
+  opened === null && dr.ok && dr.mode === 'dispatched' && dr.sessionId === 's-new' && fakeFacade.draft === '## 卡片');
 
 selectModelResult = { ok: false, error: { code: 'session/model-unavailable', message: 'model not routable' } };
 selectedModel = null;
@@ -288,6 +265,25 @@ dr = await mod._test.dispatchToNewSession('## 卡片', [], { model: { provider: 
 check('dispatchToNewSession 模型被拒时填草稿但不自动发送',
   selectedModel && !('reasoningEffort' in selectedModel)
   && dr.ok && dr.mode === 'draft' && dr.message.includes('模型设置失败') && fakeFacade.draft === '## 卡片');
+
+// conversation 服务缺失（facade 拿不到）→ 不自动发，返回 ok:false 让上层降级插入当前会话，
+// 且必须释放后台 retain（新会话是空的，不能留悬挂连接）
+let released = 0;
+const savedGet = ctx.get;
+ctx.get = function (name) {
+  if (name === 'sessions') return {
+    list: { getSnapshot: () => ({ current: 's1', byId: { s1: { cwd: '/tmp/proj' } } }) },
+    create() { return 's-empty'; },
+    retain(id) { return { sessionId: id, release() { released++; } }; },
+    scope: () => ({}),
+  };
+  return undefined; // conversation / remote.session 都没有
+};
+dr = await mod._test.dispatchToNewSession('## 卡片', [], {});
+check('conversation 服务缺失 → 不自动发、返回 unavailable 供上层降级当前会话',
+  dr && dr.ok === false && dr.mode === 'unavailable' && dr.sessionId === 's-empty');
+check('降级路径立即释放后台 retain（不留悬挂连接）', released === 1);
+ctx.get = savedGet;
 
 dr = await mod._test.dispatchToNewSession('## 卡片', [], { cwd: '/other/dir' });
 check('dispatchToNewSession 选「继承目录」时只传 cwd',
@@ -340,7 +336,6 @@ check('sessionLinkView 无快照 / 列表未就绪 → unknown（显示处理时
 // openSessionLink：跳转 / 会话已删自动清 / 列表未就绪不误删 / 服务缺失降级
 let openedLink = null;
 ctx.get = function (name) {
-  if (name === 'sidebarRightTabs') return fakeTabs;
   if (name === 'sessions') return {
     list: { getSnapshot: () => ({ current: 's1', byId: { 's-newer': { displayTitle: '处理 Bug #123' }, s1: { cwd: '/tmp' } } }) },
   };
@@ -377,60 +372,23 @@ check('uiWorkspace 服务缺失 → unsupported（不清关联）',
 rLink = mod._test.openSessionLink('acct1', { kind: 'task', id: 999 });
 check('无关联卡片 → nolink', rLink.ok === false && rLink.reason === 'nolink');
 
-// ── 面板跟随：跳转/处理后把禅道 tab 开到目标（屏幕）会话的右侧栏 ──
-// DSH 右侧栏 per-session（store.bySession[sessionId]），不跟会被新会话空 sidebar 换掉
+// ── 面板跳转：openSessionLink 成功即 uiWorkspace.openSession ──
+// （左侧栏全局面板入口下，openSession 内部 replaceMain("reveal") → selectPanel(null)
+//   自动切回会话视图，插件无需再跟面板——原右侧栏 per-session 的 follow 逻辑已删）
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-let srOpened = null;
-ctx.get = function (name) {
-  if (name === 'sidebarRightTabs') return fakeTabs;
-  if (name === 'sidebarRight') return {
-    openTab(kind, opts) { srOpened = { kind, opts }; },
-    tabsIn: () => [{ id: 't1', kind: 'guide' }],
-  };
-  return undefined;
-};
-mod._test.followZentaoTabTo('s-target');
-await sleep(10);
-check('followZentaoTabTo：目标会话无禅道 tab → openTab(replaceTab)（替换 guide）',
-  srOpened && srOpened.kind === 'zentao' && srOpened.opts && srOpened.opts.replaceTab === true);
-
-srOpened = null;
-ctx.get = function (name) {
-  if (name === 'sidebarRight') return {
-    openTab(kind, opts) { srOpened = { kind, opts }; },
-    tabsIn: () => [{ id: 't1', kind: 'context' }, { id: 't2', kind: 'zentao' }],
-  };
-  return undefined;
-};
-mod._test.followZentaoTabTo('s-target');
-await sleep(10);
-check('followZentaoTabTo：已有禅道 tab → 幂等 reveal（不带 replaceTab，不误关别的 tab）',
-  srOpened && srOpened.kind === 'zentao' && (!srOpened.opts || srOpened.opts.replaceTab === undefined));
-
-srOpened = null;
-ctx.get = function (name) { return name === 'sidebarRightTabs' ? fakeTabs : undefined; };
-mod._test.followZentaoTabTo('s-target');
-await sleep(10);
-check('followZentaoTabTo：无 sidebarRight 服务（旧版 DSH）不抛错', srOpened === null);
-
-// openSessionLink 跳转成功时顺带 follow（面板跟到目标会话）
-srOpened = null; openedLink = null;
+openedLink = null;
 ctx.get = function (name) {
   if (name === 'sessions') return {
     list: { getSnapshot: () => ({ current: 's1', byId: { 's-live': { displayTitle: 'T' }, s1: { cwd: '/tmp' } } }) },
   };
   if (name === 'uiWorkspace') return { openSession(id) { openedLink = id; } };
-  if (name === 'sidebarRight') return {
-    openTab(kind, opts) { srOpened = { kind, opts }; },
-    tabsIn: () => [],
-  };
   return undefined;
 };
 mod._test.saveSessionLink('acct1', card123, 's-live');
 rLink = mod._test.openSessionLink('acct1', card123);
 await sleep(10);
-check('openSessionLink 跳转成功后面板跟随（openSession + sidebarRight.openTab）',
-  rLink.ok === true && openedLink === 's-live' && srOpened && srOpened.kind === 'zentao');
+check('openSessionLink 跳转成功（uiWorkspace.openSession）',
+  rLink.ok === true && openedLink === 's-live');
 
 // ── 「处理」时序优化：图片预取与建会话并行；切视图后草稿立即写入；模型/附件互不阻塞 ──
 const evLog = [];
@@ -454,11 +412,11 @@ ctx.connection.rpc.call = async (channel, endpoint) => {
   return { ok: false, error: { message: 'unexpected ' + endpoint } };
 };
 ctx.get = function (name) {
-  if (name === 'sidebarRightTabs') return fakeTabs;
   if (name === 'sessions') return {
     list: { getSnapshot: () => ({ current: 's1', byId: { s1: { cwd: '/tmp' } } }) },
     scope: () => ({}),
     create() { order.push('create'); return 's-xy'; },
+    retain(id) { order.push('retain'); return { sessionId: id, release() {} }; },
   };
   if (name === 'conversation') return evConversation;
   if (name === 'uiWorkspace') return { openSession() { order.push('open'); } };
@@ -472,8 +430,9 @@ const drSlow = mod._test.dispatchToNewSession('## 快', imgs2, { model: { provid
 await sleep(8);
 check('图片字节预取在 sessions.create 之前发起（与建会话并行）',
   order.indexOf('zentao.image') !== -1 && order.indexOf('zentao.image') < order.indexOf('create'));
-check('视图切换后文本草稿立即写入（setDraft 先于附件注册，不空白等待）',
-  evLog.indexOf('setDraft') !== -1 && evLog.indexOf('setDraft') < evLog.indexOf('drafts'));
+check('不跳转：retain（非 openSession）后文本草稿立即写入（setDraft 先于附件注册）',
+  order.indexOf('retain') !== -1 && order.indexOf('open') === -1
+  && evLog.indexOf('setDraft') !== -1 && evLog.indexOf('setDraft') < evLog.indexOf('drafts'));
 check('selectModel 未完成时附件照常注册（并行不互等）',
   evLog.indexOf('drafts') !== -1 && evLog.indexOf('attach') !== -1 && slowSelectResolve !== null);
 slowSelectResolve({ ok: true, value: { selected: {} } });
@@ -488,6 +447,147 @@ const attPre = await mod._test.attachImagesToDraft(imgs2, { sessionId: 's', faca
 const rpcAfter = order.filter((e) => e === 'zentao.image').length;
 check('attachImagesToDraft 带预取结果时跳过 zentao.image RPC',
   attPre.ok === true && attPre.count === 2 && rpcAfter === rpcBefore);
+
+// ── M6 处理中任务的实时状态：单面板（办公室面板已按用户要求移除）+ 常驻监控 ──
+const allMainRegs = slotRegs.filter((r) => r.opts.name === 'main');
+const allIconRegs = slotRegs.filter((r) => r.opts.name === 'sidebar.panellist');
+check('左侧栏只注册禅道一个面板（办公室面板已移除）',
+  allMainRegs.length === 1 && allIconRegs.length === 1
+  && allMainRegs[0].opts.key === 'zentao' && allIconRegs[0].opts.id === 'zentao');
+
+// link key 解析（监控从 key 还原账号/类型/id，旧值结构没有卡片信息也能工作）
+check('parseLinkKey 解析账号前缀 + kind + 数字 id',
+  JSON.stringify(mod._test.parseLinkKey('acct1/bug-123')) === JSON.stringify({ activeId: 'acct1', kind: 'bug', id: 123 }));
+check('parseLinkKey anon 前缀也可解析', mod._test.parseLinkKey('anon/task-7').kind === 'task');
+check('parseLinkKey 坏 key → null',
+  mod._test.parseLinkKey('随便') === null && mod._test.parseLinkKey('') === null && mod._test.parseLinkKey('a/feat-1') === null);
+
+// saveSessionLink 值结构（M6：补 kind/id/title 供提醒文案取名）
+lsBacking.clear();
+const savedLink = mod._test.saveSessionLink('acct1', { kind: 'bug', id: 123, title: '登录页报错' }, 's-live');
+check('saveSessionLink 值里带卡片 kind/id/title',
+  savedLink.kind === 'bug' && savedLink.id === 123 && savedLink.title === '登录页报错');
+
+// 活性推导：ask > done > running；idle / 会话已删 → null（「已处理」由 chip 表达）
+const D = mod._test.deriveLiveState;
+check('deriveLiveState：决策最优先（ask 盖过 done/running）',
+  D({ running: true, pendingInteraction: 'question', completionUnread: true }, true) === 'ask');
+check('deriveLiveState：完成未读 → done',
+  D({ running: false, pendingInteraction: null, completionUnread: true }, true) === 'done');
+check('deriveLiveState：running → running（处理中）',
+  D({ running: true, pendingInteraction: null, completionUnread: false }, true) === 'running');
+check('deriveLiveState：idle / 无状态 / 会话已删 → null（不叠徽标）',
+  D({ running: false, pendingInteraction: null, completionUnread: false }, true) === null
+  && D(null, true) === null && D({ running: true }, false) === null);
+
+// 边沿事件：同帧 done+decision 只报 decision（行动需求已覆盖）
+const E = (p, n) => mod._test.watchEdges(p, n);
+check('watchEdges：完成未读置位 → done',
+  JSON.stringify(E({ running: true, pendingInteraction: null, completionUnread: false },
+    { running: false, pendingInteraction: null, completionUnread: true })) === '["done"]');
+check('watchEdges：出现决策（question）→ decision',
+  E({ running: true, pendingInteraction: null, completionUnread: false },
+    { running: true, pendingInteraction: 'question', completionUnread: false })[0] === 'decision');
+check('watchEdges：决策类型变化（question→approval）也算新决策',
+  E({ running: true, pendingInteraction: 'question', completionUnread: false },
+    { running: true, pendingInteraction: 'approval', completionUnread: false }).length === 1);
+check('watchEdges：done+decision 同帧 → 只 decision',
+  E({ running: true, pendingInteraction: null, completionUnread: false },
+    { running: false, pendingInteraction: 'plan-review', completionUnread: true }).join() === 'decision');
+check('watchEdges：无变化 / 完成未读被清除（看过了）→ 不产生事件',
+  E({ running: true, pendingInteraction: null, completionUnread: false },
+    { running: true, pendingInteraction: null, completionUnread: false }).length === 0
+  && E({ running: false, pendingInteraction: null, completionUnread: true },
+    { running: false, pendingInteraction: null, completionUnread: false }).length === 0);
+
+// 提醒文案：中性文案（无角色梗），区分完成/决策与交互类型
+const evDone = { type: 'done', sessionId: 's-live', interaction: null, entry: { kind: 'bug', id: 123, title: '登录页报错' } };
+const evAsk = { type: 'decision', sessionId: 's-live', interaction: 'question', entry: { kind: 'bug', id: 123, title: '登录页报错' } };
+const ttDone = mod._test.watchToastText(evDone);
+const ttAsk = mod._test.watchToastText(evAsk);
+check('watchToastText（完成）：标题含「任务完成」、正文含卡标识',
+  ttDone.title.includes('任务完成') && ttDone.body.includes('#123') && ttDone.body.includes('登录页报错'));
+check('watchToastText（决策）：区分交互类型（提问/审批/方案确认）',
+  ttAsk.title.includes('决策') && ttAsk.body.includes('提问')
+  && mod._test.watchToastText({ ...evAsk, interaction: 'approval' }).body.includes('审批')
+  && mod._test.watchToastText({ ...evAsk, interaction: 'plan-review' }).body.includes('方案确认'));
+
+// 监控集成：绑定 fake 服务 → 活性快照 → 边沿驱动状态翻转 → 卡片查询
+let statusMap = new Map([
+  ['s-live', { running: true, pendingInteraction: null, completionUnread: false }],
+  ['s-task', { running: true, pendingInteraction: null, completionUnread: false }],
+]);
+const statusCbs = [];
+ctx.get = function (name) {
+  if (name === 'uiSession') return {
+    sessionStatus: {
+      getSnapshot: () => statusMap,
+      subscribe(cb) { statusCbs.push(cb); return () => {}; },
+    },
+  };
+  if (name === 'sessions') return {
+    list: {
+      getSnapshot: () => ({ byId: { 's-live': { displayTitle: '会话A' }, 's-task': { displayTitle: '会话B' } } }),
+      subscribe() { return () => {}; },
+    },
+  };
+  if (name === 'uiWorkspace') return { openSession() {} };
+  return undefined;
+};
+mod._test.watchTryBind();
+check('监控绑定 uiSession.sessionStatus（订阅生效）', mod._test.watch.bound === true && statusCbs.length >= 1);
+
+mod._test.paneCache.status = { activeId: 'acct1' };
+mod._test.saveSessionLink('acct1', { kind: 'task', id: 55, title: '写周报' }, 's-task');
+mod._test.watchEval();
+let wsnap = mod._test.watchGetSnapshot();
+check('活性快照：两个处理中的会话都是 running',
+  wsnap.ready === true && wsnap.states['s-live'] === 'running' && wsnap.states['s-task'] === 'running');
+check('watchStateForCard：已关联卡片查到 running',
+  mod._test.watchStateForCard('acct1', { kind: 'bug', id: 123 }) === 'running');
+check('watchStateForCard：未关联卡片 → null',
+  mod._test.watchStateForCard('acct1', { kind: 'bug', id: 999 }) === null);
+
+// 多账号：其它账号的 link 不进当前监控
+mod._test.saveSessionLink('acct2', { kind: 'bug', id: 9, title: '别人的' }, 's-task');
+mod._test.watchEval();
+wsnap = mod._test.watchGetSnapshot();
+check('切换账号视角：只看当前激活账号的关联（acct2 不混入）',
+  wsnap.states['s-task'] === 'running' && mod._test.watchStateForCard('acct2', { kind: 'bug', id: 9 }) === null);
+
+// 状态边沿：后台跑完 → done；agent 提问 → ask；看过+idle → null
+statusMap.set('s-live', { running: false, pendingInteraction: null, completionUnread: true });
+statusCbs.forEach((cb) => cb());
+wsnap = mod._test.watchGetSnapshot();
+check('后台跑完 → 卡片活性变 done（绿色对勾徽标）',
+  wsnap.states['s-live'] === 'done' && mod._test.watchStateForCard('acct1', { kind: 'bug', id: 123 }) === 'done');
+statusMap.set('s-live', { running: false, pendingInteraction: 'question', completionUnread: false });
+statusCbs.forEach((cb) => cb());
+wsnap = mod._test.watchGetSnapshot();
+check('agent 提问 → 卡片活性变 ask（琥珀呼吸徽标）',
+  wsnap.states['s-live'] === 'ask' && mod._test.watchStateForCard('acct1', { kind: 'bug', id: 123 }) === 'ask');
+statusMap.set('s-live', { running: false, pendingInteraction: null, completionUnread: false });
+statusCbs.forEach((cb) => cb());
+wsnap = mod._test.watchGetSnapshot();
+check('看过且 idle → 活性归零（只剩会话 chip，不叠徽标）',
+  wsnap.states['s-live'] === null && mod._test.watchStateForCard('acct1', { kind: 'bug', id: 123 }) === null);
+
+// 会话删除 → 活性清零（chip 侧由 sessionLinkView 判 dead）
+ctx.get = function (name) {
+  if (name === 'uiSession') return {
+    sessionStatus: { getSnapshot: () => statusMap, subscribe(cb) { return () => {}; } },
+  };
+  if (name === 'sessions') return {
+    list: {
+      getSnapshot: () => ({ byId: { 's-live': { displayTitle: '会话A' } } }), // s-task 没了
+      subscribe() { return () => {}; },
+    },
+  };
+  return undefined;
+};
+mod._test.watchEval();
+wsnap = mod._test.watchGetSnapshot();
+check('关联会话被删 → 活性清零（不亮徽标）', wsnap.states['s-task'] === null);
 
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);

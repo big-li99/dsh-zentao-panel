@@ -1,7 +1,10 @@
-// dsh-zentao-panel — client 半边（右侧栏 tab + 起始页引导卡片）
+// dsh-zentao-panel — client 半边（左侧栏全局面板）
 //
-// 入口形态参照 dsh-context 的「上下文」：注册到右侧栏的 sidebarRightTabs，
-// 在「开始」引导页里呈现为一张卡片，点开后在右侧栏里作为 tab 打开（可停靠/浮窗/分屏）。
+// 入口形态参照 dsh-mnemon：在左侧栏的 sidebar.panellist 列表里注册一个图标行，
+// 同 id 在根作用域 main keyed slot 里注册面板组件——点图标 = ctx.layout.selectPanel(id)，
+// 禅道面板占据整个主区域（与「插件管理」页同一机制）。「处理」/会话 chip 跳转用的
+// uiWorkspace.openSession 内部走 replaceMain(...,"reveal") → selectPanel(null)，
+// 会自动切回会话视图，无需插件介入。
 //
 // 主题：DSH 用 body[data-ds-dark-theme] 切暗色，颜色全部来自 --dsw-alias-* 语义 token，
 // 所以日间/夜间无需任何 JS 判断，自动跟随。
@@ -28,19 +31,30 @@
       var useState = React.useState, useEffect = React.useEffect, useMemo = React.useMemo, useCallback = React.useCallback;
 
       var CHANNEL = '/dsh-zentao-panel';
-      var TAB_ID = 'dsh-zentao-panel';
-      var TAB_KIND = 'zentao';
+      // main keyed slot 的 key 与 sidebar.panellist 的 id 必须同值：
+      // 选中态按这个 id 寻址 main 注册项（dsh-client-ui-sidebar README 契约）
+      var PANEL_ID = 'zentao';
+      var TAB_ID = 'dsh-zentao-panel'; // 悬浮兜底入口的 slot id
 
       // ───────────────────────── 样式 ─────────────────────────
       // 只用 DSH 的语义 token：bg-layer-1/2、border-l1..l4、label-primary/secondary/tertiary、
       // state-error/success/warn/business、interactive-bg-hover(-solid)、toast-bg… 全部随主题翻转。
       var CSS = [
-        // 根容器：右侧栏 tab body 是 flex 列，自身不画背景，吃面板底色
-        '.ztp-root{height:100%;min-height:0;display:flex;flex-direction:column;flex:auto;color:var(--dsw-alias-label-primary);font-size:var(--dsh-content-font-size-secondary,13px);line-height:1.5;}',
+        // 主面板容器（main slot 全局面板）：macOS 桌面让位隐藏交通灯（--dsh-frame-top-clearance，
+        // Web 上为 0），顶部拖拽带承担窗口拖拽；内容限宽居中，超宽窗口里列表不至于拉满
+        '.ztp-main{position:relative;height:100%;min-height:0;display:flex;flex-direction:column;flex:auto;box-sizing:border-box;padding-top:var(--dsh-frame-top-clearance,0px);}',
+        '.ztp-dragband{position:absolute;left:0;right:0;top:0;height:var(--dsh-frame-top-clearance,0px);z-index:3;}',
+        // 面板根容器：不画背景吃主区域底色；relative 作为账号弹层（ztp-acct-pop）的定位基准
+        '.ztp-root{position:relative;height:100%;min-height:0;display:flex;flex-direction:column;flex:auto;color:var(--dsw-alias-label-primary);font-size:var(--dsh-content-font-size-secondary,13px);line-height:1.5;}',
 
-        // 头部（38px，与 DSH 各面板保持一致）
-        '.ztp-head{flex:none;display:flex;align-items:center;gap:2px;height:38px;padding:0 6px 0 10px;border-bottom:.5px solid var(--dsw-alias-border-l3);box-sizing:border-box;}',
-        '.ztp-head-title{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);padding-left:4px;}',
+        // mast（主面板标题行）：图标 + 「禅道」+ 实例主机名 + 账号/工具，对齐 dsh-mnemon 的页头形态
+        '.ztp-mast{flex:none;display:flex;align-items:center;gap:8px;height:46px;padding:0 12px 0 16px;box-sizing:border-box;}',
+        '.ztp-mast-mark{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:var(--dsw-radius-sm);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent);color:var(--dsw-alias-state-business-primary);flex:none;}',
+        '.ztp-mast-title{font-size:14px;font-weight:600;color:var(--dsw-alias-label-primary);letter-spacing:.2px;}',
+        '.ztp-mast-sub{font-size:11.5px;color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}',
+
+        // 头部（分段 tab 行）
+        '.ztp-head{flex:none;display:flex;align-items:center;gap:2px;min-height:38px;padding:0 8px 0 10px;border-bottom:.5px solid var(--dsw-alias-border-l3);box-sizing:border-box;}',
         '.ztp-seg{display:flex;align-items:center;gap:2px;min-width:0;overflow-x:auto;scrollbar-width:none;}',
         '.ztp-seg::-webkit-scrollbar{display:none;}',
         '.ztp-seg-btn{appearance:none;border:0;background:transparent;font:inherit;font-size:12.5px;line-height:1;color:var(--dsw-alias-label-secondary);height:26px;padding:0 10px;border-radius:999px;display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;}',
@@ -57,20 +71,39 @@
         '.ztp-spin{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--dsw-alias-border-l4);border-top-color:var(--dsw-alias-label-secondary);animation:ztp-rot .8s linear infinite;box-sizing:border-box;}',
         '@keyframes ztp-rot{to{transform:rotate(360deg)}}',
 
-        // 滚动区
-        '.ztp-scroll{flex:1;min-height:0;overflow:auto;scrollbar-gutter:stable;padding:8px 10px 14px;box-sizing:border-box;}',
+        // 主体：左列表 / 右详情 双栏（宽面板）；窄容器（悬浮兜底 <720px）详情覆盖列表
+        '.ztp-body{flex:1;min-height:0;display:flex;align-items:stretch;}',
+        '.ztp-list-col{flex:1.2;min-width:0;overflow:auto;scrollbar-gutter:stable;padding:14px 16px 20px;box-sizing:border-box;border-right:.5px solid var(--dsw-alias-border-l3);}',
+        '.ztp-detail-col{flex:1;min-width:0;overflow:auto;scrollbar-gutter:stable;padding:14px 16px 20px;box-sizing:border-box;}',
+        '.ztp-dph{padding:56px 16px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px;line-height:1.8;}',
+        '.ztp-dph svg{width:28px;height:28px;opacity:.5;display:block;margin:0 auto 8px;}',
+        '.ztp-detail-col .ztp-back{display:none;}', // 双栏下详情常驻，无需返回
+        '@media (max-width:719px){',
+        '  .ztp-body{position:relative;display:block;}',
+        '  .ztp-list-col{border-right:0;height:100%;}',
+        '  .ztp-detail-col{position:absolute;inset:0;z-index:5;display:none;background:var(--dsw-alias-bg-base,transparent);}',
+        '  .ztp-detail-col.has{display:block;}',
+        '  .ztp-detail-col .ztp-back{display:inline-flex;}', // 覆盖模式下可返回列表
+        '}',
 
         // 卡片
-        '.ztp-card{position:relative;display:block;width:100%;box-sizing:border-box;text-align:left;font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);padding:10px 12px 10px 14px;margin:0 0 8px;cursor:pointer;transition:background .12s ease,border-color .12s ease;}',
+        '.ztp-card{position:relative;display:block;width:100%;box-sizing:border-box;text-align:left;font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);padding:11px 14px 11px 16px;margin:0 0 10px;cursor:pointer;transition:background .12s ease,border-color .12s ease;}',
         '.ztp-card:hover{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l4);}',
         '.ztp-card:active{background:var(--dsw-alias-interactive-bg-active);}',
+        '.ztp-card.on{background:var(--dsw-alias-interactive-bg-hover);border-color:color-mix(in srgb,var(--ztp-c,var(--dsw-alias-state-business-primary)) 55%,var(--dsw-alias-border-l3));}',
+        '.ztp-card.on:before{opacity:1;}',
         '.ztp-card:before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:2px;border-radius:0 2px 2px 0;background:var(--ztp-c,transparent);opacity:.7;}',
         '.ztp-k-task{--ztp-c:var(--dsw-alias-state-business-primary);}',
         '.ztp-k-bug{--ztp-c:var(--dsw-alias-state-error-primary);}',
         '.ztp-k-story{--ztp-c:var(--dsw-alias-state-success-primary);}',
         '.ztp-row{display:flex;align-items:center;gap:6px;min-width:0;}',
+        // 顶行：tag + #id 左、状态/优先级/截止右（窄容器自动换行，右贴不变）
+        '.ztp-top{display:flex;align-items:center;gap:4px 8px;min-width:0;flex-wrap:wrap;}',
+        '.ztp-top-meta{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:4px 10px;font-size:11.5px;color:var(--dsw-alias-label-tertiary);min-width:0;}',
         '.ztp-id{font-size:11px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;flex:none;}',
-        '.ztp-card-title{margin-top:4px;font-size:13px;line-height:1.45;color:var(--dsw-alias-label-primary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;}',
+        // 详情页元信息行
+        '.ztp-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin-top:8px;font-size:11.5px;color:var(--dsw-alias-label-tertiary);}',
+        '.ztp-card-title{margin-top:5px;font-size:13.5px;line-height:1.45;color:var(--dsw-alias-label-primary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;}',
 
         // 类型标签
         '.ztp-tag{display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;font-size:11px;font-weight:500;flex:none;line-height:18px;}',
@@ -79,7 +112,6 @@
         '.ztp-tag.story{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 14%,transparent);}',
 
         // 元信息
-        '.ztp-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin-top:6px;font-size:11.5px;color:var(--dsw-alias-label-tertiary);}',
         '.ztp-st{display:inline-flex;align-items:center;gap:5px;color:var(--dsw-alias-label-secondary);}',
         '.ztp-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none;}',
         '.ztp-st-active{color:var(--dsw-alias-state-business-primary);}',
@@ -93,7 +125,7 @@
 
         // 按钮
         '.ztp-acts{display:flex;justify-content:flex-end;gap:6px;margin-top:8px;}',
-        '.ztp-btn{appearance:none;font:inherit;font-size:12px;line-height:1;height:26px;padding:0 10px;border-radius:var(--dsw-radius-sm);border:.5px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;box-sizing:border-box;}',
+        '.ztp-btn{appearance:none;font:inherit;font-size:12px;line-height:1;height:28px;padding:0 12px;border-radius:var(--dsw-radius-sm);border:.5px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;box-sizing:border-box;}',
         '.ztp-btn:hover{background:var(--dsw-alias-interactive-bg-hover);}',
         '.ztp-btn.primary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);border-color:transparent;}',
         '.ztp-btn.primary:hover{background:var(--dsw-alias-button-primary-hover);}',
@@ -108,15 +140,15 @@
         '.ztp-slink.dead{color:var(--dsw-alias-label-caption);border-style:dashed;}',
 
         // 空态 / 骨架 / 错误
-        '.ztp-empty{padding:44px 16px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px;line-height:1.7;}',
-        '.ztp-skel{height:76px;border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-skeleton);border:.5px solid var(--dsw-alias-border-l1);margin-bottom:8px;animation:ztp-pulse 1.5s ease-in-out infinite;}',
+        '.ztp-empty{padding:48px 24px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px;line-height:1.7;}',
+        '.ztp-skel{height:92px;border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-skeleton);border:.5px solid var(--dsw-alias-border-l1);margin-bottom:8px;animation:ztp-pulse 1.5s ease-in-out infinite;}',
         '@keyframes ztp-pulse{0%,100%{opacity:.5}50%{opacity:.95}}',
         '.ztp-err{margin:8px 0;padding:8px 10px;border-radius:var(--dsw-radius-md);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent);color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:1.55;}',
         '.ztp-err-row{display:flex;align-items:center;gap:8px;justify-content:space-between;}',
         '.ztp-err-retry{appearance:none;border:.5px solid currentColor;background:transparent;color:inherit;font:inherit;font-size:11.5px;height:22px;padding:0 8px;border-radius:var(--dsw-radius-sm);cursor:pointer;flex:none;}',
 
         // 页脚
-        '.ztp-foot{flex:none;display:flex;align-items:center;gap:8px;height:28px;padding:0 12px;border-top:.5px solid var(--dsw-alias-border-l1);font-size:11px;color:var(--dsw-alias-label-tertiary);box-sizing:border-box;overflow:hidden;white-space:nowrap;}',
+        '.ztp-foot{flex:none;display:flex;align-items:center;gap:8px;height:30px;padding:0 16px;border-top:.5px solid var(--dsw-alias-border-l1);font-size:11px;color:var(--dsw-alias-label-tertiary);box-sizing:border-box;overflow:hidden;white-space:nowrap;}',
         '.ztp-foot-dim{opacity:.75;}',
 
         // 详情
@@ -127,7 +159,7 @@
         '.ztp-link{margin-left:auto;color:var(--dsw-alias-link);text-decoration:none;font-size:12px;display:inline-flex;align-items:center;gap:3px;}',
         '.ztp-link:hover{text-decoration:underline;}',
         '.ztp-link svg{width:12px;height:12px;}',
-        '.ztp-panel-card{border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1);padding:12px;}',
+        '.ztp-panel-card{border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1);padding:14px 16px;}',
         '.ztp-detail-title{margin-top:6px;font-size:14px;line-height:1.5;font-weight:600;color:var(--dsw-alias-label-primary);word-break:break-word;}',
         '.ztp-kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin-top:10px;font-size:12px;color:var(--dsw-alias-label-secondary);}',
         '.ztp-kv dt{color:var(--dsw-alias-label-tertiary);white-space:nowrap;}',
@@ -138,7 +170,7 @@
 
         // 登录
         '.ztp-fill{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;}',
-        '.ztp-login{flex:1;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;padding:24px 20px;}',        '.ztp-login-mark{width:44px;height:44px;border-radius:var(--dsw-radius-md);display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent);color:var(--dsw-alias-state-business-primary);margin-bottom:14px;}',
+        '.ztp-login{flex:1;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;padding:32px 28px;max-width:420px;width:100%;margin:0 auto;}',        '.ztp-login-mark{width:44px;height:44px;border-radius:var(--dsw-radius-md);display:flex;align-items:center;justify-content:center;background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent);color:var(--dsw-alias-state-business-primary);margin-bottom:14px;}',
         '.ztp-login-title{font-size:15px;font-weight:600;color:var(--dsw-alias-label-primary);}',
         '.ztp-login-sub{margin:6px 0 16px;font-size:12px;line-height:1.7;color:var(--dsw-alias-label-tertiary);}',
         '.ztp-label{display:block;font-size:12px;color:var(--dsw-alias-label-secondary);margin:12px 0 5px;}',
@@ -155,7 +187,7 @@
         '.ztp-acct-label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
         '.ztp-acct svg{width:11px;height:11px;flex:none;opacity:.7;}',
         '.ztp-acct-layer{position:fixed;inset:0;z-index:2147482000;}',
-        '.ztp-acct-pop{position:absolute;right:8px;top:44px;z-index:2147482001;min-width:230px;max-width:300px;padding:6px;border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-2);border:.5px solid var(--dsw-alias-border-l3);box-shadow:var(--dsw-shadow-lv3);}',
+        '.ztp-acct-pop{position:absolute;right:10px;top:48px;z-index:2147482001;min-width:230px;max-width:300px;padding:6px;border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-2);border:.5px solid var(--dsw-alias-border-l3);box-shadow:var(--dsw-shadow-lv3);}',
         '.ztp-acct-row{display:flex;align-items:center;gap:8px;width:100%;box-sizing:border-box;padding:7px 8px;border-radius:var(--dsw-radius-md);border:0;background:transparent;font:inherit;text-align:left;cursor:pointer;color:var(--dsw-alias-label-primary);}',
         '.ztp-acct-row:hover{background:var(--dsw-alias-interactive-bg-hover);}',
         '.ztp-acct-row.on{background:var(--dsw-alias-interactive-bg-hover-solid);}',
@@ -179,7 +211,51 @@
         '.ztp-disp-acts .ztp-btn{flex:1;height:30px;justify-content:center;}',
         '.ztp-disp-note{margin-top:10px;font-size:11px;color:var(--dsw-alias-label-caption);line-height:1.6;}',
 
-        // 兜底：没有 sidebarRightTabs 的旧版 DSH 用悬浮入口
+        // ───────────────── 处理中任务的实时状态（M6：卡片上的活性徽标 + 常驻提醒）─────────────────────────
+        // 会话关联（§4.3）+ uiSession.sessionStatus（running/pendingInteraction/completionUnread）
+        // → 卡片顶行一枚状态胶囊：处理中三点跳动 / 等决策琥珀呼吸 / 已完成绿色对勾。
+        '.ztp-live{display:inline-flex;align-items:center;gap:5px;height:20px;padding:0 9px;border-radius:999px;font-size:11px;font-weight:500;line-height:1;flex:none;white-space:nowrap;}',
+        '.ztp-live i{width:5px;height:5px;border-radius:50%;background:currentColor;flex:none;}',
+        '.ztp-live.running{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 13%,transparent);}',
+        '.ztp-live.ask{color:var(--dsw-alias-state-warn-primary);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 15%,transparent);}',
+        '.ztp-live.done{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 14%,transparent);}',
+        // 处理中：三点依次跳动
+        '.ztp-live.running .ztp-dots{display:inline-flex;gap:2.5px;align-items:center;}',
+        '.ztp-live.running .ztp-dots b{width:4px;height:4px;border-radius:50%;background:currentColor;animation:ztp-dot 1.05s ease-in-out infinite;}',
+        '.ztp-live.running .ztp-dots b:nth-child(2){animation-delay:.18s;}',
+        '.ztp-live.running .ztp-dots b:nth-child(3){animation-delay:.36s;}',
+        '@keyframes ztp-dot{0%,60%,100%{transform:translateY(0);opacity:.45}30%{transform:translateY(-3px);opacity:1}}',
+        // 等决策：胶囊整体呼吸 + 卡片暖色描边提醒
+        '.ztp-live.ask{animation:ztp-breath 1.6s ease-in-out infinite;}',
+        '.ztp-card.ztp-live-ask{border-color:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 45%,var(--dsw-alias-border-l3));}',
+        '.ztp-card.ztp-live-ask:before{background:var(--dsw-alias-state-warn-primary);}',
+        '@keyframes ztp-breath{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--dsw-alias-state-warn-primary) 0%,transparent)}50%{box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-warn-primary) 22%,transparent)}}',
+        // 已完成：对勾一次弹入 + 卡片绿色微光
+        '.ztp-live.done svg{width:11px;height:11px;flex:none;}',
+        '.ztp-live.done .ztp-live-ok{animation:ztp-pop2 .3s ease-out;}',
+        '.ztp-card.ztp-live-done{border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 40%,var(--dsw-alias-border-l3));}',
+        '@keyframes ztp-pop2{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}',
+        // 会话 chip 前的活性小点（有实时状态时随状态变色，处理中闪烁）
+        '.ztp-slink .ztp-slink-dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--dsw-alias-label-caption);}',
+        '.ztp-slink .ztp-slink-dot.running{background:var(--dsw-alias-state-business-primary);animation:ztp-blink 1.2s ease-in-out infinite;}',
+        '.ztp-slink .ztp-slink-dot.ask{background:var(--dsw-alias-state-warn-primary);animation:ztp-blink 1.2s ease-in-out infinite;}',
+        '.ztp-slink .ztp-slink-dot.done{background:var(--dsw-alias-state-success-primary);}',
+        '@keyframes ztp-blink{0%,100%{opacity:1}50%{opacity:.35}}',
+
+        // 常驻提醒 toast（监控驱动，面板关着也能弹）：带「去看看」一键跳回会话
+        '.ztp-live-toasts{position:fixed;left:50%;bottom:44px;transform:translateX(-50%);z-index:2147483000;display:flex;flex-direction:column;gap:8px;align-items:stretch;max-width:min(440px,86vw);}',
+        '.ztp-live-toast{display:flex;align-items:center;gap:10px;box-sizing:border-box;padding:9px 10px 9px 14px;border-radius:var(--dsw-radius-md);background:var(--dsw-alias-toast-bg);color:var(--dsw-alias-toast-label);box-shadow:var(--dsw-shadow-lv3);font-size:12.5px;line-height:1.5;animation:ztp-pop2 .16s ease-out;}',
+        '.ztp-live-toast-title{font-weight:600;font-size:12.5px;display:flex;align-items:center;gap:6px;}',
+        '.ztp-live-toast-title i{width:7px;height:7px;border-radius:50%;flex:none;}',
+        '.ztp-live-toast-title.done i{background:var(--dsw-alias-state-success-primary);}',
+        '.ztp-live-toast-title.decision i{background:var(--dsw-alias-state-warn-primary);animation:ztp-blink 1.2s ease-in-out infinite;}',
+        '.ztp-live-toast-text{color:var(--dsw-alias-label-secondary);font-size:11.5px;margin-top:1px;}',
+        '.ztp-live-toast-go{appearance:none;font:inherit;font-size:12px;flex:none;height:26px;padding:0 12px;border-radius:999px;border:0;background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);cursor:pointer;}',
+        '.ztp-live-toast-go:hover{background:var(--dsw-alias-button-primary-hover);}',
+        '.ztp-live-toast-x{appearance:none;font:inherit;font-size:14px;line-height:1;flex:none;width:24px;height:24px;border-radius:50%;border:0;background:transparent;color:var(--dsw-alias-toast-label);opacity:.7;cursor:pointer;}',
+        '.ztp-live-toast-x:hover{opacity:1;}',
+
+        // 兜底：没有 main/sidebar.panellist slot 的旧版 DSH 用悬浮入口
         '.ztp-fab{position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:9000;display:flex;align-items:center;justify-content:center;height:44px;padding:0 7px;border:.5px solid var(--dsw-alias-border-l3);border-right:none;border-radius:var(--dsw-radius-md) 0 0 var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-secondary);box-shadow:var(--dsw-shadow-lv2);cursor:pointer;}',
         '.ztp-fab:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
         '.ztp-fab svg{width:18px;height:18px;}',
@@ -695,18 +771,21 @@
       /**
        * M3「处理」：新会话自动下发。时序（2026-10-24 优化：消除「切过去空白约 2 秒」）：
        *   点击发送瞬间：prefetchImageBytes 与 sessions.create 并行（host 拉禅道图最慢，提前开始）
-       *   → create 完成：openSession 切视图 + 立即 facade.setDraft（视图切过来输入框就有内容）
+       *   → create 完成：sessions.retain 后台保活（不切视图）+ 立即 facade.setDraft
        *   → selectModel 与附件注册并行等待（互不阻塞）
        *   → 全部就绪才 submit（留 250ms 等 composer 挂载）。
-       * 旧的串行链（create → 视图 → selectModel → 图片下载 → setDraft → submit）里用户
-       * 看到的是空白会话干等；现在文本即刻可见，只有附件缩略图/发送稍晚。
+       * 2026-10-24 用户要求「处理后不要自动跳转新会话」：不再调 uiWorkspace.openSession
+       * （其内部 replaceMain + selectPanel(null) 是跳转来源），改用
+       * sessions.retain(id, { source: 'zentao-panel' })——scope 照常可用（facade 填草稿/
+       * 附件/submit 都是服务级，不需要视图挂载），用户留在禅道面板，靠卡片会话 chip /
+       * 活性徽标（M6）跳回。dispatched 模式 submit 完成后 3s release；draft 模式保留
+       * retain——release 会让 scope retire，未发送的草稿 store 可能随之丢失。
        * choice 由「处理」弹层给出：{workspaceId?|cwd?, model?: {provider, model, reasoningEffort?}}；
        * 缺省时继承当前会话目录、模型走默认。
        * 任一环失败 → 降级插入当前会话 composer；再失败 → 剪贴板。
        */
       function dispatchToNewSession(md, images, choice) {
         var sessions = lookupService('sessions');
-        var ws = lookupService('uiWorkspace');
         var conversation = lookupService('conversation');
         if (!sessions || typeof sessions.create !== 'function') {
           return Promise.resolve({ ok: false, mode: 'unavailable', message: 'sessions 服务不可用（DSH 版本过旧？）' });
@@ -732,12 +811,11 @@
           .then(function () { return sessions.create(opts); })
           .then(function (sessionId) {
             if (!sessionId) throw new Error('session.create 未返回会话 id');
-            if (ws && typeof ws.openSession === 'function') {
-              try {
-                ws.openSession(sessionId);
-                followZentaoTabTo(sessionId); // 主视图切到新会话 → 禅道面板跟过去
-              } catch (e) { /* 打开失败也继续尝试填草稿 */ }
-            }
+            var retainRef = null;
+            try {
+              // 只 retain 不切视图：scope(id) 依赖 retain 才有值；release 见 dispatched/draft 分支
+              if (typeof sessions.retain === 'function') retainRef = sessions.retain(sessionId, { source: 'zentao-panel' });
+            } catch (e) { retainRef = null; }
             var scope = null;
             try { scope = sessions.scope(sessionId); } catch (e) { scope = null; }
             if (conversation && conversation.input && scope) {
@@ -745,9 +823,7 @@
               try { facade = conversation.input.for(scope); } catch (e) { facade = null; }
               if (facade && typeof facade.setDraft === 'function') {
                 var target = { sessionId: sessionId, scope: scope, facade: facade, conversation: conversation };
-                // 文本草稿立即挂上——视图刚切过来输入框就有内容，不再空白等待
                 facade.setDraft(md);
-                try { facade.focus(); } catch (e) { /* 忽略 */ }
                 // 模型设置与附件注册并行等待（成功才自动发送；模型显式失败则只填草稿，交用户确认）
                 var modelStep = (choice && choice.model)
                   ? selectModelFor(sessionId, choice.model)
@@ -755,21 +831,31 @@
                 return Promise.all([modelStep, attachImagesToDraft(images, target, prefetch)]).then(function (rs) {
                   var mres = rs[0], att = rs[1];
                   if (mres && mres.ok === false) {
+                    // 只填了草稿、没 submit：保留 retain（release 会 retireScope，草稿/附件随之丢）
                     return { ok: true, mode: 'draft', sessionId: sessionId,
-                      message: '已新建会话并填入输入框（模型设置失败：' + mres.message + '，请确认后手动发送）' };
+                      message: '已新建会话并填入草稿（模型设置失败：' + mres.message + '），点卡片标签跳回确认发送' };
                   }
                   setTimeout(function () {
                     try { if (typeof facade.submit === 'function') facade.submit(); } catch (e) { /* 已填草稿，发送交给用户 */ }
+                    // turn 已交给宿主跑，3s 后释放后台 retain（draft 模式不释放，见上）
+                    setTimeout(function () {
+                      try { if (retainRef && typeof retainRef.release === 'function') retainRef.release(); } catch (e) { /* 已被释放 */ }
+                    }, 3000);
                   }, 250);
                   var suffix = att && att.ok ? '（含 ' + att.count + ' 张图片）' : '';
-                  return { ok: true, mode: 'dispatched', sessionId: sessionId, message: '已在新会话发送任务背景' + suffix };
+                  return { ok: true, mode: 'dispatched', sessionId: sessionId,
+                    message: '已在后台新会话发送任务背景' + suffix + '，卡片标签可跳回' };
                 });
               }
             }
-            setTimeout(function () {
-              try { fillComposerEditable(md); } catch (e) { /* 忽略 */ }
-            }, 250);
-            return { ok: true, mode: 'draft', message: '已新建会话并填入输入框，请确认发送', sessionId: sessionId };
+            // facade 不可用（conversation 服务缺失 / retain 没拿到 scope）：新会话里什么都没填，
+            // 立即释放后台 retain 不留悬挂连接，返回 ok:false 让 sendDispatch 走
+            // insertToCurrentChat 降级（内容+图片进当前会话，文案也更准确）
+            if (retainRef && typeof retainRef.release === 'function') {
+              try { retainRef.release(); } catch (e) { /* 忽略 */ }
+            }
+            return { ok: false, mode: 'unavailable', sessionId: sessionId,
+              message: '新会话输入接口不可用（conversation/sessions 服务缺失）' };
           })
           .catch(function (err) {
             return { ok: false, mode: 'failed', message: '新会话创建失败：' + (err && err.message ? err.message : String(err)) };
@@ -810,23 +896,31 @@
       function sessionLinkKey(activeId, card) {
         return String(activeId || 'anon') + '/' + card.kind + '-' + card.id;
       }
+      /** link key → {activeId, kind, id}；办公室监控用（旧值结构里没有卡片信息，key 本身就是权威）。 */
+      function parseLinkKey(key) {
+        var m = /^([^/]+)\/(task|bug|story)-(\d+)$/.exec(String(key || ''));
+        return m ? { activeId: m[1], kind: m[2], id: Number(m[3]) } : null;
+      }
       function getSessionLink(activeId, card) {
         var v = readLinkMap()[sessionLinkKey(activeId, card)];
         return (v && typeof v.sessionId === 'string' && v.sessionId) ? v : null;
       }
-      /** 「处理」成功时记录关联；同卡片再次处理 → 覆盖为最新会话。 */
+      /** 「处理」成功时记录关联；同卡片再次处理 → 覆盖为最新会话。
+       *  值里带 kind/id/title（M6 实时状态徽标取名用；旧值没有也能从 key 解析 kind/id）。 */
       function saveSessionLink(activeId, card, sessionId) {
         var key = sessionLinkKey(activeId, card);
-        var link = { sessionId: String(sessionId), at: Date.now() };
+        var link = { sessionId: String(sessionId), at: Date.now(), kind: card.kind, id: card.id, title: String(card.title || '') };
         var map = readLinkMap();
         map[key] = link;
         writeLinkMap(map);
+        watchPoke(); // 监控立即跟进新关联
         return link;
       }
       function removeSessionLink(activeId, card) {
         var map = readLinkMap();
         delete map[sessionLinkKey(activeId, card)];
         writeLinkMap(map);
+        watchPoke();
       }
 
       function fmtLinkAt(at) {
@@ -854,35 +948,6 @@
           if (hasAny) return { state: 'dead', title: '', at: link.at };
         }
         return { state: 'unknown', title: '已处理 · ' + fmtLinkAt(link.at), at: link.at };
-      }
-
-      /**
-       * 主视图切到别的会话后，把禅道 tab 也开到（屏幕会话的）右侧栏。
-       * DSH 的右侧栏是 per-session 的（surface 存在 store.bySession[sessionId]，
-       * 跟随 uiSession 当前会话），不跟的话跳转后右侧栏会被新会话的空 sidebar
-       * 换掉——这就是「跳转会话时面板刷新一下」的根因。
-       * 公开服务 ctx.sidebarRight（dsh-client-ui-sidebar-right）：openTab(kind) 作用于
-       * 屏幕会话；tabsIn(sessionId) 读该会话已开的 tab（已有禅道 tab → 幂等 reveal
-       * 不带 replaceTab；新会话只有「开始」guide → replaceTab 替换它）。
-       * 时序：openSession 后 on-screen 会话的更新是同步 store 链，这里再让一个
-       * 宏任务，链没跟上时 openTab 落回旧会话（已有 tab，幂等无害）。
-       */
-      function followZentaoTabTo(sessionId) {
-        var sr = null;
-        try { sr = lookupService('sidebarRight'); } catch (e) { sr = null; }
-        if (!sr || typeof sr.openTab !== 'function') return;
-        setTimeout(function () {
-          try {
-            var has = false;
-            if (sessionId && typeof sr.tabsIn === 'function') {
-              var open = sr.tabsIn(sessionId) || [];
-              for (var i = 0; i < open.length; i++) {
-                if (open[i] && open[i].kind === TAB_KIND) { has = true; break; }
-              }
-            }
-            sr.openTab(TAB_KIND, has ? {} : { replaceTab: true });
-          } catch (e) { /* 旧版 DSH 无 sidebarRight 服务/会话未 adopt：右侧栏走默认，不影响跳转 */ }
-        }, 0);
       }
 
       /**
@@ -914,13 +979,293 @@
         } catch (e) {
           return { ok: false, reason: 'error', message: String((e && e.message) || e) };
         }
-        followZentaoTabTo(link.sessionId); // 面板跟着切到目标会话，不被新会话的空 sidebar 换掉
         return { ok: true, sessionId: link.sessionId };
+      }
+
+      // ───────────────────────── M6 处理中任务的实时状态：常驻监控 ─────────────────────────
+      // 「任务完成 / 需要决策」提醒不依赖面板打开：插件 apply() 即启动本监控。
+      // 信号源（0.2.1-rc.2 源码确认，dsh-notify-me 同款）：
+      //   uiSession.sessionStatus = observable store，快照 Map<sessionId,
+      //     {running, pendingInteraction, completionUnread}>；
+      //   - pendingInteraction ∈ 'approval'|'plan-review'|'question'（宿主算好的「等你决策」）
+      //   - completionUnread：后台会话跑完置位、打开该会话即清（宿主算好的「完成未读」）
+      // 观察对象 = 会话关联表（§4.3 links.v1）里当前账号的条目；活性汇成
+      // watchGetSnapshot().states（sessionId → 'running'|'ask'|'done'|null），禅道卡片/chip
+      // 渲染时查询；边沿事件触发常驻 toast（带「去看看」一键跳回会话）。
+      var INTERACTION_LABEL = { approval: '审批', 'plan-review': '方案确认', question: '提问' };
+      var LIVE_STATE_LABEL = { running: '处理中', ask: '等你决策', done: '已完成' };
+      var LIVE_STATE_TITLE = {
+        running: '关联会话正在处理这个任务',
+        ask: '关联会话在等你决策，点击会话 chip 跳回',
+        done: '关联会话已处理完成，去看看结果',
+      };
+
+      var watch = {
+        started: false, bound: false, retry: 0,
+        prev: {},          // sessionId -> {running, pendingInteraction, completionUnread}（边沿基线）
+        listeners: [],
+        unsub: [],
+        stopRetry: null, unslow: null,
+        snapshot: { ready: false, activeId: null, states: {} }, // states: sessionId -> 'running'|'ask'|'done'|null
+      };
+
+      function watchGetSnapshot() { return watch.snapshot; }
+      function watchSubscribe(cb) {
+        watch.listeners.push(cb);
+        return function () {
+          var i = watch.listeners.indexOf(cb);
+          if (i >= 0) watch.listeners.splice(i, 1);
+        };
+      }
+      function watchEmit() {
+        for (var i = 0; i < watch.listeners.length; i++) {
+          try { watch.listeners[i](); } catch (e) { /* 面板异常不拖垮监控 */ }
+        }
+      }
+      /** links/缓存有变（保存关联、禅道面板刷新 mine、切账号）→ 重新评估。 */
+      function watchPoke() {
+        if (watch.bound) watchEval();
+      }
+
+      function watchStart() {
+        if (watch.started) return;
+        watch.started = true;
+        watchTryBind();
+        if (typeof setInterval !== 'function' || typeof clearInterval !== 'function') return;
+        // uiSession/sessions 是核心服务但激活时序晚于插件：3s 重试，60s 后降频到 30s
+        var fast = setInterval(function () {
+          if (watch.bound) { clearInterval(fast); return; }
+          watchTryBind();
+        }, 3000);
+        watch.stopRetry = function () { clearInterval(fast); };
+        setTimeout(function () {
+          clearInterval(fast);
+          if (!watch.bound) {
+            var slow = setInterval(function () {
+              if (watch.bound) { clearInterval(slow); return; }
+              watchTryBind();
+            }, 30000);
+            watch.unslow = function () { clearInterval(slow); };
+          }
+        }, 60000);
+      }
+
+      function watchTryBind() {
+        if (watch.bound) return;
+        var uiSession = null;
+        try { uiSession = lookupService('uiSession'); } catch (e) { uiSession = null; }
+        var store = uiSession && uiSession.sessionStatus;
+        if (!store || typeof store.subscribe !== 'function' || typeof store.getSnapshot !== 'function') {
+          watch.retry++;
+          return;
+        }
+        watch.bound = true;
+        if (watch.stopRetry) { watch.stopRetry(); watch.stopRetry = null; }
+        if (watch.unslow) { watch.unslow(); watch.unslow = null; }
+        watch.unsub.push(store.subscribe(function () { watchEval(); }));
+        var sessions = null;
+        try { sessions = lookupService('sessions'); } catch (e) { sessions = null; }
+        if (sessions && sessions.list && typeof sessions.list.subscribe === 'function') {
+          watch.unsub.push(sessions.list.subscribe(function () { watchEval(); }));
+        }
+        watchEval();
+      }
+
+      /**
+       * 活性推导（给卡片徽标/chip 状态点）：
+       * ask（等你决策）> done（完成未读）> running（处理中）；idle（turn 结束且无事发生）
+       * 与会话已删都返回 null——「已处理」这件事由会话 chip 表达，不叠徽标。
+       */
+      function deriveLiveState(next, live) {
+        if (!live || !next) return null;
+        if (next.pendingInteraction) return 'ask';
+        if (next.completionUnread) return 'done';
+        if (next.running) return 'running';
+        return null;
+      }
+
+      /** 边沿事件：决策出现 / 完成未读置位。同帧两者兼有只报决策（行动需求已覆盖）。 */
+      function watchEdges(prev, next) {
+        var out = [];
+        if (next.pendingInteraction && next.pendingInteraction !== prev.pendingInteraction) out.push('decision');
+        if (next.completionUnread && !prev.completionUnread && !next.pendingInteraction) out.push('done');
+        return out;
+      }
+
+      function watchEval() {
+        if (!watch.bound) return;
+        var activeId = (paneCache.status && paneCache.status.activeId) || null;
+        var map = readLinkMap();
+        var entries = [];
+        for (var key in map) {
+          if (!Object.prototype.hasOwnProperty.call(map, key) || key === '__proto__') continue;
+          var pk = parseLinkKey(key);
+          if (!pk) continue;
+          if (activeId && pk.activeId !== activeId) continue; // 只看当前激活账号（多账号不混卡）
+          var v = map[key];
+          if (!v || typeof v.sessionId !== 'string' || !v.sessionId) continue;
+          entries.push({
+            key: key, activeId: pk.activeId, kind: pk.kind, id: pk.id,
+            sessionId: v.sessionId, title: String(v.title || ''), at: Number(v.at) || 0,
+          });
+        }
+
+        var statusMap = null;
+        try {
+          var uiSession = lookupService('uiSession');
+          statusMap = uiSession && uiSession.sessionStatus && uiSession.sessionStatus.getSnapshot();
+        } catch (e) { statusMap = null; }
+        var byId = null;
+        try {
+          var sessions = lookupService('sessions');
+          var snap = sessions && sessions.list && sessions.list.getSnapshot();
+          byId = (snap && snap.byId) || null;
+        } catch (e) { byId = null; }
+        var byIdReady = false;
+        if (byId) for (var b in byId) { if (b !== '__proto__') { byIdReady = true; break; } }
+
+        var states = {};
+        var events = [];
+        for (var i = 0; i < entries.length; i++) {
+          var en = entries[i];
+          var st = statusMap
+            ? (typeof statusMap.get === 'function' ? statusMap.get(en.sessionId) : statusMap[en.sessionId])
+            : undefined;
+          var next = st
+            ? { running: !!st.running, pendingInteraction: st.pendingInteraction || null, completionUnread: !!st.completionUnread }
+            : null;
+          var prev = watch.prev[en.sessionId];
+          // 首次见到的会话只建基线不提醒（DSH 重启 / 新 link 时避免一次性风暴）
+          if (prev && next) {
+            var evs = watchEdges(prev, next);
+            for (var j = 0; j < evs.length; j++) {
+              events.push({ type: evs[j], sessionId: en.sessionId, entry: en, interaction: next.pendingInteraction });
+            }
+          }
+          if (next) watch.prev[en.sessionId] = next;
+          else delete watch.prev[en.sessionId];
+          states[en.sessionId] = deriveLiveState(next, byIdReady ? (byId[en.sessionId] !== undefined) : true);
+        }
+
+        watch.snapshot = { ready: true, activeId: activeId, states: states };
+        watchEmit();
+        for (var k = 0; k < events.length; k++) watchFire(events[k]);
+      }
+
+      /** 卡片 → 活性状态（卡片徽标与 chip 状态点查询入口；activeAcct 由当前 render 传入）。
+       *  快照只反映当前激活账号的关联，查询账号不一致时不亮徽标（多账号不混卡）。 */
+      function watchStateForCard(activeId, card) {
+        var link = getSessionLink(activeId, card);
+        if (!link) return null;
+        var s = watch.snapshot;
+        if (!s || !s.ready || !s.states) return null;
+        if (s.activeId && activeId && s.activeId !== String(activeId)) return null;
+        return s.states[link.sessionId] || null;
+      }
+
+      function watchToastText(ev) {
+        var label = (KIND_LABEL[ev.entry.kind] || ev.entry.kind) + ' #' + ev.entry.id;
+        var body = label + (ev.entry.title ? '「' + ev.entry.title + '」' : '');
+        if (ev.type === 'decision') {
+          return {
+            kind: 'decision',
+            title: '需要你决策',
+            body: body + ' 在等你' + (INTERACTION_LABEL[ev.interaction] || '拍板') + '，去看看？',
+          };
+        }
+        return { kind: 'done', title: '任务完成', body: body + ' 处理完了，去看看结果' };
+      }
+
+      function watchOpenSession(sessionId) {
+        var ws = lookupService('uiWorkspace');
+        if (ws && typeof ws.openSession === 'function') {
+          try { ws.openSession(sessionId); return true; } catch (e) { /* 下面 toast 兜底 */ }
+        }
+        return false;
+      }
+
+      function watchFire(ev) {
+        try { showWatchToast(watchToastText(ev), ev); } catch (e) { /* DOM 不可用（测试替身）时静默 */ }
+      }
+
+      // 常驻提醒 toast：挂在 body 的独立小条（面板关着也能弹），带「去看看」跳会话。
+      var watchToastRoot = null;
+      function watchToastRootEnsure() {
+        if (watchToastRoot && watchToastRoot.parentNode) return watchToastRoot;
+        try {
+          if (typeof document === 'undefined' || !document.body || typeof document.createElement !== 'function') return null;
+          var el = document.createElement('div');
+          el.className = 'ztp-live-toasts';
+          document.body.appendChild(el);
+          watchToastRoot = el;
+          return el;
+        } catch (e) { return null; }
+      }
+      function showWatchToast(t, ev) {
+        var rootEl = watchToastRootEnsure();
+        if (!rootEl) return;
+        var item = document.createElement('div');
+        item.className = 'ztp-live-toast';
+        var body = document.createElement('div');
+        var tt = document.createElement('div');
+        tt.className = 'ztp-live-toast-title ' + t.kind;
+        var dot = document.createElement('i');
+        tt.appendChild(dot);
+        tt.appendChild(document.createTextNode(t.title));
+        var tb = document.createElement('div');
+        tb.className = 'ztp-live-toast-text';
+        tb.textContent = t.body;
+        body.appendChild(tt); body.appendChild(tb);
+        item.appendChild(body);
+        var go = document.createElement('button');
+        go.className = 'ztp-live-toast-go';
+        go.type = 'button';
+        go.textContent = '去看看';
+        var x = document.createElement('button');
+        x.className = 'ztp-live-toast-x';
+        x.type = 'button';
+        x.textContent = '×';
+        x.setAttribute('aria-label', '关闭');
+        item.appendChild(go); item.appendChild(x);
+        rootEl.appendChild(item);
+        var closed = false;
+        function dismiss() {
+          if (closed) return;
+          closed = true;
+          try { if (item.parentNode) item.parentNode.removeChild(item); } catch (e) { /* 忽略 */ }
+        }
+        go.onclick = function () { watchOpenSession(ev.sessionId); dismiss(); };
+        x.onclick = dismiss;
+        var timer = setTimeout(dismiss, t.kind === 'decision' ? 12000 : 8000);
+        item.addEventListener('mouseenter', function () { clearTimeout(timer); });
+        item.addEventListener('mouseleave', function () { timer = setTimeout(dismiss, 4000); });
       }
 
       // ───────────────────────── 组件 ─────────────────────────
       function KindTag(props) {
         return h('span', { className: 'ztp-tag ' + props.kind }, KIND_LABEL[props.kind] || props.kind);
+      }
+
+      /**
+       * 处理中任务的活性徽标（M6）：处理中三点跳动 / 等你决策琥珀呼吸 / 已完成绿色对勾。
+       * state 来自 watchStateForCard（关联会话的 running/pendingInteraction/completionUnread）。
+       */
+      function LiveBadge(props) {
+        var s = props.state;
+        if (!s) return null;
+        return h('span', { className: 'ztp-live ' + s, title: LIVE_STATE_TITLE[s] },
+          s === 'running'
+            ? h('span', { className: 'ztp-dots' }, h('b'), h('b'), h('b'))
+            : s === 'ask'
+              ? h('i', null)
+              : h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+                  h('path', { className: 'ztp-live-ok', d: 'M4.2 8.7l2.5 2.5 5.1-5.7', stroke: 'currentColor', strokeWidth: 1.9, strokeLinecap: 'round', strokeLinejoin: 'round' })),
+          LIVE_STATE_LABEL[s]);
+      }
+
+      /** 会话 chip 前的活性小点：随状态变色，处理中/等决策闪烁。 */
+      function SlinkDot(props) {
+        return props.state ? h('i', { className: 'ztp-slink-dot ' + props.state }) : null;
       }
 
       function StatusChip(props) {
@@ -932,8 +1277,11 @@
       function CardItem(props) {
         var c = props.card;
         var urgent = isUrgent(c.deadline);
+        var live = props.live || null;
         return h('div', {
-          className: 'ztp-card ztp-k-' + c.kind,
+          className: 'ztp-card ztp-k-' + c.kind
+            + (props.active ? ' on' : '')
+            + (live === 'ask' ? ' ztp-live-ask' : live === 'done' ? ' ztp-live-done' : ''),
           draggable: true,
           title: '点击查看详情，可拖拽到对话输入框',
           onDragStart: function (e) {
@@ -944,16 +1292,17 @@
           },
           onClick: function () { props.onOpen(c); },
         },
-          h('div', { className: 'ztp-row' },
+          h('div', { className: 'ztp-top' },
             h(KindTag, { kind: c.kind }),
-            h('span', { className: 'ztp-id' }, '#' + c.id)),
+            live ? h(LiveBadge, { state: live }) : null,
+            h('span', { className: 'ztp-id' }, '#' + c.id),
+            h('span', { className: 'ztp-top-meta' },
+              h(StatusChip, { status: c.status }),
+              c.pri != null ? h('span', { className: 'ztp-pri p' + c.pri }, 'P' + c.pri) : null,
+              c.severity != null ? h('span', null, '严重 ' + c.severity) : null,
+              c.deadline ? h('span', { className: urgent ? 'ztp-warn' : '' }, '截止 ' + fmtDate(c.deadline)) : null,
+              c.openedBy ? h('span', null, c.openedBy + ' 创建') : null)),
           h('div', { className: 'ztp-card-title' }, c.title || ''),
-          h('div', { className: 'ztp-meta' },
-            h(StatusChip, { status: c.status }),
-            c.pri != null ? h('span', { className: 'ztp-pri p' + c.pri }, 'P' + c.pri) : null,
-            c.severity != null ? h('span', null, '严重 ' + c.severity) : null,
-            c.deadline ? h('span', { className: urgent ? 'ztp-warn' : '' }, '截止 ' + fmtDate(c.deadline)) : null,
-            c.openedBy ? h('span', null, c.openedBy + ' 创建') : null),
           h('div', { className: 'ztp-acts' },
             props.linkView ? h('button', {
               className: 'ztp-slink' + (props.linkView.state === 'dead' ? ' dead' : ''),
@@ -962,7 +1311,7 @@
                 ? fmtLinkAt(props.linkView.at) + ' 处理 · 点击跳转到该会话'
                 : (props.linkView.state === 'dead' ? '关联的会话已删除，点击清除标记' : '点击跳转到处理时创建的会话'),
               onClick: function (e) { e.stopPropagation(); props.onOpenSession(c); },
-            }, h(ChatIcon), h('span', { className: 'ztp-slink-t' },
+            }, h(SlinkDot, { state: live }), h(ChatIcon), h('span', { className: 'ztp-slink-t' },
               props.linkView.state === 'dead' ? '会话已删除' : props.linkView.title)) : null,
             h('button', {
               className: 'ztp-btn', type: 'button',
@@ -1001,9 +1350,11 @@
             h('a', { className: 'ztp-link', href: card.url, target: '_blank', rel: 'noreferrer' },
               '在禅道打开', h(LinkIcon))),
 
-          h('div', { className: 'ztp-panel-card ztp-k-' + card.kind },
+          h('div', { className: 'ztp-panel-card ztp-k-' + card.kind
+              + (props.live === 'ask' ? ' ztp-live-ask' : props.live === 'done' ? ' ztp-live-done' : '') },
             h('div', { className: 'ztp-row' },
               h(KindTag, { kind: card.kind }),
+              props.live ? h(LiveBadge, { state: props.live }) : null,
               h('span', { className: 'ztp-id' }, '#' + card.id)),
             h('div', { className: 'ztp-detail-title' }, card.title || ''),
             h('div', { className: 'ztp-meta' },
@@ -1028,7 +1379,7 @@
                   ? fmtLinkAt(props.linkView.at) + ' 处理 · 点击跳转到该会话'
                   : (props.linkView.state === 'dead' ? '关联的会话已删除，点击清除标记' : '点击跳转到处理时创建的会话'),
                 onClick: function (e) { e.stopPropagation(); props.onOpenSession(card); },
-              }, h(ChatIcon), h('span', { className: 'ztp-slink-t' },
+              }, h(SlinkDot, { state: props.live }), h(ChatIcon), h('span', { className: 'ztp-slink-t' },
                 props.linkView.state === 'dead' ? '会话已删除' : props.linkView.title)) : null,
               h('button', { className: 'ztp-btn', type: 'button', onClick: function () { props.onInsert(card, detail[0]); } }, '插入对话'),
               h('button', { className: 'ztp-btn primary', type: 'button', title: '选择工作区与模型，新建会话发送任务背景', onClick: function () { props.onDispatch(card, detail[0]); } }, '处理'))),
@@ -1307,10 +1658,10 @@
         );
       }
 
-      // ───────────────────────── 主面板（右侧栏 tab body）─────────────────────────
-      // 面板快照缓存（模块级）：右侧栏是 per-session 的，跳转/处理切主会话后禅道 tab
-      // 会卸载重挂或在新会话重开（见 followZentaoTabTo）——初始 state 直接取缓存，
-      // 重挂瞬间就是完整列表，不闪 loading/骨架；后台 RPC 照常静默刷新。
+      // ───────────────────────── 主面板（main slot 全局面板）─────────────────────────
+      // 面板快照缓存（模块级）：main slot 按 entryKey = activePanelId 只渲染当前选中面板，
+      // 切回会话视图（selectPanel(null)）或别的面板时禅道面板卸载——初始 state 直接取
+      // 缓存，重挂瞬间就是完整列表，不闪 loading/骨架；后台 RPC 照常静默刷新。
       // 登出/切账号时这些 state 被置 null，缓存同步为 null，下次重挂走登录/重拉。
       var paneCache = { tab: 'task', status: null, mine: null, detailCard: null };
 
@@ -1327,6 +1678,15 @@
         var adding = useState(false);    // 已有账号时再添加一个（LoginView 复用）
         var dispatch = useState(null);   // 「处理」确认弹层：{card, md, images}
         var linkRev = useState(0);       // 会话关联存储版本号（保存/清除后 bump 重读）
+        var liveSnap = useState(watchGetSnapshot()); // 关联会话活性（M6 监控快照）
+
+        // 订阅常驻监控：会话 running/等你决策/完成未读 的变化即时反映到卡片徽标上
+        useEffect(function () {
+          var un = watchSubscribe(function () { liveSnap[1](watchGetSnapshot()); });
+          liveSnap[1](watchGetSnapshot());
+          watchPoke();
+          return un;
+        }, []);
 
         var rpc = useCallback(function (endpoint, payload) {
           return appCtx.connection.rpc.call(CHANNEL, endpoint, payload || {});
@@ -1342,12 +1702,14 @@
           return function () { clearTimeout(timer); };
         }, [toast[0]]);
 
-        // 面板数据同步进模块级缓存：tab 卸载（切会话/关 tab）后重挂时用它秒恢复
+        // 面板数据同步进模块级缓存：tab 卸载（切会话/关 tab）后重挂时用它秒恢复；
+        // mine/激活账号变化同时通知办公室监控（白板差集、工位取名依赖 mine）
         useEffect(function () {
           paneCache.tab = tab[0];
           paneCache.status = status[0];
           paneCache.mine = mine[0];
           paneCache.detailCard = detailCard[0];
+          watchPoke();
         }, [tab[0], status[0], mine[0], detailCard[0]]);
 
         var loadStatus = useCallback(function () {
@@ -1488,6 +1850,12 @@
         function linkViewOf(card) {
           return sessionLinkView(linkMap[sessionLinkKey(activeAcct, card)] || null, sessionRows);
         }
+        /** 卡片活性：关联会话在跑（running）/ 等你决策（ask）/ 完成未读（done）。 */
+        function liveOf(card) {
+          var link = linkMap[sessionLinkKey(activeAcct, card)];
+          if (!link || !liveSnap[0] || !liveSnap[0].ready) return null;
+          return (liveSnap[0].states || {})[link.sessionId] || null;
+        }
         var filtered = useMemo(function () {
           return cards.filter(function (c) { return c.kind === tab[0]; });
         }, [cards, tab[0]]);
@@ -1502,17 +1870,8 @@
           return h('div', { className: 'ztp-empty' }, h('span', { className: 'ztp-spin', style: { display: 'inline-block' } }));
         }
 
-        function renderBody() {
-          if (detailCard[0]) {
-            return h(DetailView, {
-              key: detailCard[0].kind + '-' + detailCard[0].id,
-              rpc: rpc, card: detailCard[0],
-              linkView: linkViewOf(detailCard[0]),
-              onOpenSession: function (c) { openLinkedSession(c, activeAcct); },
-              onBack: function () { detailCard[1](null); },
-              onInsert: insertToChat, onDispatch: dispatchCard,
-            });
-          }
+        /** 列表列：骨架 / 错误 / 空态 / 卡片列表（详情移到右侧栏）。 */
+        function renderList() {
           if (loading[0] && !mine[0]) {
             return h('div', null,
               h('div', { className: 'ztp-skel' }),
@@ -1534,9 +1893,12 @@
               h('span', { className: 'ztp-foot-dim' }, '可点右上角 ⟳ 重新拉取'));
           }
           return h('div', null, filtered.map(function (c) {
+            var on = detailCard[0] && detailCard[0].kind === c.kind
+              && Number(detailCard[0].id) === Number(c.id);
             return h(CardItem, {
-              key: c.kind + '-' + c.id, card: c,
+              key: c.kind + '-' + c.id, card: c, active: on,
               linkView: linkViewOf(c),
+              live: liveOf(c),
               onOpenSession: function (c2) { openLinkedSession(c2, activeAcct); },
               onOpen: function (x) { detailCard[1](x); },
               onInsert: insertToChat, onDispatch: dispatchCard,
@@ -1544,7 +1906,27 @@
           }));
         }
 
-        // 中段：登录态未知占位 / 未配置或正在添加账号 → 登录 / 已配置 → 列表·详情
+        /** 详情列：选中卡片 → DetailView；未选中 → 占位（窄屏覆盖模式下未选中即整列隐藏）。 */
+        function renderDetail() {
+          if (!detailCard[0]) {
+            return h('div', { className: 'ztp-dph' },
+              h(ZentaoGlyph, { size: 28 }),
+              '点击左侧卡片查看详情',
+              h('br'),
+              h('span', { className: 'ztp-foot-dim' }, '支持拖拽到对话输入框'));
+          }
+          return h(DetailView, {
+            key: detailCard[0].kind + '-' + detailCard[0].id,
+            rpc: rpc, card: detailCard[0],
+            linkView: linkViewOf(detailCard[0]),
+            live: liveOf(detailCard[0]),
+            onOpenSession: function (c) { openLinkedSession(c, activeAcct); },
+            onBack: function () { detailCard[1](null); },
+            onInsert: insertToChat, onDispatch: dispatchCard,
+          });
+        }
+
+        // 中段：登录态未知占位 / 未配置或正在添加账号 → 登录 / 已配置 → 左列表右详情双栏
         var middle = !st
           ? h('div', { className: 'ztp-fill' }, renderLoading())
           : (!configured || adding[0]
@@ -1555,20 +1937,16 @@
               onDone: function (s) { adding[1](false); status[1](s); }, // 新账号自动激活，由 effect 触发拉取
               onCancel: configured ? function () { adding[1](false); } : null,
             }))
-            : h('div', { className: 'ztp-scroll' }, renderBody()));
+            : h('div', { className: 'ztp-body' },
+              h('div', { className: 'ztp-list-col' }, renderList()),
+              h('div', { className: 'ztp-detail-col' + (detailCard[0] ? ' has' : '') }, renderDetail())));
 
         return h('div', { className: 'ztp-root' },
-          h('div', { className: 'ztp-head' },
-            configured
-              ? h('div', { className: 'ztp-seg', role: 'tablist' }, KIND_ORDER.map(function (k) {
-                return h('button', {
-                  key: k, type: 'button', role: 'tab',
-                  'aria-selected': tab[0] === k ? 'true' : 'false',
-                  className: 'ztp-seg-btn',
-                  onClick: function () { tab[1](k); detailCard[1](null); },
-                }, KIND_LABEL[k], counts[k] ? h('span', { className: 'ztp-num' }, counts[k]) : null);
-              }))
-              : h('div', { className: 'ztp-head-title' }, '禅道'),
+          // mast：标题行（图标 + 禅道 + 实例主机名 + 账号/刷新/登出），对齐 dsh-mnemon 的页头形态
+          h('div', { className: 'ztp-mast' },
+            h('span', { className: 'ztp-mast-mark' }, h(ZentaoGlyph, { size: 15 })),
+            h('span', { className: 'ztp-mast-title' }, '禅道'),
+            configured && st && st.baseUrl ? h('span', { className: 'ztp-mast-sub' }, hostOf(st.baseUrl)) : null,
             h('div', { className: 'ztp-grow' }),
             configured ? h('button', {
               className: 'ztp-acct', type: 'button',
@@ -1588,6 +1966,17 @@
             props.onClose ? h('button', {
               className: 'ztp-tool', type: 'button', title: '关闭', onClick: props.onClose,
             }, h(CloseIcon)) : null),
+
+          // 分段 tab 行（未配置/登录视图时不渲染，标题已在 mast 上）
+          configured ? h('div', { className: 'ztp-head' },
+            h('div', { className: 'ztp-seg', role: 'tablist' }, KIND_ORDER.map(function (k) {
+              return h('button', {
+                key: k, type: 'button', role: 'tab',
+                'aria-selected': tab[0] === k ? 'true' : 'false',
+                className: 'ztp-seg-btn',
+                onClick: function () { tab[1](k); detailCard[1](null); },
+              }, KIND_LABEL[k], counts[k] ? h('span', { className: 'ztp-num' }, counts[k]) : null);
+            }))) : null,
 
           middle,
 
@@ -1624,13 +2013,24 @@
         );
       }
 
-      /** 右侧栏 tab 标题（tab chip 上的图标 + 文字）。 */
-      function ZentaoTabTitle() {
-        return h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: '5px' } },
-          h(ZentaoGlyph, { size: 14 }), '禅道');
+      /** 左侧栏图标行（sidebar.panellist）：DSH 自己画外层按钮/选中态/收起 tooltip，图标收 {size}。 */
+      function ZentaoSidebarIcon(props) {
+        return h(ZentaoGlyph, { size: (props && props.size) || 16, className: (props && props.className) || undefined });
       }
 
-      // ───────────────────────── 兜底：悬浮入口（旧版 DSH 没有 sidebarRightTabs）─────────────────────────
+      /**
+       * main slot 的面板组件：占整个主区域。顶部拖拽带（data-window-drag）承担
+       * macOS 窗口拖拽，ztp-main 的 padding-top 让位隐藏交通灯
+       * （--dsh-frame-top-clearance 仅 darwin 桌面非 0，Web 上高度为 0 无影响）。
+       */
+      function ZentaoMainPanel() {
+        useEffect(injectCss, []);
+        return h('div', { className: 'ztp-main' },
+          h('div', { className: 'ztp-dragband', 'data-window-drag': true, 'aria-hidden': 'true' }),
+          h(ZentaoPane, {}));
+      }
+
+      // ───────────────────────── 兜底：悬浮入口（旧版 DSH 没有 main/sidebar.panellist slot）─────────────────────────
       function ZentaoOverlay() {
         var open = useState(false);
         useEffect(injectCss, []);
@@ -1651,55 +2051,53 @@
 
       // ───────────────────────── 装载 ─────────────────────────
       var appCtx = null; // apply() 时注入
+      var leftWired = false; // 禅道面板两个 slot 都注册成功（兜入口不再挂）
 
-      /** 注册右侧栏 tab 类型 + 引导卡片 + tab body/title 三个挂点。 */
-      function registerRightSidebar(scope) {
-        var tabs = scope.sidebarRightTabs;
-        var slots = scope.slots || appCtx.slots;
-        var locale = null;
-        try { locale = appCtx.get('locale') || null; } catch (e) { locale = null; }
-
-        var registerTab = function () {
-          var dispose = tabs.register({
-            id: TAB_ID,
-            kind: TAB_KIND,
-            // 右侧栏视图跟随主会话切换；声明 keepMounted 后持有 retained tab 的
-            // view 不被 retire（SidebarSessionViews.prune），面板切回旧会话时
-            // 原样保留（state/滚动位置不丢），dock 内 tab 切换也不卸载。
-            keepMounted: true,
-            title: function () { return '禅道'; },
-            guide: [{
-              id: TAB_KIND,
-              order: 30,
-              title: function () { return '禅道'; },
-              description: function () { return '指派给我的任务、Bug 与需求'; },
-              icon: ZentaoGlyph,
-            }],
-          });
-          return function () { try { dispose(); } catch (e) { /* 忽略 */ } };
-        };
-        // 优先挂到我们的 effect 上（插件卸载时自动反注册）；scope 无 effect 时直接注册
-        if (typeof scope.effect === 'function') scope.effect(registerTab, 'dsh-zentao-panel: tab type');
-        else registerTab();
-
-        // 注意：sidebar-right 用 tab 类型的 id（不是 kind）做 slot 的 entryKey
-        // （TabSlot 里 entryKey = definition.id ?? tab.kind），dsh-context 里两者同名所以无感。
-        slots.inject('sidebar.right.pane.tab', function () {
-          return slots.register({ name: 'sidebar.right.pane.tab', key: TAB_ID, locale: locale || undefined }, function () {
-            return h(ZentaoPane, {});
-          });
-        });
-        slots.inject('sidebar.right.pane.tab.title', function () {
-          return slots.register({ name: 'sidebar.right.pane.tab.title', key: TAB_ID, locale: locale || undefined }, function () {
-            return h(ZentaoTabTitle, {});
+      /**
+       * 注册一个左侧栏全局面板（dsh-mnemon 同款机制，源码确认于 0.2.1-rc.2）：
+       * - sidebar.panellist（根作用域列表）：左侧栏图标行，{id, order, label}，
+       *   label 供展开文字/无障碍名/收起态 tooltip；行按钮与选中态由 DSH 自己画。
+       * - main（根作用域 keyed slot）：面板组件，entryKey = activePanelId，
+       *   key 必须与 panellist 的 id 同值；conversation 是保留 key。
+       * 声明感知嵌套 inject：两个 slot 都已声明才整组注册，任一失败回滚另一侧。
+       */
+      function registerPanelGroup(id, order, labelOf, IconComp, MainComp) {
+        var slots = appCtx.slots;
+        return slots.inject('main', function () {
+          return slots.inject('sidebar.panellist', function () {
+            var stopMain = slots.register({ name: 'main', key: id }, MainComp);
+            var stopIcon;
+            try {
+              stopIcon = slots.register({
+                name: 'sidebar.panellist',
+                id: id,
+                order: order,
+                label: labelOf,
+              }, IconComp);
+            } catch (e) {
+              try { stopMain(); } catch (e2) { /* 忽略 */ }
+              throw e;
+            }
+            return function () {
+              try { stopIcon(); } catch (e2) { /* 忽略 */ }
+              try { stopMain(); } catch (e2) { /* 忽略 */ }
+            };
           });
         });
       }
 
-      /** 旧版 DSH：shell.overlay 悬浮按钮 + 侧滑面板。 */
+      /** 禅道面板（order 32，排在 dsh-mnemon 记忆 30/技能 31 之后）。 */
+      function registerLeftSidebar() {
+        var stop = registerPanelGroup(PANEL_ID, 32, function () { return '禅道'; },
+          ZentaoSidebarIcon, ZentaoMainPanel);
+        leftWired = true;
+        return stop;
+      }
+
+      /** 旧版 DSH（无 main/sidebar.panellist slot）：shell.overlay 悬浮按钮 + 侧滑面板。 */
       function registerOverlay() {
-        // 右侧栏入口已经起来（例如服务晚于 2.5s 就绪）就不重复挂
-        if (lookupService('sidebarRightTabs')) return;
+        // 左侧栏入口已经起来（例如 slot 晚于 2.5s 声明）就不重复挂
+        if (leftWired) return;
         try {
           appCtx.slots.inject('shell.overlay', function () {
             return appCtx.slots.register({
@@ -1716,25 +2114,17 @@
       function apply(ctx) {
         appCtx = ctx;
         injectCss();
+        watchStart(); // 常驻监控：完成/等决策提醒不依赖面板打开
 
-        var wired = false;
         try {
-          ctx.inject(['sidebarRightTabs'], function (scope) {
-            wired = true;
-            try {
-              registerRightSidebar(scope);
-            } catch (e) {
-              wired = false;
-              try { console.error('[dsh-zentao-panel] register right-sidebar tab failed', e); } catch (e2) { /* 忽略 */ }
-            }
-          });
+          registerLeftSidebar();
         } catch (e) {
-          try { console.error('[dsh-zentao-panel] sidebarRightTabs unavailable', e); } catch (e2) { /* 忽略 */ }
+          try { console.error('[dsh-zentao-panel] register left-sidebar panel failed', e); } catch (e2) { /* 忽略 */ }
         }
 
-        // 2.5s 内拿不到 sidebarRightTabs（旧版 DSH）→ 退回悬浮入口
+        // 2.5s 内 main/sidebar.panellist 没就绪（旧版 DSH）→ 退回悬浮入口
         setTimeout(function () {
-          if (!wired) registerOverlay();
+          if (!leftWired) registerOverlay();
         }, 2500);
       }
 
@@ -1753,15 +2143,27 @@
         collectDispatchContext: collectDispatchContext,
         dispatchToNewSession: dispatchToNewSession,
         sessionLinkKey: sessionLinkKey,
+        parseLinkKey: parseLinkKey,
         readLinkMap: readLinkMap,
         getSessionLink: getSessionLink,
         saveSessionLink: saveSessionLink,
         removeSessionLink: removeSessionLink,
         sessionLinkView: sessionLinkView,
         openSessionLink: openSessionLink,
-        followZentaoTabTo: followZentaoTabTo,
         paneCache: paneCache,
         fmtLinkAt: fmtLinkAt,
+        // 实时状态监控（M6）
+        watch: watch,
+        watchStart: watchStart,
+        watchTryBind: watchTryBind,
+        watchEval: watchEval,
+        watchPoke: watchPoke,
+        watchEdges: watchEdges,
+        deriveLiveState: deriveLiveState,
+        watchStateForCard: watchStateForCard,
+        watchToastText: watchToastText,
+        watchGetSnapshot: watchGetSnapshot,
+        watchSubscribe: watchSubscribe,
       };
       return module.exports;
     },
