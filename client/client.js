@@ -962,13 +962,20 @@
         return (v && typeof v.sessionId === 'string' && v.sessionId) ? v : null;
       }
       /** 「处理」成功时记录关联；同卡片再次处理 → 覆盖为最新会话。
-       *  值里带 kind/id/title（M6 实时状态徽标取名用；旧值没有也能从 key 解析 kind/id）。 */
+       *  值里带 kind/id/title（M6 实时状态徽标取名用；旧值没有也能从 key 解析 kind/id）
+       *  和 lastSeen（最近一次确认还在「指派给我」列表的时间，清理宽限期的计时基准）。 */
       function saveSessionLink(activeId, card, sessionId) {
         var key = sessionLinkKey(activeId, card);
-        var link = { sessionId: String(sessionId), at: Date.now(), kind: card.kind, id: card.id, title: String(card.title || '') };
+        var link = {
+          sessionId: String(sessionId), at: Date.now(), lastSeen: Date.now(),
+          kind: card.kind, id: card.id, title: String(card.title || ''),
+        };
         var map = readLinkMap();
         map[key] = link;
         writeLinkMap(map);
+        // 换了新会话 → 旧会话的进度记录作废（避免徽标短暂显示旧会话的陈旧状态）
+        var sm = readStateMap();
+        if (sm[key]) { delete sm[key]; writeStateMap(sm); }
         watchPoke(); // 监控立即跟进新关联
         return link;
       }
@@ -987,6 +994,157 @@
         var md = (d.getMonth() + 1) + '月' + d.getDate() + '日';
         var hm = ('0' + d.getHours()).slice(-2) + ':' + ('0' + d.getMinutes()).slice(-2);
         return (d.getFullYear() === now.getFullYear() ? '' : d.getFullYear() + '年') + md + ' ' + hm;
+      }
+
+      // ───────────── 处理进度持久化（states.v1）+ 陈旧关联清理 ─────────────
+      // M6 的活体状态来自 uiSession.sessionStatus（内存 store）：DSH 关闭期间后台
+      // 会话跑完的 completionUnread 永久丢失，重启后面板看不到任何处理进度。
+      // 这里把每次评估出的状态落 localStorage（key 与 links 同构）：
+      // - done 是粘性进度记录——实时归零（看过会话/重启）后仍保留并兜底显示，
+      //   直到再次处理 / 会话被删 / 卡片离开「指派给我」列表被清理；
+      // - running/ask 是瞬态，只用于监控未就绪时（DSH 刚启动）短暂兜底显示。
+      var STATES_KEY = 'dsh-zentao-panel.states.v1';
+      var statesFallback = null; // localStorage 不可用时的进程内兜底（与 links 同模式）
+
+      function readStateMap() {
+        var s = linkStorage();
+        if (s) {
+          try {
+            var v = s.getItem(STATES_KEY) ? JSON.parse(s.getItem(STATES_KEY)) : null;
+            if (v && typeof v === 'object') return v;
+          } catch (e) { /* 坏数据当空 */ }
+          return {};
+        }
+        return statesFallback || (statesFallback = {});
+      }
+      function writeStateMap(map) {
+        var s = linkStorage();
+        if (s) {
+          try { s.setItem(STATES_KEY, JSON.stringify(map)); return; } catch (e) { /* 配额满 → 退内存 */ }
+        }
+        statesFallback = map;
+      }
+
+      /** 状态源就绪判定：sessionStatus 快照里有任何条目才算就绪。
+       *  空 Map/对象 = DSH 刚启动还没跟踪任何会话 → 不做「状态已结束」类写删（防重启风暴）。 */
+      function statusMapReady(statusMap) {
+        if (!statusMap) return false;
+        if (typeof statusMap.size === 'number') return statusMap.size > 0;
+        for (var k in statusMap) { if (k !== '__proto__') return true; }
+        return false;
+      }
+
+      /** 活性状态落盘（watchEval 每次评估后调用）。
+       *  会话被删（byIdReady 且无该行）→ 一律删；live 有值 → 记录（状态或会话变了才
+       *  刷新 at，同一状态保留原时间——「更新于」语义要的是状态变化时刻）；
+       *  live 归零 → done 保留（粘性）；**running 归零 → 升级为 done**（宿主的完成未读
+       *  只对「后台」会话置位——用户正看着的会话（插入对话跳过去手动发、点 chip 去看过）
+       *  跑完永远不置位，只认 completionUnread 会把「完成」漏成「无状态」）；ask 归零 =
+       *  用户已回应（agent 会继续跑），不是完成 → 删。
+       *  「确认结束」信号 confirmed = 状态源就绪（快照非空）或该会话在状态源里有行
+       *  （有行且全 false = 真实 idle——比「整个 Map 非空」更准，避免跑完瞬间 Map
+       *  恰好清空时误判成「未就绪」而卡在「处理中」）。 */
+      function syncPersistedStates(entries, states, opts, now) {
+        var t = (typeof now === 'number' && now) || Date.now();
+        var map = null, dirty = false;
+        for (var i = 0; i < entries.length; i++) {
+          var en = entries[i];
+          var live = states[en.sessionId] || null;
+          var gone = opts.byIdReady && opts.byId && opts.byId[en.sessionId] === undefined;
+          if (!map) map = readStateMap();
+          var cur = map[en.key];
+          if (live) {
+            if (!cur || cur.state !== live || cur.sessionId !== en.sessionId) {
+              map[en.key] = { sessionId: en.sessionId, state: live, at: t };
+              dirty = true;
+            }
+          } else if (cur) {
+            var confirmed = opts.statusReady
+              || (opts.sessionSeen && opts.sessionSeen[en.sessionId]);
+            if (gone) {
+              delete map[en.key];
+              dirty = true;
+            } else if (cur.state === 'done') {
+              // 粘性进度记录：看过会话/重启后实时归零也保留
+            } else if (!confirmed) {
+              // 没有任何结束信号（DSH 刚启动、状态源全空且无该会话行）→ 不动，防重启风暴
+            } else if (cur.state === 'running') {
+              // running 消失 = 这一轮跑完了（含用户正看着的会话：completionUnread 不置位）
+              map[en.key] = { sessionId: en.sessionId, state: 'done', at: t };
+              dirty = true;
+            } else {
+              // ask 消失 = 用户已回应（agent 会继续跑），不是完成 → 删
+              delete map[en.key];
+              dirty = true;
+            }
+          }
+        }
+        if (dirty && map) writeStateMap(map);
+        return dirty;
+      }
+
+      /** 卡片徽标取值（渲染查询入口）：实时监控优先，实时拿不到 → 兜底持久化进度。
+       *  返回 {state, since}（since = 持久化记录的时间，实时命中时为 null）。
+       *  - done 粘性显示：实时归零也保留——它记录的是「这个事项已处理完」；
+       *  - running/ask 只在监控未就绪（快照没起来 / 状态源为空，DSH 刚启动）时
+       *    兜底显示，就绪后以实时为准，避免把重启前死掉的 turn 显示成「处理中」。 */
+      function resolveLiveState(link, snap, persisted) {
+        if (!link) return null;
+        if (snap && snap.ready && snap.states && snap.states[link.sessionId]) {
+          return { state: snap.states[link.sessionId], since: null };
+        }
+        if (!persisted || !persisted.state) return null;
+        if (persisted.state !== 'done' && snap && snap.ready && snap.statusReady) return null;
+        return { state: persisted.state, since: Number(persisted.at) || null };
+      }
+
+      /** 清理已不在「指派给我」列表里的事项（每次 mine 拉取成功后顺带跑，即「定时清理」）：
+       *  卡片还在线 → 刷新 lastSeen（每小时最多写一次盘，减少 localStorage 磨损）；
+       *  不在线且距 lastSeen（旧值退回 at）超过宽限期 → links 与 states 条目一起删
+       *  （事项已完结/转派，会话关联与处理进度都没意义了）。只动当前账号的条目。
+       *  mine 一次返回 task/bug/story 三类全量，不存在「某类数据没刷新误删」的情况。 */
+      var LINK_GRACE_MS = 72 * 3600 * 1000; // 离开列表 72h 后清理（容忍列表短暂波动）
+      function cleanupStaleLinks(activeId, cards, now) {
+        var t = (typeof now === 'number' && now) || Date.now();
+        var acct = String(activeId || 'anon');
+        var seen = {};
+        var list = Array.isArray(cards) ? cards : [];
+        for (var i = 0; i < list.length; i++) {
+          var c = list[i];
+          if (c && c.kind && c.id != null) seen[c.kind + '-' + c.id] = true;
+        }
+        var links = readLinkMap();
+        var states = readStateMap();
+        var dirtyLinks = false, dirtyStates = false;
+        for (var key in links) {
+          if (!Object.prototype.hasOwnProperty.call(links, key) || key === '__proto__') continue;
+          var pk = parseLinkKey(key);
+          if (!pk || pk.activeId !== acct) continue;
+          var v = links[key];
+          if (seen[pk.kind + '-' + pk.id]) {
+            var ls = Number(v && v.lastSeen) || 0;
+            if (t - ls > 3600 * 1000) { v.lastSeen = t; dirtyLinks = true; }
+            continue;
+          }
+          // 不在列表：旧格式值没有 lastSeen 时退回 at（处理时间）作计时基准
+          var ref = Number(v && (v.lastSeen || v.at)) || 0;
+          if (t - ref > LINK_GRACE_MS) {
+            delete links[key]; dirtyLinks = true;
+            if (Object.prototype.hasOwnProperty.call(states, key)) { delete states[key]; dirtyStates = true; }
+          }
+        }
+        // 孤儿进度记录（关联已没了）同样按宽限期清
+        for (var sk in states) {
+          if (!Object.prototype.hasOwnProperty.call(states, sk) || sk === '__proto__') continue;
+          var spk = parseLinkKey(sk);
+          if (!spk || spk.activeId !== acct || links[sk]) continue;
+          var sref = Number(states[sk] && states[sk].at) || t;
+          if (t - sref > LINK_GRACE_MS) { delete states[sk]; dirtyStates = true; }
+        }
+        if (dirtyLinks) writeLinkMap(links);
+        if (dirtyStates) writeStateMap(states);
+        if (dirtyLinks || dirtyStates) watchPoke();
+        return dirtyLinks || dirtyStates;
       }
 
       /**
@@ -1179,14 +1337,17 @@
         } catch (e) { byId = null; }
         var byIdReady = false;
         if (byId) for (var b in byId) { if (b !== '__proto__') { byIdReady = true; break; } }
+        var statusReady = statusMapReady(statusMap);
 
         var states = {};
+        var sessionSeen = {}; // 该会话在 sessionStatus 快照里有行（有行且全 false = 真实 idle）
         var events = [];
         for (var i = 0; i < entries.length; i++) {
           var en = entries[i];
           var st = statusMap
             ? (typeof statusMap.get === 'function' ? statusMap.get(en.sessionId) : statusMap[en.sessionId])
             : undefined;
+          sessionSeen[en.sessionId] = (st !== undefined && st !== null);
           var next = st
             ? { running: !!st.running, pendingInteraction: st.pendingInteraction || null, completionUnread: !!st.completionUnread }
             : null;
@@ -1203,8 +1364,11 @@
           states[en.sessionId] = deriveLiveState(next, byIdReady ? (byId[en.sessionId] !== undefined) : true);
         }
 
-        watch.snapshot = { ready: true, activeId: activeId, states: states };
+        watch.snapshot = { ready: true, activeId: activeId, statusReady: statusReady, states: states };
         watchEmit();
+        // 处理进度落盘（states.v1）：重启/重开面板后徽标可恢复；粘性 done 记录「处理完」
+        syncPersistedStates(entries, states,
+          { byId: byId, byIdReady: byIdReady, statusReady: statusReady, sessionSeen: sessionSeen });
         for (var k = 0; k < events.length; k++) watchFire(events[k]);
       }
 
@@ -1304,12 +1468,16 @@
 
       /**
        * 处理中任务的活性徽标（M6）：处理中三点跳动 / 等你决策琥珀呼吸 / 已完成绿色对勾。
-       * state 来自 watchStateForCard（关联会话的 running/pendingInteraction/completionUnread）。
+       * state 来自 resolveLiveState（实时优先，持久化进度兜底）；since 有值时说明
+       * 是持久化兜底（DSH 重启后恢复的进度），title 里带「更新于」时间。
        */
       function LiveBadge(props) {
         var s = props.state;
         if (!s) return null;
-        return h('span', { className: 'ztp-live ' + s, title: LIVE_STATE_TITLE[s] },
+        return h('span', {
+          className: 'ztp-live ' + s,
+          title: LIVE_STATE_TITLE[s] + (props.since ? '（更新于 ' + fmtLinkAt(props.since) + '）' : ''),
+        },
           s === 'running'
             ? h('span', { className: 'ztp-dots' }, h('b'), h('b'), h('b'))
             : s === 'ask'
@@ -1350,7 +1518,7 @@
         },
           h('div', { className: 'ztp-top' },
             h(KindTag, { kind: c.kind }),
-            live ? h(LiveBadge, { state: live }) : null,
+            live ? h(LiveBadge, { state: live, since: props.liveSince || null }) : null,
             h('span', { className: 'ztp-id' }, '#' + c.id),
             // 禅道超链接在卡片上（详情里不再放链接/按钮）；draggable 关掉避免链接拖拽覆盖卡片 Markdown 拖拽
             c.url ? h('a', {
@@ -1418,7 +1586,7 @@
               + (props.live === 'ask' ? ' ztp-live-ask' : props.live === 'done' ? ' ztp-live-done' : '') },
             h('div', { className: 'ztp-row' },
               h(KindTag, { kind: card.kind }),
-              props.live ? h(LiveBadge, { state: props.live }) : null,
+              props.live ? h(LiveBadge, { state: props.live, since: props.liveSince || null }) : null,
               h('span', { className: 'ztp-id' }, '#' + card.id)),
             h('div', { className: 'ztp-detail-title' }, card.title || ''),
             h('div', { className: 'ztp-meta' },
@@ -1809,12 +1977,16 @@
         }, [toast[0]]);
 
         // 面板数据同步进模块级缓存：tab 卸载（切会话/关 tab）后重挂时用它秒恢复；
-        // mine/激活账号变化同时通知办公室监控（白板差集、工位取名依赖 mine）
+        // mine 到手后顺带清理：已不在「指派给我」列表超过宽限期的事项 → 关联/进度一起删
         useEffect(function () {
           paneCache.tab = tab[0];
           paneCache.status = status[0];
           paneCache.mine = mine[0];
           paneCache.detailCard = detailCard[0];
+          if (mine[0] && mine[0].cards && status[0] && status[0].activeId
+            && cleanupStaleLinks(status[0].activeId, mine[0].cards)) {
+            linkRev[1](function (v) { return v + 1; });
+          }
           watchPoke();
         }, [tab[0], status[0], mine[0], detailCard[0]]);
 
@@ -1956,11 +2128,20 @@
         function linkViewOf(card) {
           return sessionLinkView(linkMap[sessionLinkKey(activeAcct, card)] || null, sessionRows);
         }
-        /** 卡片活性：关联会话在跑（running）/ 等你决策（ask）/ 完成未读（done）。 */
+        /** 卡片活性：实时监控优先（running/ask/done）；实时拿不到 → 兜底持久化进度
+         *  （done 粘性显示「已处理完」，running/ask 仅监控未就绪时短暂兜底，见 resolveLiveState）。 */
+        var stateMap = useMemo(readStateMap, [linkRev[0], liveSnap[0]]);
+        function liveInfoOf(card) {
+          var k = sessionLinkKey(activeAcct, card);
+          return resolveLiveState(linkMap[k], liveSnap[0], stateMap[k] || null);
+        }
         function liveOf(card) {
-          var link = linkMap[sessionLinkKey(activeAcct, card)];
-          if (!link || !liveSnap[0] || !liveSnap[0].ready) return null;
-          return (liveSnap[0].states || {})[link.sessionId] || null;
+          var info = liveInfoOf(card);
+          return info ? info.state : null;
+        }
+        function liveSinceOf(card) {
+          var info = liveInfoOf(card);
+          return info ? info.since : null;
         }
         var filtered = useMemo(function () {
           return cards.filter(function (c) { return c.kind === tab[0]; });
@@ -2005,6 +2186,7 @@
               key: c.kind + '-' + c.id, card: c, active: on,
               linkView: linkViewOf(c),
               live: liveOf(c),
+              liveSince: liveSinceOf(c),
               onOpenSession: function (c2) { openLinkedSession(c2, activeAcct); },
               onOpen: function (x) { detailCard[1](x); },
               onInsert: insertToChat, onDispatch: dispatchCard,
@@ -2025,6 +2207,7 @@
             key: detailCard[0].kind + '-' + detailCard[0].id,
             rpc: rpc, card: detailCard[0],
             live: liveOf(detailCard[0]),
+            liveSince: liveSinceOf(detailCard[0]),
             onBack: function () { detailCard[1](null); },
           });
         }
@@ -2269,6 +2452,13 @@
         watchToastText: watchToastText,
         watchGetSnapshot: watchGetSnapshot,
         watchSubscribe: watchSubscribe,
+        // 处理进度持久化 + 陈旧关联清理
+        readStateMap: readStateMap,
+        statusMapReady: statusMapReady,
+        syncPersistedStates: syncPersistedStates,
+        resolveLiveState: resolveLiveState,
+        cleanupStaleLinks: cleanupStaleLinks,
+        LINK_GRACE_MS: LINK_GRACE_MS,
       };
       return module.exports;
     },

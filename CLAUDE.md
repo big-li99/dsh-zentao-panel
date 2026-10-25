@@ -25,7 +25,7 @@
 | M3 插入输入框 + 新会话下发 | ✅ 服务级 `setDraft` 真机可用；**描述里的截图改为真实图片附件**（`conversation.createDrafts` + `facade.addAttachments`，见 §4.1）；新会话下发待真机复验 |
 | M4 打磨 | 🔄 进行中：2026-10-24 修会话超时静默空白（超时信封识别→自动重登）+ 拉取失败 toast/错误视图；同日改「处理」为**弹层确认式**（先选工作区、接入模型与思考强度再下发，见 §4.2，待真机目视确认）；同日新增**关联会话 chip：处理过的卡片可看会话标题并一键跳回**（见 §4.3，待真机目视确认）；同日晚修复弹层卡「创建中」闭包 bug（§4.2 末）与下发时序优化（预取并行 + setDraft 提前）；同日更晚**入口改为左侧栏全局面板**（§5.1，原右栏「面板固定/跟随」三层修补随之删除——全局面板天然不随会话切换；待真机目视确认）；同日夜按用户要求改**「处理」不自动跳转新会话**（sessions.retain 后台保活替代 openSession，见 §4.2 末，待真机目视确认）；2026-10-25 按用户要求改**「插入对话」为弹层式新会话**（同「处理」弹层，但建会话后**自动跳转**过去、只填草稿**不自动发送**，见 §4.5，待真机目视确认）；其余未做 |
 | M5 多账号 | ✅ 2026-10-24 完成：schema v2（accounts[]+activeId，旧格式自动迁移）、每账号独立 client/cookie/缓存、账号菜单切换/添加/按账号移除；测试全绿（multi 25 项 + host 新增 4 项），待真机目视确认 |
-| M6 实时状态 | ✅ 2026-10-24 完成：**禅道卡片活性徽标（处理中/等你决策/已完成）+ 完成/等决策常驻提醒 toast（「去看看」跳回会话）**，信号来自 DSH 宿主 `uiSession.sessionStatus`（见 §4.4）。当天先做过一版「鲸鱼娘办公室」可视化面板（左侧栏第二面板 + 自绘 SVG 工位场景，角色参考 Neko3000/deepseek-whalechan），**用户看过后明确否决（「太垃圾」）已整体移除**——不要再做办公室/娘化角色类可视化；保留监控内核改为卡片上的活性体现。仅 client 改动，⌘R 生效 |
+| M6 实时状态 | ✅ 2026-10-24 完成：**禅道卡片活性徽标（处理中/等你决策/已完成）+ 完成/等决策常驻提醒 toast（「去看看」跳回会话）**，信号来自 DSH 宿主 `uiSession.sessionStatus`（见 §4.4）。当天先做过一版「鲸鱼娘办公室」可视化面板（左侧栏第二面板 + 自绘 SVG 工位场景，角色参考 Neko3000/deepseek-whalechan），**用户看过后明确否决（「太垃圾」）已整体移除**——不要再做办公室/娘化角色类可视化；保留监控内核改为卡片上的活性体现。2026-10-25 补**处理进度持久化（states.v1）+ 不在面板列表事项的定时清理**（见 §4.6，待真机目视确认）。仅 client 改动，⌘R 生效 |
 
 测试命令：
 ```bash
@@ -363,6 +363,20 @@ Neko3000/deepseek-whalechan 公开规范——**注意其图片素材不在开�
 - **注意**：跳转 = openSession 内部 `selectPanel(null)` → 禅道面板卸载，面板 toast 随之消失——sticky 提示只覆盖跳转前的准备期，结果以用户落点（新会话里的草稿/附件）为准，别在跳转后再指望面板 toast。
 - 测试：`test/client.mjs` 新增 10 项（传工作区建会话不掺 cwd / 自动跳转 openSession / setDraft 先于 open / 不 submit / 跳转后释放 retain / selectModel 照常 / 附件照常 / 草稿文本就位 / uiWorkspace 缺失 draft 模式不释放 / conversation 缺失 unavailable+释放）。
 
+### 4.6 处理进度持久化 + 陈旧事项清理（2026-10-25，用户要求）
+
+用户痛点：任务/Bug 的**处理进度没有持久化**——M6 活性徽标来自 `uiSession.sessionStatus`（内存 store），DSH 关闭期间后台会话跑完的 completionUnread 永久丢失，重启/重开面板后看不到任何进度；且 links.v1 只增不减，事项完结/转派离开「指派给我」列表后关联与状态残留。仅 client 改动，⌘R 生效。
+
+- **`states.v1` localStorage 持久化**（key 与 links 同构 `<activeId>/<kind>-<id>`，读坏自愈、进程内兜底，同 links.v1 模式）：
+  - `watchEval` 每次评估后调 `syncPersistedStates` 落盘：`{sessionId, state, at}`，**状态或会话变化才刷新 `at`**（「更新于」语义取状态变化时刻，同状态不重写）。
+  - **done 是粘性进度记录**：实时归零（看过会话/重启）后仍保留——它表达「这个事项已处理完」。
+  - **⚠️⚠️ 真机踩坑（2026-10-25，#16141 未标完成）**：宿主的 completionUnread **只对后台会话置位**——用户正看着的会话（「插入对话」跳过去手动发送、或中途点 chip/toast 去看过）跑完**永远不产生完成信号**。第一版把「running 归零」当瞬态删记录 → 这些场景下卡片漏成「无状态」。已修：**running 归零（有结束信号时）→ 升级记录为 done**（这一轮确实跑完了；steer 排队会重新出现 running 覆盖回去）；**ask 归零 = 用户已回应 → 删**（不是完成）。结束确认信号 `confirmed = statusReady || sessionSeen[sessionId]`（状态源非空，或该会话在快照里有行且全 false=真实 idle——比「Map 非空」更准，防跑完瞬间 Map 恰好清空时卡「处理中」）；两者皆无（DSH 刚启动）→ 不动（防重启风暴）。**注意：第一版期间跑完的任务记录已被删除，无法事后追补**（不敢追补——insert 模式建了会话没发送的也会是 idle，误标「已完成」），只保证此后正确。
+  - **会话被删**（byIdReady 且无该行）→ 一律删（与 chip「会话已删除」语义一致）。**再处理**（saveSessionLink 覆盖新会话）→ 旧进度记录作废。
+- **渲染兜底 `resolveLiveState(link, snap, persisted)`**（liveOf/liveSinceOf 查询入口，返回 `{state, since}`）：实时优先；实时拿不到 → persisted 兜底——**done 粘性显示**，running/ask **仅在监控未就绪时**兜底（`watch.snapshot` 新增 `statusReady` 闸门，就绪后以实时为准，避免把重启前死掉的 turn 显示成「处理中」）。`LiveBadge` 加 `since` prop（兜底显示时 title 带「更新于 M月d日 HH:mm」）。`watchStateForCard` 保持纯实时（toast 边沿用）。
+- **定时清理 `cleanupStaleLinks(activeId, cards, now)`**：挂在 ZentaoPane 的 paneCache 同步 effect 里——**每次 mine 拉取成功后顺带跑**（mine 一次返回三类全量，不存在某类没刷新误删；「定时」即每次拉取/未来轮询）。规则：卡片在线 → 刷新 `lastSeen`（**每小时最多写一次盘**，减少 localStorage 磨损）；离线超过宽限期 `LINK_GRACE_MS = 72h`（旧格式值无 lastSeen 退回 `at` 计时）→ links 与 states 条目一起删；孤儿进度记录（无对应 link）同规则清；只动当前账号。有删动 bump `linkRev` 重读。
+- `saveSessionLink` 值新增 `lastSeen`（= at，清理计时基准）。
+- 测试：`test/client.mjs` 新增 29 项（states.v1 自愈 / statusMapReady / syncPersistedStates 8 项含粘性 done、running 归零升级 done、sessionSeen 通道、重启防护、会话删除 / resolveLiveState 5 项 / cleanupStaleLinks 7 项含宽限保留、旧格式退回、他账号不动、孤儿清理、幂等 / saveSessionLink lastSeen 与换会话作废 / watchEval 联动落盘 + statusReady / 重启恢复 2 项）。⚠️ 测试注意：cleanup 会 `watchPoke` → watchEval，fake `sessions.list` 的 byId 必须覆盖全部关联会话，否则被误判「会话已删」连带删 done 记录。
+
 ### 5. DSH 插件体系（本机实测）
 
 - DSH Desktop **0.2.1-rc.2**，desktop profile，macOS
@@ -494,15 +508,23 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   注意：**正开着的会话完成不会弹 toast**（completionUnread 只在后台会话置位，宿主语义）；
   ⚠️ 若已装 dsh-notify-me，它也会对同一事件发系统通知（两条是不同通道，可自行关掉其一）。
   **仅 client 改动，⌘R 生效**
+- M6 进度持久化 + 清理（2026-10-25，见 §4.6）：① 「处理」→ 会话跑完 → 卡片绿「已完成」→
+  **点开该会话看完**（实时徽标本应消失）→ 回面板卡片**仍显示绿色「已完成」**（粘性进度记录，
+  hover 徽标 title 带「更新于 …」时间）；② **重启 DSH Desktop** → 打开禅道面板 → 已完成事项的
+  「已完成」徽标**立即可见**（states.v1 兜底，不等监控就绪）；DSH 关闭期间后台会话跑完的也能看到；
+  ③ 在禅道把某张处理过的卡完结/转派（离开「指派给我」列表）→ 72h 后面板任一次拉取成功时，
+  该卡的会话 chip 与徽标一起消失（links/states 条目被清；验证可临时把 `LINK_GRACE_MS` 调小）；
+  ④ 重启后正在跑的 turn 若已死，**不**显示「处理中」（瞬态兜底只在监控未就绪的过渡期生效）。
+  **仅 client 改动，⌘R 生效**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-25 复跑，103 项）：`test/client.mjs` 103 项（左侧栏注册契约 8 项：main/panellist
+- 测试现状（2026-10-25 复跑，client 132 项）：`test/client.mjs` 132 项（左侧栏注册契约 8 项：main/panellist
   配对注册、key=id 同值、label/order、不挂悬浮兜底；「处理」弹层上下文收集 + workspaceId 传参
   + selectModel 按会话设置 provider/model/思考强度 + 被拒时不自动发送 + 会话关联存取/三态视图/跳转清理
   + 下发时序优化 5 项 + **「处理」不跳转 4 项**（只 retain 不 openSession / retain 后 setDraft 先于
   drafts / facade 缺失返回 unavailable / 降级释放 retain）；
   **「插入对话」改版 10 项**（传工作区建会话 / 自动跳转 / setDraft 先于 open / 不 submit /
   跳转后释放 retain / selectModel 照常 / 附件照常 / 草稿就位 / uiWorkspace 缺失不释放 / conversation
-  缺失降级+释放，见 §4.5）；M6 实时状态 22 项，见 §4.4）、
+  缺失降级+释放，见 §4.5）；M6 实时状态 22 项，见 §4.4；**进度持久化 + 清理 29 项，见 §4.6**）、
   `test/multi.mjs` 25 项、`test/protocol.mjs` 9 项全绿；`test/host.mjs` 19 项（真机 20 张卡片：task 2 / bug 8 / story 10）、
   `test/smoke.mjs`（含 `extractImageRefs` / `fetchImage` 真图下载）需真实禅道凭据。
   注意：沙箱会话里跑 host.mjs 读不了 `~/.dsh/zentao-panel/config.json`（EPERM），需把凭据文件拷进

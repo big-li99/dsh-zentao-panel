@@ -659,5 +659,159 @@ mod._test.watchEval();
 wsnap = mod._test.watchGetSnapshot();
 check('关联会话被删 → 活性清零（不亮徽标）', wsnap.states['s-task'] === null);
 
+// ── 处理进度持久化（states.v1）+ 陈旧关联清理 ──
+// M6 活性状态来自内存 store：DSH 关闭期间会话跑完的完成事件会丢。
+// states.v1 落盘 + liveOf 兜底 → 重启/重开面板后徽标可恢复处理进度；
+// links.lastSeen + cleanupStaleLinks → 不在「指派给我」列表超宽限期的事项清理。
+const SKEY = 'dsh-zentao-panel.states.v1';
+const NOW = 1761000000000;
+const H = 3600 * 1000;
+const TT = mod._test;
+
+lsBacking.set(SKEY, '{oops');
+check('states.v1 存储损坏时读作空表不抛错（自愈）', typeof TT.readStateMap() === 'object');
+lsBacking.delete(SKEY);
+
+check('statusMapReady：Map 有条目 true / 空 Map false / null false',
+  TT.statusMapReady(new Map([['s', {}]])) === true
+  && TT.statusMapReady(new Map()) === false && TT.statusMapReady(null) === false);
+
+// syncPersistedStates：落盘 / at 稳定 / 粘性 done / 瞬态删除 / 重启防护 / 会话删除
+lsBacking.clear();
+const sEnts = [{ key: 'acct1/bug-123', sessionId: 's1', kind: 'bug', id: 123, title: 'x' }];
+const SOPT = { byId: { s1: {} }, byIdReady: true, statusReady: true };
+TT.syncPersistedStates(sEnts, { s1: 'running' }, SOPT, NOW);
+check('syncPersistedStates：running → 落盘 {sessionId, state, at}',
+  JSON.stringify(TT.readStateMap()['acct1/bug-123']) === JSON.stringify({ sessionId: 's1', state: 'running', at: NOW }));
+TT.syncPersistedStates(sEnts, { s1: 'running' }, SOPT, NOW + 5000);
+check('syncPersistedStates：同状态不刷新 at（进度时间稳定）',
+  TT.readStateMap()['acct1/bug-123'].at === NOW);
+TT.syncPersistedStates(sEnts, { s1: 'done' }, SOPT, NOW + 9000);
+check('syncPersistedStates：状态变化刷新 at', TT.readStateMap()['acct1/bug-123'].at === NOW + 9000);
+TT.syncPersistedStates(sEnts, { s1: null }, SOPT, NOW + 10000);
+check('syncPersistedStates：实时归零后 done 粘性保留（进度记录）',
+  TT.readStateMap()['acct1/bug-123'].state === 'done');
+TT.syncPersistedStates(sEnts, { s1: 'running' }, SOPT, NOW + 11000);
+TT.syncPersistedStates(sEnts, { s1: null }, SOPT, NOW + 12000);
+check('syncPersistedStates：running 归零且状态源就绪 → 升级为 done（真机坑：正看着的会话跑完 completionUnread 不置位，旧逻辑删记录漏成「无状态」）',
+  TT.readStateMap()['acct1/bug-123'].state === 'done' && TT.readStateMap()['acct1/bug-123'].at === NOW + 12000);
+TT.syncPersistedStates(sEnts, { s1: 'running' }, { byId: { s1: {} }, byIdReady: true, statusReady: false, sessionSeen: { s1: true } }, NOW + 12500);
+TT.syncPersistedStates(sEnts, { s1: null }, { byId: { s1: {} }, byIdReady: true, statusReady: false, sessionSeen: { s1: true } }, NOW + 12700);
+check('syncPersistedStates：状态源全空但该会话有行（真实 idle）→ 照常升级 done',
+  TT.readStateMap()['acct1/bug-123'].state === 'done');
+TT.syncPersistedStates(sEnts, { s1: 'running' }, { byId: { s1: {} }, byIdReady: true, statusReady: false }, NOW + 13000);
+TT.syncPersistedStates(sEnts, { s1: null }, { byId: { s1: {} }, byIdReady: true, statusReady: false }, NOW + 14000);
+check('syncPersistedStates：无结束信号（状态源空且无该会话行，DSH 刚启动）→ 不动（防重启风暴）',
+  TT.readStateMap()['acct1/bug-123'].state === 'running');
+TT.syncPersistedStates(sEnts, { s1: 'ask' }, SOPT, NOW + 14500);
+TT.syncPersistedStates(sEnts, { s1: null }, SOPT, NOW + 15000);
+check('syncPersistedStates：ask 归零且状态源就绪 → 删记录（用户已回应，非完成）',
+  TT.readStateMap()['acct1/bug-123'] === undefined);
+TT.syncPersistedStates(sEnts, { s1: 'done' }, { byId: { s1: {} }, byIdReady: true, statusReady: false }, NOW + 15500);
+TT.syncPersistedStates(sEnts, { s1: null }, { byId: {}, byIdReady: true, statusReady: false }, NOW + 16000);
+check('syncPersistedStates：会话被删 → done 也删（与 chip「会话已删除」语义一致）',
+  TT.readStateMap()['acct1/bug-123'] === undefined);
+
+// resolveLiveState：实时优先 + 持久化兜底（done 粘性 / 瞬态仅在监控未就绪时）
+const R = TT.resolveLiveState;
+check('resolveLiveState：实时命中优先（since 为 null）',
+  R({ sessionId: 's1' }, { ready: true, states: { s1: 'running' } }, { state: 'done', at: 1 }).state === 'running'
+  && R({ sessionId: 's1' }, { ready: true, states: { s1: 'running' } }, { state: 'done', at: 1 }).since === null);
+check('resolveLiveState：实时归零 → 持久化 done 兜底（带 since 供徽标显示时间）',
+  JSON.stringify(R({ sessionId: 's1' }, { ready: true, statusReady: true, states: { s1: null } }, { state: 'done', at: 123 }))
+  === JSON.stringify({ state: 'done', since: 123 }));
+check('resolveLiveState：监控未就绪 → 瞬态（running/ask）兜底显示（重启过渡期）',
+  R({ sessionId: 's1' }, { ready: false }, { state: 'running', at: 5 }).state === 'running'
+  && R({ sessionId: 's1' }, null, { state: 'ask', at: 5 }).state === 'ask');
+check('resolveLiveState：监控就绪后瞬态不再兜底（重启前死掉的 turn 不显示「处理中」）',
+  R({ sessionId: 's1' }, { ready: true, statusReady: true, states: {} }, { state: 'running', at: 5 }) === null
+  && R({ sessionId: 's1' }, { ready: true, statusReady: true, states: {} }, { state: 'ask', at: 5 }) === null);
+check('resolveLiveState：无关联 / 无持久化 → null',
+  R(null, {}, null) === null && R({ sessionId: 's1' }, { ready: true, states: {} }, null) === null);
+
+// cleanupStaleLinks：在线刷 lastSeen / 宽限期保留 / 超期删 / 他账号不动 / 孤儿清理 / 幂等
+// （清理会 watchPoke → watchEval：byId 覆盖全部关联会话、状态源为空，模拟真实存活场景）
+ctx.get = function (name) {
+  if (name === 'uiSession') return {
+    sessionStatus: { getSnapshot: () => new Map(), subscribe() { return () => {}; } },
+  };
+  if (name === 'sessions') return {
+    list: { getSnapshot: () => ({ byId: { 's-1': {}, 's-2': {}, 's-3': {}, 's-9': {} } }), subscribe() { return () => {}; } },
+  };
+  return undefined;
+};
+lsBacking.clear();
+const mkLink = (id, at, lastSeen) => ({ sessionId: 's-' + id, at, lastSeen, kind: 'bug', id, title: 't' + id });
+lsBacking.set('dsh-zentao-panel.links.v1', JSON.stringify({
+  'acct1/bug-1': mkLink(1, NOW - 100 * H, NOW - 100 * H), // 在线
+  'acct1/bug-2': mkLink(2, NOW - 100 * H, NOW - 2 * H),   // 离线 2h（宽限期内）
+  'acct1/bug-3': mkLink(3, NOW - 200 * H),                // 旧格式无 lastSeen，离线 200h
+  'acct2/bug-9': mkLink(9, NOW - 200 * H),                // 其他账号
+}));
+lsBacking.set(SKEY, JSON.stringify({
+  'acct1/bug-2': { sessionId: 's-2', state: 'done', at: NOW - 2 * H },
+  'acct1/bug-3': { sessionId: 's-3', state: 'done', at: NOW - 200 * H },
+  'acct2/bug-9': { sessionId: 's-9', state: 'done', at: NOW - 200 * H },
+  'acct1/bug-7': { sessionId: 's-7', state: 'done', at: NOW - 200 * H }, // 孤儿（无 link）
+}));
+const mineCards = [{ kind: 'task', id: 500 }, { kind: 'bug', id: 1 }];
+const cleaned1 = TT.cleanupStaleLinks('acct1', mineCards, NOW);
+const lm2 = JSON.parse(lsBacking.get('dsh-zentao-panel.links.v1'));
+const sm2 = JSON.parse(lsBacking.get(SKEY));
+check('cleanupStaleLinks：超期离线删除（旧格式无 lastSeen 退回 at 计时），links 与进度一起删',
+  lm2['acct1/bug-3'] === undefined && sm2['acct1/bug-3'] === undefined);
+check('cleanupStaleLinks：宽限期内（2h < 72h）保留', lm2['acct1/bug-2'] !== undefined && sm2['acct1/bug-2'].state === 'done');
+check('cleanupStaleLinks：其他账号条目不动', lm2['acct2/bug-9'] !== undefined && sm2['acct2/bug-9'] !== undefined);
+check('cleanupStaleLinks：孤儿进度记录（无关联）同样清理', sm2['acct1/bug-7'] === undefined);
+check('cleanupStaleLinks：在线条目刷新 lastSeen（计时基准重置）', lm2['acct1/bug-1'].lastSeen === NOW);
+check('cleanupStaleLinks：有清理动作返回 true', cleaned1 === true);
+check('cleanupStaleLinks：幂等（紧接着再跑无动作 → false，1h 内不重写 lastSeen）',
+  TT.cleanupStaleLinks('acct1', mineCards, NOW + 1000) === false
+  && JSON.parse(lsBacking.get('dsh-zentao-panel.links.v1'))['acct1/bug-1'].lastSeen === NOW);
+
+// saveSessionLink 值带 lastSeen；再处理会清掉旧进度记录
+lsBacking.clear();
+const nl = TT.saveSessionLink('acct1', { kind: 'bug', id: 42, title: 'x' }, 's-42');
+check('saveSessionLink 值带 lastSeen（清理计时基准）', Number(nl.lastSeen) > 0 && Number(nl.lastSeen) === Number(nl.at));
+TT.syncPersistedStates([{ key: 'acct1/bug-42', sessionId: 's-42', kind: 'bug', id: 42, title: 'x' }],
+  { 's-42': 'done' }, SOPT, NOW);
+TT.saveSessionLink('acct1', { kind: 'bug', id: 42, title: 'x' }, 's-43');
+check('saveSessionLink 换新会话 → 旧进度记录作废（防徽标显示旧会话陈旧状态）',
+  TT.readStateMap()['acct1/bug-42'] === undefined);
+
+// watchEval 联动：评估落盘 + 快照带 statusReady 闸门
+lsBacking.clear();
+ctx.get = function (name) {
+  if (name === 'uiSession') return {
+    sessionStatus: { getSnapshot: () => new Map([['s-w', { running: true }]]), subscribe() { return () => {}; } },
+  };
+  if (name === 'sessions') return {
+    list: { getSnapshot: () => ({ byId: { 's-w': {} } }), subscribe() { return () => {}; } },
+  };
+  return undefined;
+};
+TT.paneCache.status = { activeId: 'acct1' };
+TT.saveSessionLink('acct1', { kind: 'task', id: 77, title: 'y' }, 's-w');
+TT.watchEval();
+check('watchEval 联动：评估出的 running 状态落盘 states.v1',
+  TT.readStateMap()['acct1/task-77'] && TT.readStateMap()['acct1/task-77'].state === 'running');
+check('watchEval 快照带 statusReady（瞬态兜底显示的闸门）', TT.watchGetSnapshot().statusReady === true);
+
+// 重启恢复场景：面板重开/DSH 重启 → 徽标从持久化进度恢复
+const infoRestart = TT.resolveLiveState(
+  { sessionId: 's-w' },
+  { ready: false, activeId: 'acct1', states: {} },   // 新进程监控还没起来
+  TT.readStateMap()['acct1/task-77']);
+check('重启场景：监控未就绪 → 持久化 running 兜底显示',
+  infoRestart && infoRestart.state === 'running' && infoRestart.since > 0);
+TT.syncPersistedStates([{ key: 'acct1/task-77', sessionId: 's-w', kind: 'task', id: 77, title: 'y' }],
+  { 's-w': 'done' }, { byId: { 's-w': {} }, byIdReady: true, statusReady: true }, NOW);
+const infoDone = TT.resolveLiveState(
+  { sessionId: 's-w' },
+  { ready: true, statusReady: true, states: { 's-w': null } }, // 就绪但实时归零（重启期间跑完）
+  TT.readStateMap()['acct1/task-77']);
+check('重启场景：关闭期间跑完（完成事件已丢）→ 持久化 done 仍显示「已完成」',
+  infoDone && infoDone.state === 'done' && infoDone.since === NOW);
+
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);
