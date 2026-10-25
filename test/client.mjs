@@ -1478,6 +1478,37 @@ qfChips[2].props.onClick();
 check('QfBar：点激活项 = 清除（pick null）；点其他项 = 切换',
   qfPicks[0] === null && qfPicks[1] === 'overdue');
 
+// ── 一键复制（2026-10-25 迭代）：#id+标题 / 完整 Markdown ──
+const cpLog = [];
+window.navigator = { clipboard: { writeText: (t) => { cpLog.push(t); return Promise.resolve(); } } };
+check('copyToClipboard：clipboard API 成功路径',
+  TT.copyToClipboard('#1 标题').then((ok) => ok === true && cpLog[0] === '#1 标题'));
+delete window.navigator;
+window.navigator = { /* 无 clipboard → DOM 兜底（execCommand 假失败） */ };
+check('copyToClipboard：无 clipboard API 时走 DOM 兜底不抛错',
+  TT.copyToClipboard('x').then((ok) => ok === false));
+let cpCard = null;
+const cpNode = TT.CardItem({
+  card: bc1, linkView: null, live: null, onCopyTitle: (c) => { cpCard = c; },
+  onInsert: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
+});
+const cpActs = cpNode.children.find((n) => n && n.props && n.props.className === 'ztp-acts');
+const cpBtn = cpActs.children.find((n) => n && n.type === 'button' && String(n.props.title).startsWith('复制「#'));
+cpBtn.props.onClick({ stopPropagation() {} });
+check('CardItem：动作行有复制按钮，点击回传卡片（复制 #id+标题）',
+  Boolean(cpBtn) && cpCard === bc1 && typeof cpBtn.children[0].type === 'function');
+let cpMd = null;
+const cpDv = TT.DetailView({
+  card: bc1, rpc: () => {}, live: null, onBack: () => {},
+  onCopyMd: (c, d) => { cpMd = [c, d]; },
+});
+const cpBar = cpDv.children.find((n) => n && n.props && n.props.className === 'ztp-detail-bar');
+const cpMdBtn = cpBar.children.find((n) => n && n.props && n.props.className === 'ztp-detail-copy');
+cpMdBtn.props.onClick();
+check('DetailView：返回栏有「复制 Markdown」按钮（fake useEffect 下 detail=null）',
+  Boolean(cpMdBtn) && typeof cpMdBtn.children[0].type === 'function' && cpMdBtn.children[1] === '复制 Markdown'
+  && cpMd[0] === bc1 && cpMd[1] === null);
+
 // ── 完成闭环（2026-10-25 迭代）：finishUrl 深链 + 详情 done 态按钮 ──
 check('finishUrl：三类卡片替换为操作页（同 base 同 id）',
   TT.finishUrl({ kind: 'bug', id: 123, url: 'http://z:8090/bug-view-123.html' }) === 'http://z:8090/bug-resolve-123.html'

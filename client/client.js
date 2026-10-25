@@ -196,6 +196,9 @@
         // 详情
         '.ztp-detail-bar{display:flex;align-items:center;gap:8px;margin:0 0 8px;}',
         '.ztp-back{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;height:24px;padding:0 6px 0 2px;border-radius:var(--dsw-radius-sm);cursor:pointer;display:inline-flex;align-items:center;gap:3px;}',
+        '.ztp-detail-copy{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;height:24px;padding:0 6px;border-radius:var(--dsw-alias-radius-sm,var(--dsw-radius-sm));cursor:pointer;display:inline-flex;align-items:center;gap:3px;margin-left:auto;}',
+        '.ztp-detail-copy:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover);}',
+        '.ztp-detail-copy svg{width:13px;height:13px;}',
         '.ztp-back:hover{color:var(--dsw-alias-label-primary);}',
         '.ztp-back svg{width:13px;height:13px;}',
         // 卡片 #id 旁的禅道外链小图标（详情里不再放链接/按钮，超链接迁到卡片上）
@@ -455,6 +458,13 @@
       function ChatIcon() {
         return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
           h('path', { d: 'M3 4.3c0-.72.58-1.3 1.3-1.3h7.4c.72 0 1.3.58 1.3 1.3v5c0 .72-.58 1.3-1.3 1.3H7.8L5.2 13.2v-2.6h-.9C3.58 10.6 3 10.02 3 9.3z', stroke: 'currentColor', strokeWidth: 1.1, strokeLinejoin: 'round' }),
+        );
+      }
+      /** 复制（卡片动作行/详情栏）：两张叠纸。 */
+      function CopyIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('rect', { x: 5.5, y: 5.5, width: 8, height: 8, rx: 1.5, stroke: 'currentColor', strokeWidth: 1.1 }),
+          h('path', { d: 'M10.5 3.5v-.2c0-.72-.58-1.3-1.3-1.3H3.8c-.72 0-1.3.58-1.3 1.3v5.4c0 .72.58 1.3 1.3 1.3H4', stroke: 'currentColor', strokeWidth: 1.1, strokeLinecap: 'round' }),
         );
       }
       /** 批量选择入口（工具栏）：方框 + 勾。 */
@@ -1128,6 +1138,37 @@
             return { ok: true, count: ids.length };
           });
         });
+      }
+
+      /**
+       * 复制文本到剪贴板（一键复制用）：优先 navigator.clipboard，失败/不存在退
+       * textarea + execCommand（老环境兜底）。resolve true = 复制成功。
+       */
+      function copyToClipboard(text) {
+        var s = String(text == null ? '' : text);
+        try {
+          var nav = root.navigator;
+          if (nav && nav.clipboard && typeof nav.clipboard.writeText === 'function') {
+            return Promise.resolve(nav.clipboard.writeText(s)).then(function () { return true; }, function () {
+              return copyViaDom(s);
+            });
+          }
+        } catch (e) { /* 走 DOM 兜底 */ }
+        return Promise.resolve(copyViaDom(s));
+      }
+      function copyViaDom(s) {
+        try {
+          var ta = document.createElement('textarea');
+          ta.value = s;
+          ta.setAttribute('readonly', '');
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          var ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          return Boolean(ok);
+        } catch (e) { return false; }
       }
 
       /**
@@ -2426,6 +2467,11 @@
               props.linkView.state === 'dead' ? '会话已删除' : props.linkView.title)) : null,
             h('button', {
               className: 'ztp-btn', type: 'button',
+              title: '复制「#' + c.id + ' ' + (c.title || '') + '」到剪贴板（贴 IM 用）',
+              onClick: function (e) { e.stopPropagation(); props.onCopyTitle(c); },
+            }, h(CopyIcon)),
+            h('button', {
+              className: 'ztp-btn', type: 'button',
               title: '选择工作区与模型，新建会话填入草稿并跳转（不自动发送）',
               onClick: function (e) { e.stopPropagation(); props.onInsert(c, null); },
             }, '插入对话'),
@@ -2669,7 +2715,13 @@
         return h('div', null,
           // 详情纯只读：链接/按钮都在左侧卡片上；返回按钮仅在窄容器覆盖模式下可见
           h('div', { className: 'ztp-detail-bar' },
-            h('button', { className: 'ztp-back', type: 'button', onClick: props.onBack }, h(BackIcon), '返回')),
+            h('button', { className: 'ztp-back', type: 'button', onClick: props.onBack }, h(BackIcon), '返回'),
+            // 一键复制：详情已加载则含完整描述/重现步骤，未加载退列表摘要
+            h('button', {
+              className: 'ztp-detail-copy', type: 'button',
+              title: '复制完整 Markdown（标题 + 描述/重现步骤）到剪贴板',
+              onClick: function () { props.onCopyMd(card, detail[0] || null); },
+            }, h(CopyIcon), '复制 Markdown')),
 
           h('div', { className: 'ztp-panel-card ztp-k-' + card.kind
               + (props.live === 'ask' ? ' ztp-live-ask' : props.live === 'done' ? ' ztp-live-done' : '') },
@@ -3415,10 +3467,24 @@
           }).catch(function (e) { toast[1]('下发失败：' + String((e && e.message) || e)); });
         }, []);
 
+        // 一键复制（2026-10-25 迭代）：卡片复制 #id+标题（贴 IM），详情复制完整 Markdown。
+        // copyToClipboard 全 promise 化（clipboard API → DOM execCommand 兜底），失败 toast 提示手动复制。
+        var copyCardTitle = useCallback(function (card) {
+          var s = '#' + card.id + ' ' + (card.title || '');
+          Promise.resolve(copyToClipboard(s)).then(function (ok) {
+            toast[1](ok ? '已复制 ' + s : '复制失败，请手动复制');
+          });
+        }, []);
+        var copyCardMd = useCallback(function (card, detail) {
+          var md = cardToMarkdown(card, detail || null);
+          Promise.resolve(copyToClipboard(md)).then(function (ok) {
+            toast[1](ok ? '已复制 Markdown（' + (md.length > 60 ? Math.round(md.length / 1000 * 10) / 10 + 'k 字符' : md.length + ' 字符') + '）' : '复制失败，请手动复制');
+          });
+        }, []);
+
         // 跳转到卡片关联的会话；会话已删 → 清除标记并提示（openSessionLink 内判定）。
         // activeAcct 由调用方传当前 render 的值，理由同 sendDispatch 的闭包说明。
-        var openLinkedSession = useCallback(function (card, activeAcct) {
-          var r = openSessionLink(activeAcct, card);
+        var openLinkedSession = useCallback(function (card, activeAcct) {          var r = openSessionLink(activeAcct, card);
           if (r && r.ok) return;
           if (r && r.reason === 'missing') toast[1]('关联的会话已不存在，已清除标记');
           else if (r && r.reason === 'unsupported') toast[1]('当前 DSH 缺少跳转服务，无法打开会话');
@@ -3659,6 +3725,7 @@
               onOpenSession: function (c2) { openLinkedSession(c2, activeAcct); },
               onOpen: function (x) { detailCard[1](x); },
               onInsert: insertToChat, onDispatch: dispatchCard,
+              onCopyTitle: copyCardTitle,
             });
           }));
         }
@@ -3687,6 +3754,7 @@
             replyLoading: replyBusy[0] === dKey,
             onRefreshReply: dLink ? function () { fetchReplyNow(activeAcct, dCard, dLink); } : null,
             onBack: function () { detailCard[1](null); },
+            onCopyMd: copyCardMd,
           });
         }
 
@@ -4044,6 +4112,7 @@
         quickFilterCounts: quickFilterCounts,
         QUICK_FILTERS: QUICK_FILTERS,
         QfBar: QfBar,
+        copyToClipboard: copyToClipboard,
         searchHaystack: searchHaystack,
         // 列表快照持久化（mine.v1）
         readMineSnapshot: readMineSnapshot,
