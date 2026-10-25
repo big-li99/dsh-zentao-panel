@@ -127,14 +127,15 @@
         '}',
 
         // 卡片
-        '.ztp-card{position:relative;display:block;width:100%;box-sizing:border-box;text-align:left;font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);padding:11px 14px 11px 16px;margin:0 0 10px;cursor:pointer;transition:background .12s ease,border-color .12s ease;}',
+        '.ztp-card{position:relative;display:block;width:100%;box-sizing:border-box;text-align:left;font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);padding:11px 14px 11px 16px;margin:0 0 10px;cursor:pointer;transition:background .12s ease,border-color .12s ease,transform .12s ease,box-shadow .12s ease;}',
         '.ztp-card:hover{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l4);}',
         '.ztp-card:active{background:var(--dsw-alias-interactive-bg-active);}',
-        // 选中态加强（2026-10-25 用户反馈「不够明显」）：类型色淡染背景 + inset 全彩描边
-        // （不改盒模型）+ 左彩条加宽——与 hover（灰底浅边）拉开差距。边框色若与活性描边
-        // （.ztp-live-ask/done，源码顺序在后）冲突时让位给活性色：选中由底色+内描边+宽彩条表达。
-        '.ztp-card.on{background:color-mix(in srgb,var(--ztp-c,var(--dsw-alias-state-business-primary)) 10%,var(--dsw-alias-bg-layer-2));border-color:var(--ztp-c,var(--dsw-alias-state-business-primary));box-shadow:inset 0 0 0 1px var(--ztp-c,var(--dsw-alias-state-business-primary)));}',
-        '.ztp-card.on:before{opacity:1;width:3px;top:10px;bottom:10px;}',
+        // 选中态二轮加强（2026-10-25 用户反馈「只是颜色变化不够明显」）：全高 4px 类型彩条 +
+        // 阴影浮起 + 向右微移（示意指向右侧详情）+「查看中」文字角标——不依赖颜色感知也能识别。
+        '.ztp-card.on{background:color-mix(in srgb,var(--ztp-c,var(--dsw-alias-state-business-primary)) 12%,var(--dsw-alias-bg-layer-2));border-color:var(--ztp-c,var(--dsw-alias-state-business-primary));box-shadow:inset 0 0 0 1px var(--ztp-c,var(--dsw-alias-state-business-primary)),var(--dsw-alias-shadow-lv1,0 1px 4px rgba(0,0,0,.12));transform:translateX(3px);}',
+        '.ztp-card.on:before{opacity:1;width:4px;top:0;bottom:0;border-radius:0;}',
+        '.ztp-card.on .ztp-card-title{font-weight:600;}',
+        '.ztp-viewing-badge{position:absolute;top:-1px;right:-1px;font-size:10px;line-height:1;padding:3px 7px;border-radius:0 var(--dsw-alias-radius-lg,var(--dsw-radius-lg)) 0 var(--dsw-alias-radius-sm,var(--dsw-radius-sm));background:var(--ztp-c,var(--dsw-alias-state-business-primary));color:var(--dsw-alias-label-primary-foreground);pointer-events:none;}',
         '.ztp-card:before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:2px;border-radius:0 2px 2px 0;background:var(--ztp-c,transparent);opacity:.7;}',
         '.ztp-k-task{--ztp-c:var(--dsw-alias-state-business-primary);}',
         '.ztp-k-bug{--ztp-c:var(--dsw-alias-state-error-primary);}',
@@ -2822,7 +2823,8 @@
                 className: 'ztp-dl' + dlCls,
                 title: dlCls ? (dl.overdue ? '已逾期 ' + overdueDays(dl) + ' 天' : '距截止不足 3 天') : '',
               }, (dlCls.indexOf('overdue') !== -1 ? '逾期 ' : '截止 ') + fmtDate(c.deadline)) : null,
-              c.openedBy ? h('span', null, c.openedBy + ' 创建') : null)),
+              c.openedBy ? h('span', null, c.openedBy + ' 创建') : null,
+              props.active && !sel ? h('span', { className: 'ztp-viewing-badge' }, '查看中') : null)),
           h('div', { className: 'ztp-card-title' }, c.title || ''),
           props.note ? h('div', { className: 'ztp-note-line', title: '本地备注：' + props.note },
             h(NoteIcon), noteLine(props.note)) : null,

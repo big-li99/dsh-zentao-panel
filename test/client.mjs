@@ -1945,5 +1945,16 @@ check('BoardView：点缩略卡回传 onPick；逾期卡在 ask 列、截止 chi
   && bdAskDeep.some((row) => row && row.children && row.children.some(
     (m) => m && m.props && String(m.props.className).split(' ').includes('overdue'))));
 
+// 选中态二轮加强：active 卡片带「查看中」文字角标（不依赖颜色感知）
+const actNode = TT.CardItem({
+  card: bc1, active: true, live: null, linkView: null,
+  onOpen: () => {}, onInsert: () => {}, onDispatch: () => {}, onCopyTitle: () => {},
+  onToggleMark: () => {}, onOpenSession: () => {},
+});
+const actMeta = actNode.children.find((n) => n && n.props && n.props.className === 'ztp-top').children.find((n) => n && n.props && n.props.className === 'ztp-top-meta');
+const actBadge = actMeta.children[actMeta.children.length - 1];
+check('CardItem active 态：渲染「查看中」角标（类型色底白字，绝对定位右上）',
+  actBadge.props.className === 'ztp-viewing-badge' && actBadge.children[0] === '查看中');
+
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);
