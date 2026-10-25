@@ -1,8 +1,10 @@
 # dsh-zentao-panel
 
-DeepSeekRuntime 的禅道（ZenTao）工作台插件：在 DSH **左侧边栏**里以一个**禅道**图标
+DeepSeek Harness（DSH）的禅道（ZenTao）工作台插件：在 DSH **左侧边栏**里以一个**禅道**图标
 作为入口（与「记忆系统」同款形式，位于其下方），点开后禅道面板占据主区域，查看
 **指派给我**的任务 / Bug / 需求，一键把卡片转成 DSH 对话上下文。
+
+![真实截图：Bug 列表页——快捷筛选、搜索与智能排序、逾期高亮、处理状态徽标、关联会话与最近回复摘要](docs/bug-list.webp)
 
 ## 功能
 
@@ -28,9 +30,10 @@ DeepSeekRuntime 的禅道（ZenTao）工作台插件：在 DSH **左侧边栏**�
 - 「处理」按钮：先弹窗选**工作区**、**接入的模型**（按接入方分组）和**思考强度**（默认带出当前会话的
   在用项），确认后新建会话、按所选模型设置并自动下发任务背景提示词（含图片附件）；下发**不会跳转视图**，
   你仍留在禅道面板继续挑活，卡片上会亮出该会话的状态与入口（要过去再点 chip）；
-- **关联会话跳转**：处理过的卡片左侧会出现会话 chip（显示该 DSH 会话标题），点击即可跳回那个会话
-  继续跟进；会话被删除后 chip 显示「会话已删除」，点击清除标记。关联按禅道账号隔离，只存本机
-  localStorage，不落任何远端；
+- **关联会话跳转（双向）**：处理过的卡片左侧会出现会话 chip（显示该 DSH 会话标题），点击即可跳回
+  那个会话继续跟进；反过来，处理过的会话头部也会有「禅道」小按钮，点击切回禅道面板并**自动定位
+  选中该卡片**（列表自动滚动到位，跨账号自动切换）。会话被删除后 chip 显示「会话已删除」，点击清除
+  标记。关联按禅道账号隔离，只存本机 localStorage，不落任何远端；
 - **实时状态（处理中的任务一目了然）**：处理过的卡片 chip 前有活性状态点；会话在跑 → 卡片亮蓝色
   「处理中」胶囊（三点跳动）；agent 等你拍板 → 琥珀色「等你决策」（呼吸描边）；后台会话跑完 →
   绿色「已完成」徽标，同时弹提醒条，点「去看看」直接跳回那个会话。提醒不依赖面板是否打开
@@ -42,7 +45,7 @@ DeepSeekRuntime 的禅道（ZenTao）工作台插件：在 DSH **左侧边栏**�
   （绿 = 已连 / 红 = 不可达），禅道连不上时列表上方常驻提示条（展示缓存时间、可重试）；
   轮询到**新指派**弹提醒（「禅道新指派 2 条（任务×1 · Bug×1）」），按账号记忆不重复提醒；
 - **流程看板**：head「流程」切换——四列泳道（待处理/处理中/等你决策/已完成待闭环）同屏
-  看全局，点卡回列表定位，视图自动记忆；
+  看全局，列内再按 任务/Bug/需求 分组，点卡回列表定位（自动滚动到卡片），视图自动记忆；
 - **回复摘要行 / 决策应答台**：处理过的卡片显示 agent 最后回复的一行预览；「等你决策」时
   在详情页直接回复 agent（一键同意或自定义答复），不用跳会话；
 - **本地备注 / 继续处理**：卡片自己的备忘（仅本机可见，卡片摘要 + 详情编辑）；处理过的卡片在
@@ -98,7 +101,7 @@ DSH_HOME=/tmp/zt-host  node test/host.mjs     # apply() + RPC wire 协议端到�
 从 npm 安装（推荐）：
 
 ```bash
-DSH="/Applications/DeepSeekRuntime.app/Contents/Resources/runtime/cli/bin/dsh"
+DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 "$DSH" plugin --profile desktop add dsh-zentao-panel
 ```
 
@@ -106,7 +109,7 @@ DSH="/Applications/DeepSeekRuntime.app/Contents/Resources/runtime/cli/bin/dsh"
 
 ```bash
 git clone https://github.com/big-li99/dsh-zentao-panel.git
-DSH="/Applications/DeepSeekRuntime.app/Contents/Resources/runtime/cli/bin/dsh"
+DSH="/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh"
 "$DSH" plugin --profile desktop add "$(pwd)/dsh-zentao-panel"
 ```
 
