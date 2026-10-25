@@ -517,6 +517,22 @@ QUICK_FILTERS 现在 6 项）；隐藏 → `visCards` 把隐藏卡从列表/计�
 带完整描述）直接 `sendDispatch(choice, {..., intent:'dispatch', instr})`，跳过弹层。弹层正常路径不受影响；
 无记录时按钮不渲染。
 
+### 4.14 本地备注 + 继续处理（2026-10-25，用户批准的两提案）
+
+**①本地备注（notes.v1）**：key 与 links 同构，值 `{text, at, seenAt?}`；`saveNote`（空串=清除）/
+`getNote`/`noteLine`（压空白 50 字截断）。卡片标题下一行 `.ztp-note-line`（铅笔图标+摘要，title 全文）；
+DetailView 元信息卡下编辑区（textarea + 保存/清除，`noteText` 在切卡 effect 里重置——与备注共用一个 effect，
+并把「继续处理」框的 contOpen/contText 也一并重置）。cleanupStaleLinks 顺带清（在线 1h 限频刷 seenAt、
+离线 72h 宽限删，**notes 的在线计时字段叫 seenAt 不是 lastSeen**）。
+
+**②继续处理（continueInSession）**：处理结果区「继续处理…」按钮（仅 `replyLink && onContinue` 存在时渲染）
+→ 展开 textarea → 「续发到会话」。链路：`retain('zentao-panel')` → `scope` → `facade.setDraft(【继续处理
+禅道X #id】
+<用户输入>)` → **250ms 后 submit**（与 dispatchToNewSession 同款时序）→ **3s 释放 retain**。
+会话正在跑时 submit 走宿主排队，不冲突。失败分支：空白文本 → empty；conversation/sessions 缺失 →
+unsupported；retain 后 scope/facade 拿不到 → **立即释放 retain** 返回 unavailable（不留悬挂连接）。
+handler `continueLinked` 的 link 由当前 render 传参（闭包老坑）；前缀带卡片标识便于模型接上下文。
+
 ### 5. DSH 插件体系（本机实测）
 
 - DSH Desktop **0.2.1-rc.2**，desktop profile，macOS
@@ -648,13 +664,14 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   ④ 重启后正在跑的 turn 若已死，**不**显示「处理中」（瞬态兜底只在监控未就绪的过渡期生效）。
   **仅 client 改动，⌘R 生效**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **278 项**（注册契约 8 项 +「处理」弹层/下发/时序/
+- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **289 项**（注册契约 8 项 +「处理」弹层/下发/时序/
   不跳转 +「插入对话」10 项（§4.5）+ M6 22 项（§4.4）+ 进度持久化 29 项（§4.6）+ **列表三件套 56 项**
   （§4.7：搜索排序 25 项含 smart 融合实时状态、mine.v1 7 项、replies/fetchLastReply 24 项含 Markdown 渲染 10 项）
   + **会话头部反向跳转 13 项（§4.3 末）** + **账号别名 5 项（§6 多账号节：acctDisplayName 纯函数 +
   AccountSwitcher 展示/编辑态结构——fake useState 恒 null 只能测展示路径，行内编辑交互靠真机）**
   + **附加指令 7 项 + 指令模板预设 8 项 + 完成闭环 4 项（§4.11）+ 快捷筛选 6 项（§4.12）
-  + 一键复制 4 项 + 旗标隐藏 6 项（含 cleanup marks）+ 极速重发 3 项（§4.13）**）
+  + 一键复制 4 项 + 旗标隐藏 6 项（含 cleanup marks）+ 极速重发 3 项（§4.13）+ 本地备注 5 项 +
+  继续处理 6 项（§4.14）**）
   ——DetailView 首次进 _test；chips 类组件断言要 children.flat(2)（map 出的是嵌套数组，§4.8 同坑，
   指令模板与 QfBar 各踩一次）、
   `multi` 42 项（别名 11 项 + **fetchImage 缓存 6 项（§4.10）**）、`protocol` 15 项（+actions/stories 拼写 5 项，§4.8）；`host.mjs` 21+6 项

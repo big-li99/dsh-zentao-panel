@@ -1802,5 +1802,66 @@ const attCached = await TT.attachImagesToDraft(pcImgs, { sessionId: 's-c', facad
 check('attachImagesToDraft 缓存命中：不发 RPC 照常建附件',
   imgRpcN === 2 && attCached.ok === true && attCached.count === 2);
 
+
+// ── 继续处理（2026-10-25 迭代）：往关联会话追加指令 ──
+{
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  let contDraft = null, contSubmitted = 0, contRetained = null, contReleased = 0;
+  const contFacade = { setDraft(t) { contDraft = t; }, submit() { contSubmitted++; } };
+  ctx.get = function (name) {
+    if (name === 'sessions') return {
+      scope: () => ({ sid: 's9' }),
+      retain(id, opts) { contRetained = { id, opts }; return { release() { contReleased++; } }; },
+    };
+    if (name === 'conversation') return { input: { for: () => contFacade } };
+    return undefined;
+  };
+  const rOk = await mod._test.continueInSession('s-link', '【继续处理 禅道Bug #1】\n把代码改了');
+  await sleep(320);
+  check('continueInSession：retain(zentao-panel) → setDraft → 250ms 后 submit',
+    rOk.ok === true && rOk.sessionId === 's-link'
+    && contRetained && contRetained.id === 's-link' && contRetained.opts.source === 'zentao-panel'
+    && contDraft === '【继续处理 禅道Bug #1】\n把代码改了'
+    && contSubmitted === 1 && contReleased === 0);
+  await sleep(3000);
+  check('continueInSession：3s 后释放后台 retain', contReleased === 1);
+  const rEmpty = await mod._test.continueInSession('s-link', '   ');
+  check('continueInSession：空白文本 → empty 不动作',
+    rEmpty.ok === false && rEmpty.reason === 'empty');
+  ctx.get = function (name) { return name === 'sessions' ? { scope: () => null } : undefined; };
+  const rUnsup = await mod._test.continueInSession('s-link', 'x');
+  check('continueInSession：conversation 缺失 → unsupported', rUnsup.ok === false && rUnsup.reason === 'unsupported');
+  let rel2 = 0;
+  ctx.get = function (name) {
+    if (name === 'sessions') return { scope: () => null, retain: () => ({ release() { rel2++; } }) };
+    if (name === 'conversation') return { input: { for: () => null } };
+    return undefined;
+  };
+  const rUnavail = await mod._test.continueInSession('s-link', 'x');
+  check('continueInSession：scope/facade 拿不到 → unavailable 且立即释放 retain',
+    rUnavail.ok === false && rUnavail.reason === 'unavailable' && rel2 === 1);
+}
+
+// DetailView：关联会话存在时显示「继续处理…」入口（onContinue 缺失则不显示）
+let contCalled = null;
+const contDv = TT.DetailView({
+  card: bc1, rpc: () => {}, live: 'done', onBack: () => {}, onCopyMd: () => {}, note: '',
+  onSaveNote: () => {}, replyLink: { sessionId: 's-link', at: 1 }, reply: null,
+  onContinue: (c, t) => { contCalled = [c, t]; },
+});
+const contWrap = contDv.children.find((n) => n && n.props && n.props.className === 'ztp-reply-wrap');
+const contMeta = contWrap.children.find((n) => n && n.props && n.props.className === 'ztp-reply-meta');
+const contBtn = contMeta.children.find((n) => n && n.type === 'button' && n.children[0] === '继续处理…');
+contBtn.props.onClick(); // 展开（fake useState 恒初值 false，展开框不渲染，按钮结构可断言）
+const contDvNo = TT.DetailView({
+  card: bc1, rpc: () => {}, live: null, onBack: () => {}, onCopyMd: () => {}, note: '', onSaveNote: () => {},
+  replyLink: { sessionId: 's-link', at: 1 }, reply: null,
+});
+const contWrapNo = contDvNo.children.find((n) => n && n.props && n.props.className === 'ztp-reply-wrap');
+const contMetaNo = contWrapNo.children.find((n) => n && n.props && n.props.className === 'ztp-reply-meta');
+check('DetailView：关联会话存在 → 「继续处理…」按钮渲染；onContinue 缺失不渲染',
+  Boolean(contBtn) && contBtn.props.onClick() === undefined
+  && !contMetaNo.children.some((n) => n && n.type === 'button' && n.children[0] === '继续处理…'));
+
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);

@@ -161,6 +161,7 @@
         '.ztp-note-line svg{width:10px;height:10px;flex:none;margin-top:2px;}',
         '.ztp-note-edit{display:flex;flex-direction:column;gap:6px;margin-top:12px;}',
         '.ztp-note-acts{display:flex;gap:6px;}',
+        '.ztp-cont-box{display:flex;flex-direction:column;gap:6px;margin-top:8px;}',
         '.ztp-flagdot{display:inline-flex;color:var(--dsw-alias-state-business-primary);}',
         '.ztp-flagdot svg{width:11px;height:11px;}',
 
@@ -1618,6 +1619,47 @@
        * draft 模式（release 会让 scope retire、丢未发送草稿），从会话列表/卡片
        * chip 找回。前段失败 → ok:false 交上层降级插入当前会话输入框（旧版行为）。
        */
+      /**
+       * 「继续处理」（2026-10-25 迭代）：往已关联的会话**追加**新指令（如「按刚才的
+       * 分析把代码改了」），不开新会话丢上下文。retain('zentao-panel') → scope →
+       * setDraft → 250ms submit → 3s 释放 retain（模式与 dispatchToNewSession 尾段
+       * 一致）；会话在跑时 submit 走宿主排队。调用方负责拼「【继续处理 禅道X #id】」
+       * 前缀（模型可辨识是同一事项的追问）。
+       */
+      function continueInSession(sessionId, text) {
+        var body = String(text == null ? '' : text).trim();
+        if (!body) return Promise.resolve({ ok: false, reason: 'empty', message: '先输入要继续执行的内容' });
+        var sessions = null, conversation = null;
+        try {
+          sessions = lookupService('sessions');
+          conversation = lookupService('conversation');
+        } catch (e) { /* 下方统一判 */ }
+        if (!sessions || typeof sessions.retain !== 'function' || typeof sessions.scope !== 'function'
+          || !conversation || !conversation.input) {
+          return Promise.resolve({ ok: false, reason: 'unsupported', message: 'DSH 缺少会话输入服务，无法续发' });
+        }
+        var retainRef = null, scope = null;
+        try {
+          retainRef = sessions.retain(sessionId, { source: 'zentao-panel' });
+          scope = sessions.scope(sessionId);
+        } catch (e) { retainRef = null; scope = null; }
+        var facade = null;
+        try { facade = scope ? conversation.input.for(scope) : null; } catch (e) { facade = null; }
+        if (!facade || typeof facade.setDraft !== 'function') {
+          try { if (retainRef && typeof retainRef.release === 'function') retainRef.release(); } catch (e) { /* 已被释放 */ }
+          return Promise.resolve({ ok: false, reason: 'unavailable', message: '会话输入接口不可用（会话可能已删除）' });
+        }
+        facade.setDraft(body);
+        setTimeout(function () {
+          try { if (typeof facade.submit === 'function') facade.submit(); } catch (e) { /* 已填草稿，发送交给用户 */ }
+          setTimeout(function () {
+            try { if (retainRef && typeof retainRef.release === 'function') retainRef.release(); } catch (e) { /* 已被释放 */ }
+          }, 3000);
+        }, 250);
+        return Promise.resolve({ ok: true, mode: 'sent', sessionId: sessionId,
+          message: '已续发到关联会话，卡片标签可跳回查看' });
+      }
+
       function insertToNewSession(md, images, choice) {
         return createDraftSession(md, images, choice).then(function (p) {
           if (!p.ok) return p;
@@ -2926,8 +2968,10 @@
         var card = props.card;
         var detail = useState(null), err = useState(null);
         var noteText = useState(props.note || ''); // 本地备注编辑值；切卡重置（effect）
+        var contOpen = useState(false), contText = useState(''); // 继续处理：展开态 + 追问文本
         useEffect(function () {
           noteText[1](String(props.note || ''));
+          contOpen[1](false); contText[1](''); // 切卡收起续发框、清空输入
         }, [card.kind, card.id, props.note]);
         useEffect(function () {
           var alive = true;
@@ -3029,7 +3073,23 @@
                 className: 'ztp-reply-refresh', type: 'button', disabled: !!props.replyLoading,
                 onClick: props.onRefreshReply,
                 title: '重新从关联会话读取最新回复',
-              }, '重新读取') : null)) : null,
+              }, '重新读取') : null,
+              // 继续处理（2026-10-25 迭代）：往关联会话追加指令，不开新会话丢上下文
+              props.onContinue ? h('button', {
+                className: 'ztp-reply-refresh', type: 'button',
+                onClick: function () { contOpen[1](!contOpen[0]); },
+              }, contOpen[0] ? '收起续发' : '继续处理…') : null),
+            contOpen[0] && props.onContinue ? h('div', { className: 'ztp-cont-box' },
+              h('textarea', {
+                className: 'ztp-input ztp-instr', value: contText[0], rows: 2,
+                placeholder: '追加给该会话的指令，如：按刚才的分析把代码改了，改完跑一遍测试',
+                onChange: function (e) { contText[1](e.target.value); },
+              }),
+              h('div', { className: 'ztp-note-acts' },
+                h('button', {
+                  className: 'ztp-btn primary', type: 'button', disabled: !contText[0].trim(),
+                  onClick: function () { props.onContinue(card, contText[0]); contOpen[1](false); contText[1](''); },
+                }, '续发到会话'))) : null) : null,
 
           h('div', { className: 'ztp-section' }, card.kind === 'bug' ? '重现步骤 / 描述' : '描述'),
           desc
@@ -3765,6 +3825,16 @@
           });
         }, []);
 
+        // 继续处理（2026-10-25 迭代）：详情里往关联会话追加指令。link 由当前 render 传入
+        // （useCallback([]) 闭包读不到最新 state 的老坑），前缀带卡片标识便于模型接上下文。
+        var continueLinked = useCallback(function (card, text, link) {
+          if (!link || !link.sessionId) return;
+          var body = '【继续处理 禅道' + (KIND_LABEL[card.kind] || card.kind) + ' #' + card.id + '】\n' + String(text || '').trim();
+          Promise.resolve(continueInSession(link.sessionId, body)).then(function (r) {
+            toast[1](r && r.ok ? r.message : '续发失败：' + ((r && r.message) || '未知原因'));
+          }, function (e) { toast[1]('续发失败：' + String((e && e.message) || e)); });
+        }, []);
+
         // 跳转到卡片关联的会话；会话已删 → 清除标记并提示（openSessionLink 内判定）。
         // activeAcct 由调用方传当前 render 的值，理由同 sendDispatch 的闭包说明。
         var openLinkedSession = useCallback(function (card, activeAcct) {          var r = openSessionLink(activeAcct, card);
@@ -4069,6 +4139,7 @@
             onCopyMd: copyCardMd,
             note: getNote(noteMap, activeAcct, dCard),
             onSaveNote: saveNoteHere,
+            onContinue: dLink ? function (card, text) { continueLinked(card, text, dLink); } : null,
           });
         }
 
@@ -4433,6 +4504,7 @@
         QfBar: QfBar,
         copyToClipboard: copyToClipboard,
         readLastDispatch: readLastDispatch,
+        continueInSession: continueInSession,
         readNoteMap: readNoteMap,
         saveNote: saveNote,
         getNote: getNote,
