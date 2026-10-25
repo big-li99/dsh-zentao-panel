@@ -433,6 +433,31 @@ Neko3000/deepseek-whalechan 公开规范——**注意其图片素材不在开�
 - **闭包坑照旧**：`openBatchDialog/toggleSelAll` 是 render 作用域函数（读当次 selCards/filtered，**不能**写进 `useCallback([])`）；`toggleSel` 用函数式 setState（setter 引用稳定）。
 - 纯函数 `batchToMarkdown/batchSummary/mergeCardImages` + `CardItem/DispatchDialog` 进 `_test`。测试注意：fake createElement 下 className 断言要 `.split(' ').includes('sel')`——`ztp-k-bug` 类型类夹在中间，连续子串匹配会误判。
 
+### 4.10 详情图片双层缓存（2026-10-25，用户要求：重开详情/面板重挂不再每次转圈）
+
+此前图片零缓存：`DetailImages` 每次挂载逐张发 `zentao.image` RPC，host `fetchImage` 每次真实下载禅道——
+面板切走再切回（main slot 只渲染当前面板，禅道面板整个卸载重挂）详情图全部重新转圈。现加两层内存缓存
+（都不落盘，⌘R / 重启即清；禅道 `/file-read-<fileID>` 按 fileID 定址、内容不变，天然适合缓存）：
+
+- **client 层（`client.js` 模块级 `imageCache`: Map<url, dataURL>）**：上限 **40 张 / 24MB**（dataURL 字符
+  串长度计），Map 迭代序即新旧序，超限最旧先出（`rememberImageSrc` 每次插入重算总量再淘汰，无字节计数漂移）。
+  **三个消费方共用一套读写**：`fetchImageValue(img)` 统一「查缓存（`imageDataUrlParts` 把 dataURL 还原成
+  RPC value 形态，name 取图片引用的）→ miss 走 RPC → 成功回写」；`DetailImages` 的取图内核抽成
+  `loadDetailImages(urls, markRow)`（effect 只做缓存铺底 + 委托，fake React 测不了 effect 所以抽出来直测）：
+  初始行直接用缓存铺 src（已看过的图不转圈），未命中的逐张 RPC；**失败不缓存**（下次挂载自然重试）。
+  `prefetchImageBytes`/`attachImagesToDraft` 走 `fetchImageValue` —— 详情看过的图点「处理」时不再重拉。
+- **host 层（`service.mjs` 每账号会话 `imageCache`: Map<path, {at, value}>）**：TTL **10min**（`IMAGE_CACHE_TTL_MS`）+
+  容量 **32MB**（`IMAGE_CACHE_MAX_BYTES`，按图片原字节计，最旧先出；单图超上限不入缓存）。**缓存命中在
+  `ensureLogin` 之前返回**——登录态失效也不触发重登/探活。缓存随账号会话生灭：upsert/logout 整只重建即清空。
+  两个参数经 `createZentaoService({imageCacheTtlMs, imageCacheMaxBytes})` 可注入（测试用）。
+- 测试：client +11（imageDataUrlParts / 记忆-读回 / 张数淘汰 / 字节淘汰 / loadDetailImages 4 项含 cancel
+  与失败不缓存 / prefetch 二次 0 RPC / attach 缓存命中照常建附件）、multi +6（命中不重打 / 命中绕过登录探活 /
+  TTL 过期重拉 / 容量淘汰最旧先出 / 单图超上限不入缓存）。**⚠️ 测试坑**：client 的时序断言（「预取先于
+  create」）依赖真实 RPC——前面向同 url 的取图已入缓存会让预取静默命中，断言挂掉；test/client.mjs 在该处
+  先 `mod._test.imageCache.clear()`（`TT` 在 669 行才定义，之前用 `mod._test`）。
+- 插件是 `link:` 符号链接直连本仓库（`~/.dsh/profiles/desktop/node_modules/dsh-zentao-panel`），host 改动
+  **重启桌面版即生效，无需重装**（package.json 没动时）。
+
 ### 5. DSH 插件体系（本机实测）
 
 - DSH Desktop **0.2.1-rc.2**，desktop profile，macOS
@@ -564,16 +589,16 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   ④ 重启后正在跑的 turn 若已死，**不**显示「处理中」（瞬态兜底只在监控未就绪的过渡期生效）。
   **仅 client 改动，⌘R 生效**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **229 项**（注册契约 8 项 +「处理」弹层/下发/时序/
+- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **240 项**（注册契约 8 项 +「处理」弹层/下发/时序/
   不跳转 +「插入对话」10 项（§4.5）+ M6 22 项（§4.4）+ 进度持久化 29 项（§4.6）+ **列表三件套 56 项**
   （§4.7：搜索排序 25 项含 smart 融合实时状态、mine.v1 7 项、replies/fetchLastReply 24 项含 Markdown 渲染 10 项）
   + **会话头部反向跳转 13 项（§4.3 末）** + **账号别名 5 项（§6 多账号节：acctDisplayName 纯函数 +
   AccountSwitcher 展示/编辑态结构——fake useState 恒 null 只能测展示路径，行内编辑交互靠真机）**）、
-  `multi` 36 项（+别名 11 项）、`protocol` 15 项（+actions/stories 拼写 5 项，§4.8）；`host.mjs` 21+6 项
-  （真机 20 张卡片；actions 透传 + story detail 2 项为 §4.8 新增；**别名 6 项（login 带别名/空白保留/
-  rename 设置/未知 id/缺参/空串清除）为 2026-10-25 新增，本地无凭据未跑，下次真机复验**；
-  **logout 测试会清空借用凭据目录的账号**——/tmp/zt-smoke
-  的 config 已被消耗，下次跑需重新提供凭据）、`smoke.mjs` 需真实禅道凭据。
+  `multi` 42 项（别名 11 项 + **fetchImage 缓存 6 项（§4.10）**）、`protocol` 15 项（+actions/stories 拼写 5 项，§4.8）；`host.mjs` 21+6 项
+  （真机 20 张卡片；actions 透传 + story detail 2 项为 §4.8 新增；**别名 6 项 + fetchImage 缓存已 2026-10-25
+  用真实凭据复跑全绿**——沙箱里 dsh CLI 写不了 ~/.dsh 的 lock 文件（EPERM），跑法：从
+  `~/.dsh/zentao-panel/config.json` 读凭据写进临时 env 文件（0600）source 后即删，DSH_HOME 指向 /tmp 目录；
+  **logout 测试会清空该 DSH_HOME 的账号**，别把 DSH_HOME 指向真实 ~/.dsh）、`smoke.mjs` 需真实禅道凭据。
   沙箱里跑 host.mjs 读不了 `~/.dsh/zentao-panel/config.json`（EPERM），需把凭据拷进
   `$DSH_HOME/zentao-panel/`，此时「status before config」一项会假失败（假设初始无配置）
 

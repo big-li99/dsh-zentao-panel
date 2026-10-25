@@ -164,5 +164,78 @@ check('重启恢复 2 个账号 + 激活状态', boot3.configured === true && bo
 check('重启后 bob 仍登录态', st5.accounts.find((a) => a.account === 'bob').loggedIn === true);
 check('重启恢复别名', st5.accounts.find((a) => a.account === 'bob').alias === '生产 · bob');
 
+// ── 6. fetchImage 内存缓存（10min TTL + 容量淘汰；client 半边另有 dataURL 缓存）──
+console.log('== fetchImage 缓存 ==');
+const PNG_MAGIC = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+// mock client：fetchFile 按 path 计数；cookies 放 counters 里方便测试直接踢掉（验缓存命中免登录）
+const makeImgClient = (c, { size = 100 } = {}) => ({
+  loggedIn: () => Boolean(c.cookies && c.cookies.za && c.cookies.zp),
+  restore() { c.cookies = {}; },
+  exportCookies: () => ({ ...(c.cookies ?? {}) }),
+  async login() { c.logins++; c.cookies = { za: 'x', zp: 'y' }; return { ok: true }; },
+  async fetchMyWork() { c.probes++; return []; },
+  async fetchDetail() { return {}; },
+  async fetchFile({ path }) {
+    c.byPath[path] = (c.byPath[path] ?? 0) + 1;
+    return { status: 200, contentType: 'image/png', bytes: Buffer.concat([PNG_MAGIC, Buffer.alloc(size)]) };
+  },
+});
+const imgSvc = (c, opts = {}) => createZentaoService({
+  logger: quiet, cacheTtlMs: 60_000, createClient: () => makeImgClient(c), ...opts,
+});
+const IU1 = 'http://c.zentao:8090/file-read-1.png';
+const IU2 = 'http://c.zentao:8090/file-read-2.png';
+
+// 命中：TTL 内同 URL 只打一次禅道；踢掉 cookie 后缓存命中连登录/探活都不触发
+{
+  const c = { byPath: {}, logins: 0, probes: 0 };
+  const s = imgSvc(c);
+  s.configure({ baseUrl: 'http://c.zentao:8090', account: 'carol', password: 'pw' });
+  const img1 = await s.fetchImage(IU1);
+  check('fetchImage 首次：真实下载，name/mediaType 归一',
+    c.byPath['/file-read-1.png'] === 1 && img1.name === '1.png' && img1.mediaType === 'image/png' && img1.bytes === 108);
+  const img2 = await s.fetchImage(IU1);
+  check('fetchImage TTL 内命中缓存：不重打禅道，返回同值',
+    c.byPath['/file-read-1.png'] === 1 && img2.base64 === img1.base64 && img2.bytes === 108);
+  const { logins, probes } = c;
+  c.cookies = {}; // 模拟登录态失效——命中路径在 ensureLogin 之前返回，不该触发重登
+  const img3 = await s.fetchImage(IU1);
+  check('fetchImage 缓存命中绕过登录/探活（踢掉 cookie 也不重登）',
+    c.byPath['/file-read-1.png'] === 1 && c.logins === logins && c.probes === probes && img3.bytes === 108);
+}
+
+// TTL 过期：同 URL 重新下载
+{
+  const c = { byPath: {}, logins: 0, probes: 0 };
+  const s = imgSvc(c, { imageCacheTtlMs: 0 });
+  s.configure({ baseUrl: 'http://c.zentao:8090', account: 'carol', password: 'pw' });
+  await s.fetchImage(IU1);
+  await s.fetchImage(IU1);
+  check('fetchImage TTL 过期后重新下载（ttl=0 每次都 miss）', c.byPath['/file-read-1.png'] === 2);
+}
+
+// 容量淘汰：总字节超上限时最旧先出，腾位置给新图
+{
+  const c = { byPath: {}, logins: 0, probes: 0 };
+  const s = imgSvc(c, { imageCacheMaxBytes: 150 }); // 单图 108B：两张即超
+  s.configure({ baseUrl: 'http://c.zentao:8090', account: 'carol', password: 'pw' });
+  await s.fetchImage(IU1);
+  await s.fetchImage(IU2);   // 108+108 > 150 → 淘汰 IU1
+  await s.fetchImage(IU1);   // miss → 重新下载（IU2 反被挤出去）
+  check('fetchImage 容量淘汰：超限最旧先出，被淘汰的重新下载',
+    c.byPath['/file-read-1.png'] === 2 && c.byPath['/file-read-2.png'] === 1);
+}
+
+// 单图超过容量上限：不入缓存，每次真实下载（返回值照常）
+{
+  const c = { byPath: {}, logins: 0, probes: 0 };
+  const s = imgSvc(c, { imageCacheMaxBytes: 50 }); // 单图 108B > 上限
+  s.configure({ baseUrl: 'http://c.zentao:8090', account: 'carol', password: 'pw' });
+  const a = await s.fetchImage(IU1);
+  const b = await s.fetchImage(IU1);
+  check('fetchImage 单图超容量上限不入缓存（每次重拉，返回值不受影响）',
+    c.byPath['/file-read-1.png'] === 2 && a.bytes === 108 && b.bytes === 108);
+}
+
 console.log(failures === 0 ? '\n全部通过 ✅' : `\n${failures} 项失败 ❌`);
 process.exit(failures === 0 ? 0 : 1);

@@ -861,6 +861,52 @@
       }
 
       /**
+       * 详情图片内存缓存（模块级，不落盘）：url → dataURL。
+       * 禅道 file-read 按 fileID 定址、内容不变，面板重挂/重开详情直接命中（不再转圈）；
+       * ⌘R / 重启 DSH 即清。Map 迭代序 = 插入序，容量超限（张数/字节）从最旧开始淘汰。
+       * 三个消费方共用：DetailImages（浏览）、prefetchImageBytes / attachImagesToDraft（下发附件）。
+       */
+      var IMAGE_CACHE_MAX = 40;
+      var IMAGE_CACHE_MAX_BYTES = 24 * 1024 * 1024; // dataURL 字符串长度 ≈ 占用内存
+      var imageCache = new Map();
+
+      function cachedImageSrc(url) { return imageCache.get(url) || null; }
+
+      function rememberImageSrc(url, dataUrl) {
+        if (!url || typeof dataUrl !== 'string' || !dataUrl) return;
+        imageCache.delete(url); // 重新插入移到队尾（保最新）
+        imageCache.set(url, dataUrl);
+        var total = 0;
+        imageCache.forEach(function (v) { total += v.length; });
+        var keys = imageCache.keys();
+        while (imageCache.size && (imageCache.size > IMAGE_CACHE_MAX || (total > IMAGE_CACHE_MAX_BYTES && imageCache.size > 1))) {
+          var oldest = keys.next().value;
+          total -= imageCache.get(oldest).length;
+          imageCache.delete(oldest);
+        }
+      }
+
+      /** dataURL → {mediaType, base64}（缓存命中还原成 RPC value 形态）；不是 base64 dataURL 返回 null。 */
+      function imageDataUrlParts(dataUrl) {
+        var m = /^data:([^;,]+);base64,([\s\S]*)$/.exec(String(dataUrl || ''));
+        return m ? { mediaType: m[1], base64: m[2] } : null;
+      }
+
+      /** url → RPC value：先查缓存（命中还原 name/mediaType/base64），未命中走 RPC 并回写缓存。 */
+      function fetchImageValue(img) {
+        var hit = cachedImageSrc(img.url);
+        if (hit) {
+          var parts = imageDataUrlParts(hit);
+          if (parts) return Promise.resolve({ name: img.name, mediaType: parts.mediaType, base64: parts.base64 });
+        }
+        return rpcCall('zentao.image', { url: img.url }).then(function (r) {
+          var v = (r && r.ok && r.value && r.value.base64) ? r.value : null;
+          if (v) rememberImageSrc(img.url, 'data:' + (v.mediaType || 'image/png') + ';base64,' + v.base64);
+          return v;
+        }, function () { return null; });
+      }
+
+      /**
        * 预取禅道图片字节（host→禅道下载，通常是最慢的一环）。
        * 「处理」在点击发送的瞬间就发起，与 sessions.create 并行——等会话建好、
        * 视图切过去时字节多半已就绪，附件注册不再额外等待。单张失败得 null，不拦整体。
@@ -869,9 +915,7 @@
         if (!images || !images.length) return null;
         return Promise.all(images.slice(0, 20).map(function (img) {
           if (!img || typeof img.url !== 'string' || !img.url) return Promise.resolve(null);
-          return rpcCall('zentao.image', { url: img.url }).then(function (r) {
-            return (r && r.ok && r.value && r.value.base64) ? r.value : null;
-          }, function () { return null; });
+          return fetchImageValue(img);
         }));
       }
 
@@ -895,10 +939,7 @@
         }
         var picked = images.slice(0, 20);
         var bytesP = prefetched ? Promise.resolve(prefetched) : Promise.all(picked.map(function (img) {
-          return rpcCall('zentao.image', { url: img.url }).then(function (r) {
-            if (!r || !r.ok || !r.value || !r.value.base64) return null;
-            return r.value;
-          }, function () { return null; });
+          return fetchImageValue(img);
         }));
         return bytesP.then(function (values) {
           var files = [];
@@ -2511,6 +2552,30 @@
        * 渲染附件图片用的就是 data:/blob:，主窗口无 CSP 拦截）。
        * 逐张独立请求独立落位：单张失败只占位提示不拦其它；点击放大，再点关闭。
        */
+      /**
+       * DetailImages 的取图内核（从 effect 抽出便于直测）：缓存命中的同步回填（面板重挂/
+       * 重开详情秒出），未命中的逐张走 zentao.image RPC，成功回写缓存。失败不缓存，
+       * 下次挂载自然重试。markRow(i, url, patch) 由调用方同步进组件 state。
+       * 返回 cancel()：卸载（或 key 切换）后迟到的回调作废。
+       */
+      function loadDetailImages(urls, markRow) {
+        var alive = true;
+        urls.forEach(function (url, i) {
+          var cached = cachedImageSrc(url);
+          if (cached) { markRow(i, url, { src: cached }); return; }
+          rpcCall('zentao.image', { url: url }).then(function (r) {
+            if (!alive) return;
+            var v = r && r.ok && r.value;
+            var src = v && v.base64 ? 'data:' + (v.mediaType || 'image/png') + ';base64,' + v.base64 : null;
+            if (src) rememberImageSrc(url, src);
+            markRow(i, url, src ? { src: src } : { failed: true });
+          }, function () {
+            if (alive) markRow(i, url, { failed: true });
+          });
+        });
+        return function () { alive = false; };
+      }
+
       function DetailImages(props) {
         var images = (props.images || []).slice(0, 20);
         var key = images.map(function (x) { return x.url; }).join('|');
@@ -2518,25 +2583,20 @@
         var zoom = useState(null);
         useEffect(function () {
           var alive = true;
-          var init = key ? key.split('|').map(function (url) { return { url: url, src: null, failed: false }; }) : [];
-          rows[1](init);
-          init.forEach(function (row, i) {
-            var mark = function (patch) {
-              if (!alive) return;
-              rows[1](function (cur) {
-                // key 已切换（url 对不上）或本张已有结果 → 忽略迟到的回调
-                if (!cur[i] || cur[i].url !== row.url || cur[i].src || cur[i].failed) return cur;
-                var next = cur.slice();
-                next[i] = Object.assign({}, cur[i], patch);
-                return next;
-              });
-            };
-            rpcCall('zentao.image', { url: row.url }).then(function (r) {
-              var v = r && r.ok && r.value;
-              mark(v && v.base64 ? { src: 'data:' + (v.mediaType || 'image/png') + ';base64,' + v.base64 } : { failed: true });
-            }, function () { mark({ failed: true }); });
+          var urls = key ? key.split('|') : [];
+          // 初始行直接用缓存铺底：已看过的图不转圈，转圈只留给新图
+          rows[1](urls.map(function (url) { return { url: url, src: cachedImageSrc(url), failed: false }; }));
+          var cancel = loadDetailImages(urls, function (i, url, patch) {
+            if (!alive) return;
+            rows[1](function (cur) {
+              // key 已切换（url 对不上）或本张已有结果 → 忽略迟到的回调
+              if (!cur[i] || cur[i].url !== url || cur[i].src || cur[i].failed) return cur;
+              var next = cur.slice();
+              next[i] = Object.assign({}, cur[i], patch);
+              return next;
+            });
           });
-          return function () { alive = false; };
+          return function () { alive = false; cancel(); };
         }, [key]);
         if (!key) return null;
         return h('div', { className: 'ztp-imgs' },
@@ -3676,6 +3736,15 @@
         prefetchImageBytes: prefetchImageBytes,
         imagesOf: imagesOf,
         bytesFromBase64: bytesFromBase64,
+        // 图片内存缓存（url → dataURL，模块级）
+        imageCache: imageCache,
+        cachedImageSrc: cachedImageSrc,
+        rememberImageSrc: rememberImageSrc,
+        imageDataUrlParts: imageDataUrlParts,
+        fetchImageValue: fetchImageValue,
+        loadDetailImages: loadDetailImages,
+        IMAGE_CACHE_MAX: IMAGE_CACHE_MAX,
+        IMAGE_CACHE_MAX_BYTES: IMAGE_CACHE_MAX_BYTES,
         collectDispatchContext: collectDispatchContext,
         dispatchToNewSession: dispatchToNewSession,
         insertToNewSession: insertToNewSession,

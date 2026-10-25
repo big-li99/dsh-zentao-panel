@@ -495,6 +495,8 @@ ctx.get = function (name) {
   };
   return undefined;
 };
+// 预取必须真发 zentao.image RPC —— 先清图片缓存（前面向 file-read-1/2 的取图已入缓存）
+mod._test.imageCache.clear();
 const imgs2 = [{ url: 'http://z/file-read-1.png' }, { url: 'http://z/file-read-2.png' }];
 const drSlow = mod._test.dispatchToNewSession('## 快', imgs2, { model: { provider: 'p', model: 'm' } });
 await sleep(8);
@@ -1404,6 +1406,94 @@ swRows[0].children[0][1].props.onClick({ stopPropagation: () => { editStopProp =
 check('账号菜单：点行切换账号、点改名不冒泡（stopPropagation）',
   ((() => { swRows[1].props.onClick(); return pickedAcct && pickedAcct.id === 'a2'; })())
   && editStopProp === true);
+
+// ── 图片内存缓存（url → dataURL，模块级；面板重挂/重开详情秒出，2026-10-25）──
+TT.imageCache.clear();
+
+check('imageDataUrlParts：dataURL → mediaType/base64；非 dataURL / 空 → null',
+  (() => { const p = TT.imageDataUrlParts('data:image/png;base64,QUJD'); return p && p.mediaType === 'image/png' && p.base64 === 'QUJD'; })()
+  && TT.imageDataUrlParts('http://z/1.png') === null
+  && TT.imageDataUrlParts('data:text/plain,hello') === null
+  && TT.imageDataUrlParts('') === null && TT.imageDataUrlParts(null) === null);
+
+TT.rememberImageSrc('http://z/a.png', 'data:image/png;base64,QQ');
+TT.rememberImageSrc('http://z/a.png', 'data:image/png;base64,QQ==');
+check('rememberImageSrc 写入 / 覆盖更新 / cachedImageSrc 读回',
+  TT.cachedImageSrc('http://z/a.png') === 'data:image/png;base64,QQ=='
+  && TT.cachedImageSrc('http://z/never.png') === null
+  && (TT.rememberImageSrc('http://z/bad.png', ''), TT.cachedImageSrc('http://z/bad.png') === null) /* 空值不写 */);
+
+// 张数淘汰：塞满 MAX+1 张 → 最旧的被淘汰、最新的保留
+TT.imageCache.clear();
+for (let i = 0; i < TT.IMAGE_CACHE_MAX + 1; i++) TT.rememberImageSrc(`http://z/n${i}.png`, `data:image/png;base64,${i}`);
+check(`张数淘汰：上限 ${TT.IMAGE_CACHE_MAX} 张，最旧先出`,
+  TT.imageCache.size === TT.IMAGE_CACHE_MAX
+  && TT.cachedImageSrc('http://z/n0.png') === null
+  && TT.cachedImageSrc(`http://z/n${TT.IMAGE_CACHE_MAX}.png`) !== null);
+
+// 字节淘汰：单条超预算可独占缓存（保至少 1 张），再来一条把超大的挤出去
+TT.imageCache.clear();
+TT.rememberImageSrc('http://z/big.png', 'data:image/png;base64,' + 'A'.repeat(TT.IMAGE_CACHE_MAX_BYTES + 10));
+TT.rememberImageSrc('http://z/small.png', 'data:image/png;base64,QQ');
+check('字节淘汰：总量超预算时最旧先出，最新保留', TT.imageCache.size === 1
+  && TT.cachedImageSrc('http://z/big.png') === null
+  && TT.cachedImageSrc('http://z/small.png') === 'data:image/png;base64,QQ');
+
+// loadDetailImages（DetailImages 取图内核）：未命中走 RPC 并回写缓存；命中同步回填不再 RPC
+TT.imageCache.clear();
+let imgRpcN = 0;
+ctx.connection.rpc.call = async (channel, endpoint) => {
+  if (endpoint !== 'zentao.image') return { ok: false, error: { message: 'unexpected ' + endpoint } };
+  imgRpcN++;
+  return { ok: true, value: { name: '1.png', mediaType: 'image/png', base64: 'QUJD', bytes: 3 } };
+};
+let marks1 = [];
+TT.loadDetailImages(['http://z/la-1.png'], (i, url, patch) => marks1.push({ i, url, patch }));
+await new Promise((r) => setTimeout(r, 5));
+check('loadDetailImages 首次：走 RPC，成功 mark src 并回写缓存',
+  imgRpcN === 1 && marks1.length === 1 && marks1[0].patch.src === 'data:image/png;base64,QUJD'
+  && TT.cachedImageSrc('http://z/la-1.png') === 'data:image/png;base64,QUJD');
+let marks2 = [];
+TT.loadDetailImages(['http://z/la-1.png'], (i, url, patch) => marks2.push({ i, url, patch }));
+check('loadDetailImages 缓存命中：同步回填、不再发 RPC', imgRpcN === 1
+  && marks2.length === 1 && marks2[0].patch.src === 'data:image/png;base64,QUJD');
+
+// 失败不缓存（下次挂载重试）
+ctx.connection.rpc.call = async () => ({ ok: false, error: { message: 'boom' } });
+let marks3 = [];
+TT.loadDetailImages(['http://z/la-2.png'], (i, url, patch) => marks3.push({ i, url, patch }));
+await new Promise((r) => setTimeout(r, 5));
+check('loadDetailImages 失败：mark failed、不写缓存', marks3.length === 1 && marks3[0].patch.failed === true
+  && TT.cachedImageSrc('http://z/la-2.png') === null);
+
+// cancel 后迟到的 RPC 回调作废
+let lateResolve = null;
+ctx.connection.rpc.call = () => new Promise((res) => { lateResolve = res; });
+let marks4 = [];
+const cancel4 = TT.loadDetailImages(['http://z/la-3.png'], (i, url, patch) => marks4.push({ i, url, patch }));
+cancel4();
+lateResolve({ ok: true, value: { name: '1.png', mediaType: 'image/png', base64: 'QUJD', bytes: 3 } });
+await new Promise((r) => setTimeout(r, 5));
+check('loadDetailImages cancel：卸载后迟到回调作废', marks4.length === 0);
+
+// 预取 / 附件管线复用同一缓存：已看过的图下发时不重拉
+TT.imageCache.clear();
+imgRpcN = 0;
+ctx.connection.rpc.call = async (channel, endpoint) => {
+  if (endpoint !== 'zentao.image') return { ok: false, error: { message: 'unexpected ' + endpoint } };
+  imgRpcN++;
+  return { ok: true, value: { name: 'x.png', mediaType: 'image/png', base64: base64Png, bytes: 10 } };
+};
+const pcImgs = [{ url: 'http://z/pc-1.png', name: 'pc1.png' }, { url: 'http://z/pc-2.png', name: 'pc2.png' }];
+const pc1 = await TT.prefetchImageBytes(pcImgs);
+check('prefetchImageBytes 首次逐张走 RPC（并回写缓存）',
+  imgRpcN === 2 && pc1.length === 2 && pc1.every(Boolean));
+const pc2 = await TT.prefetchImageBytes(pcImgs);
+check('prefetchImageBytes 二次命中缓存：0 RPC，name 取自图片引用',
+  imgRpcN === 2 && pc2.length === 2 && pc2[0].name === 'pc1.png' && pc2[0].mediaType === 'image/png');
+const attCached = await TT.attachImagesToDraft(pcImgs, { sessionId: 's-c', facade: evFacade, conversation: evConversation });
+check('attachImagesToDraft 缓存命中：不发 RPC 照常建附件',
+  imgRpcN === 2 && attCached.ok === true && attCached.count === 2);
 
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);
