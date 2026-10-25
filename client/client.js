@@ -1384,6 +1384,23 @@
       }
 
       /**
+       * 列表滚动到目标卡片（2026-10-25 用户反馈「跳转后不滚动」）：按 data-zcard 查
+       * DOM，scrollIntoView nearest（只在卡片不可见时滚动，不打扰当前视野）。doc 参数
+       * 可注入（测试用）。返回是否滚动成功。
+       */
+      function scrollCardIntoView(card, doc) {
+        if (!card || !doc || typeof doc.querySelector !== 'function') return false;
+        try {
+          var el = doc.querySelector('[data-zcard="' + card.kind + '-' + card.id + '"]');
+          if (el && typeof el.scrollIntoView === 'function') {
+            el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            return true;
+          }
+        } catch (e) { /* DOM 环境异常忽略 */ }
+        return false;
+      }
+
+      /**
        * 复制文本到剪贴板（一键复制用）：优先 navigator.clipboard，失败/不存在退
        * textarea + execCommand（老环境兜底）。resolve true = 复制成功。
        */
@@ -2789,6 +2806,7 @@
             + (sel && props.selected ? ' sel' : '')
             + (props.hidden ? ' hiddenmark' : '')
             + (live === 'ask' ? ' ztp-live-ask' : live === 'done' ? ' ztp-live-done' : ''),
+          'data-zcard': c.kind + '-' + c.id, // 选中滚动定位锚点（scrollCardIntoView）
           draggable: !sel,
           title: sel ? '点击选中/取消选中' : '点击查看详情，可拖拽到对话输入框',
           onDragStart: sel ? undefined : function (e) {
@@ -3780,6 +3798,14 @@
           return function () { clearTimeout(timer); };
         }, [toast[0]]);
 
+        // 选中卡滚动定位（2026-10-25 用户反馈）：反向跳转/看板回列表等场景，目标卡
+        // 可能不在列表视口内——detailCard 或视图切回列表后滚到 nearest。点列表里的卡
+        // 本来就可见，nearest 不会额外滚动。
+        useEffect(function () {
+          if (!detailCard[0] || viewMode[0] !== 'list') return;
+          scrollCardIntoView(detailCard[0], document);
+        }, [detailCard[0], viewMode[0]]);
+
         // 面板数据同步进模块级缓存：tab 卸载（切会话/关 tab）后重挂时用它秒恢复；
         // mine 到手后顺带清理：已不在「指派给我」列表超过宽限期的事项 → 关联/进度一起删
         useEffect(function () {
@@ -4683,6 +4709,7 @@
         boardColumns: boardColumns,
         BOARD_COLS: BOARD_COLS,
         copyToClipboard: copyToClipboard,
+        scrollCardIntoView: scrollCardIntoView,
         readLastDispatch: readLastDispatch,
         continueInSession: continueInSession,
         readNoteMap: readNoteMap,

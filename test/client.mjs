@@ -1956,5 +1956,19 @@ const actBadge = actMeta.children[actMeta.children.length - 1];
 check('CardItem active 态：渲染「查看中」角标（类型色底白字，绝对定位右上）',
   actBadge.props.className === 'ztp-viewing-badge' && actBadge.children[0] === '查看中');
 
+// ── 选中卡滚动定位（2026-10-25 用户反馈「跳转后不滚动」）──
+let scrolled = null;
+const fakeDoc = { querySelector: (sel) => (sel === '[data-zcard="bug-1"]'
+  ? { scrollIntoView: (o) => { scrolled = o; } } : null) };
+check('scrollCardIntoView：查 data-zcard 命中则 scrollIntoView(nearest/smooth)',
+  TT.scrollCardIntoView({ kind: 'bug', id: 1 }, fakeDoc) === true
+  && scrolled && scrolled.block === 'nearest' && scrolled.behavior === 'smooth'
+  && TT.scrollCardIntoView({ kind: 'bug', id: 2 }, fakeDoc) === false // 查不到 → false
+  && TT.scrollCardIntoView(null, fakeDoc) === false
+  && TT.scrollCardIntoView({ kind: 'bug', id: 1 }, null) === false);
+const anchorNode = TT.CardItem({ card: bc1, linkView: null, live: null, onOpen: () => {} });
+check('CardItem 根节点带 data-zcard 锚点（kind-id）',
+  anchorNode.props['data-zcard'] === 'bug-1');
+
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);
