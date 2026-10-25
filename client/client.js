@@ -218,6 +218,18 @@
         '.ztp-img-failed{height:56px;border-radius:var(--dsw-radius-md);border:.5px dashed var(--dsw-alias-border-l3);display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:11.5px;}',
         '.ztp-img-zoom{position:fixed;inset:0;z-index:2147482100;background:color-mix(in srgb,#000 72%,transparent);display:flex;align-items:center;justify-content:center;cursor:zoom-out;}',
         '.ztp-img-zoom img{max-width:94vw;max-height:94vh;border-radius:var(--dsw-radius-md);box-shadow:var(--dsw-shadow-lv3);}',
+        // 最近动态时间线（v1 actions）：左侧竖线 + 每条 desc/备注/字段变更
+        '.ztp-actions{display:flex;flex-direction:column;gap:2px;margin:2px 0 4px;}',
+        '.ztp-act{padding:5px 2px 5px 10px;border-left:2px solid var(--dsw-alias-border-l2);}',
+        '.ztp-act + .ztp-act{border-top:.5px solid var(--dsw-alias-border-l1);}',
+        '.ztp-act-head{display:flex;align-items:baseline;gap:8px;justify-content:space-between;}',
+        '.ztp-act-desc{font-size:12.5px;color:var(--dsw-alias-label-primary);word-break:break-word;}',
+        '.ztp-act-date{flex:none;font-size:11px;color:var(--dsw-alias-label-caption);}',
+        '.ztp-act-comment{margin-top:4px;padding:6px 9px;border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-interactive-bg-hover);font-size:12px;line-height:1.65;color:var(--dsw-alias-label-secondary);white-space:pre-wrap;word-break:break-word;}',
+        '.ztp-act .ztp-imgs{margin-top:6px;}',
+        '.ztp-act-hist{margin-top:3px;font-size:11px;line-height:1.6;color:var(--dsw-alias-label-caption);word-break:break-word;}',
+        '.ztp-act-toggle{appearance:none;border:0;background:transparent;color:var(--dsw-alias-link);font:inherit;font-size:11.5px;padding:4px 0 2px;cursor:pointer;align-self:flex-start;}',
+        '.ztp-act-toggle:hover{text-decoration:underline;}',
 
         // 登录
         '.ztp-fill{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;}',
@@ -2325,6 +2337,10 @@
 
           imgs.length ? h('div', { className: 'ztp-section' }, '截图（' + imgs.length + '）') : null,
           h(DetailImages, { images: imgs }),
+
+          // 最近动态（提案 2）：v1 actions 精简时间线——同事备注/流转记录/字段变更
+          (d.actions && d.actions.length) ? h('div', { className: 'ztp-section' }, '最近动态（' + d.actions.length + '）') : null,
+          (d.actions && d.actions.length) ? h(ActionTimeline, { actions: d.actions }) : null,
         );
       }
 
@@ -2377,6 +2393,50 @@
           zoom[0] ? h('div', { className: 'ztp-img-zoom', onClick: function () { zoom[1](null); } },
             h('img', { src: zoom[0], alt: '' })) : null,
         );
+      }
+
+      /** action.date（"2026-09-22 09:09:16"）→ 紧凑展示：今年 "09-22 09:09"，往年带年份。 */
+      function fmtActDate(s) {
+        var m = /^(\d{4})-(\d{2}-\d{2})[ T](\d{2}:\d{2})/.exec(String(s || ''));
+        if (!m) return String(s || '');
+        return m[1] === String(new Date().getFullYear()) ? (m[2] + ' ' + m[3]) : (m[1] + '-' + m[2]);
+      }
+
+      /** 「最近动态」默认折叠条数（时间正序，折叠时只露尾部最新几条）。 */
+      var ACTION_FOLD_N = 5;
+
+      /**
+       * 最近动态时间线（v1 actions，host 已精简：desc 现成中文句 / comment 备注正文 /
+       * history 字段变更明细）。时间正序、折叠只显示最近 5 条，可展开全部；
+       * 备注里的内联图片复用 DetailImages 走 zentao.image 真实渲染。
+       */
+      function ActionTimeline(props) {
+        var acts = (props.actions || []).filter(function (a) {
+          return a && (a.desc || a.comment || (a.history && a.history.length));
+        });
+        var fold = useState(true);
+        useEffect(function () { fold[1](true); }, [props.actions]);
+        if (!acts.length) return null;
+        var over = acts.length > ACTION_FOLD_N;
+        var skipped = acts.length - ACTION_FOLD_N;
+        var shown = (fold[0] && over) ? acts.slice(skipped) : acts;
+        return h('div', { className: 'ztp-actions' },
+          shown.map(function (a, i) {
+            return h('div', { key: (a.date || '') + '#' + (acts.length - shown.length + i), className: 'ztp-act' },
+              h('div', { className: 'ztp-act-head' },
+                h('span', { className: 'ztp-act-desc' }, a.desc || a.actor || ''),
+                a.date ? h('span', { className: 'ztp-act-date' }, fmtActDate(a.date)) : null),
+              a.comment ? h('div', { className: 'ztp-act-comment' }, stripImageMarkers(a.comment)) : null,
+              (a.images && a.images.length) ? h(DetailImages, { images: a.images }) : null,
+              (a.history && a.history.length) ? h('div', { className: 'ztp-act-hist' },
+                a.history.map(function (hv, j) {
+                  return h('div', { key: j }, hv.field + '：' + (hv.old ? hv.old + ' → ' : '') + hv.new);
+                })) : null);
+          }),
+          over ? h('button', {
+            className: 'ztp-act-toggle', type: 'button',
+            onClick: function () { fold[1](!fold[0]); },
+          }, fold[0] ? ('展开全部（' + acts.length + ' 条）') : '收起') : null);
       }
 
       /** 多账号：账号管理弹出层（切换 / 添加 / 按账号移除）。 */
@@ -3314,6 +3374,10 @@
         mdToBlocks: mdToBlocks,
         mdInlineNodes: mdInlineNodes,
         mdListTree: mdListTree,
+        // 最近动态时间线（v1 actions）
+        fmtActDate: fmtActDate,
+        ActionTimeline: ActionTimeline,
+        ACTION_FOLD_N: ACTION_FOLD_N,
       };
       return module.exports;
     },

@@ -1209,5 +1209,45 @@ check('mdListTree：缩进子级挂到上一项 children',
   tree.length === 2 && tree[0].children.length === 1 && tree[0].children[0].text === 'a1'
   && tree[1].text === 'b' && tree[1].children.length === 0);
 
+// ── 最近动态时间线（v1 actions，2026-10-25 提案 2；fake useState 恒折叠态）──
+check('fmtActDate：今年 → "MM-DD HH:mm"，往年带年份，非法原样',
+  TT.fmtActDate('2026-09-22 09:09:16') === '09-22 09:09'
+  && TT.fmtActDate('2021-09-22 09:09:16') === '2021-09-22'
+  && TT.fmtActDate('') === '' && TT.fmtActDate('abc') === 'abc');
+
+const mkAct = (i) => ({
+  actor: 'actor' + i, action: 'edited', date: '2026-09-' + String(9 + i).padStart(2, '0') + ' 09:00:00',
+  desc: '第' + i + '条动态', comment: i === 8 ? '备注正文[图片：1.png]' : '',
+  images: i === 8 ? [{ url: 'http://z/file-read-1.png', name: '1.png' }] : [],
+  history: i === 10 ? [{ field: '指派给', old: 'zhang', new: 'li' }] : [],
+});
+const acts10 = Array.from({ length: 10 }, (_, i) => mkAct(i + 1));
+const tl = TT.ActionTimeline({ actions: acts10 });
+// fake createElement 不展平数组 children（真 React 会），先 flat 再找节点
+const tlAll = tl.children.flat(2).filter(Boolean);
+const tlItems = tlAll.filter((x) => x.type === 'div' && x.props.className === 'ztp-act');
+const tlToggle = tlAll.find((x) => x.type === 'button');
+check('ActionTimeline：10 条 → 折叠只渲染最近 5 条 + 展开按钮',
+  tl && tl.type === 'div' && tl.props.className === 'ztp-actions'
+  && tlItems.length === 5 && tlToggle && tlToggle.children[0] === '展开全部（10 条）');
+check('ActionTimeline：折叠露的是尾部最新（第 6 条在最上）+ desc/紧凑日期渲染',
+  tlItems[0].children[0].children[0].children[0] === '第6条动态'
+  && tlItems[0].children[0].children[1].children[0] === '09-15 09:00');
+const cmNode = tlItems[2].children.find((x) => x && x.props && x.props.className === 'ztp-act-comment');
+const imNode = tlItems[2].children.find((x) => x && typeof x.type === 'function');
+const histNode = tlItems[4].children.find((x) => x && x.props && x.props.className === 'ztp-act-hist');
+check('ActionTimeline：备注去图片占位符 + 图片复用 DetailImages（函数组件）+ 变更明细文案',
+  cmNode && cmNode.children[0] === '备注正文'
+  && imNode && imNode.props.images.length === 1
+  && histNode && histNode.children.flat(2)[0].children[0] === '指派给：zhang → li');
+const tl3 = TT.ActionTimeline({ actions: acts10.slice(0, 3) });
+const tl3All = tl3.children.flat(2).filter(Boolean);
+check('ActionTimeline：≤ 折叠数 → 全显示、无展开按钮',
+  tl3All.filter((x) => x.type === 'div' && x.props.className === 'ztp-act').length === 3
+  && !tl3All.some((x) => x.type === 'button'));
+check('ActionTimeline：空数组 / 全空条目 → 整块不渲染',
+  TT.ActionTimeline({ actions: [] }) === null
+  && TT.ActionTimeline({ actions: [{ desc: '', comment: '', history: [] }, null] }) === null);
+
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);

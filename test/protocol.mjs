@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createZentaoClient } from '../lib/zentao-client.mjs';
-import { createZentaoService } from '../lib/service.mjs';
+import { createZentaoService, toActions } from '../lib/service.mjs';
 
 let failures = 0;
 function check(name, cond, extra = '') {
@@ -39,6 +39,19 @@ function jsonResponse(obj, headers = {}) {
   });
 }
 
+// v1 story 详情载荷（2026-10-25 实测坑：v1 路径复数是 stories；此前 client 把
+// story 简单加 s 拼成 storys，story 详情从 M3 起一直 404「不存在」）
+const v1StoryPayload = {
+  id: 8, title: '需求C', spec: 'x', status: 'reviewing',
+  actions: [
+    { actor: '张三', action: 'opened', date: '2026-10-24 17:35:00',
+      desc: '2026-10-24 17:35:00, 由 <strong>张三</strong> 创建。\n', comment: '', history: [] },
+    { actor: '李四', action: 'commented', date: '2026-10-25 10:00:00',
+      desc: '2026-10-25 10:00:00, 由 李四 添加备注。',
+      comment: '<p>先等后端</p><img src="http://zentao.test/file-read-36123.png" />', history: [] },
+  ],
+};
+
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(String(url));
@@ -56,7 +69,12 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.pathname === '/my-work-story.json') {
     return jsonResponse({ status: 'success', data: JSON.stringify({ stories: { 8: { id: '8', title: '需求C' } } }) });
   }
-  if (u.pathname === '/user-login.html' && method === 'GET') {
+  // v1 story 详情路由
+if (u.pathname === '/api.php/v1/stories/8') return jsonResponse(v1StoryPayload);
+if (u.pathname === '/api.php/v1/stories/999') {
+  return new Response(JSON.stringify({ error: 'not found' }), { status: 404 });
+}
+if (u.pathname === '/user-login.html' && method === 'GET') {
     return new Response('<html>user-login</html>', { status: 200, headers: { 'set-cookie': 'zentaosid=stub; path=/' } });
   }
   if (u.pathname === '/user-refreshRandom.html') {
@@ -130,6 +148,39 @@ check('重登走了登录协议（GET login + refreshRandom + POST login）',
   calls.includes('GET /user-login.html') && calls.includes('GET /user-refreshRandom.html') && calls.includes('POST /user-login.html'));
 const again = await service.fetchMine();
 check('重登后缓存命中（不再重登）', again.cached === true && calls.filter((c) => c === 'POST /user-login.html').length === 1);
+
+// ── 3. v1 详情路径复数 + actions 精简映射（2026-10-25 提案 2）──
+calls.length = 0;
+const s8 = await client.fetchDetail('story', 8);
+check('story 详情走 stories（不是 storys）→ 成功',
+  s8?.id === 8 && calls.includes('GET /api.php/v1/stories/8') && !calls.includes('GET /api.php/v1/storys/8'));
+
+err = null;
+try { await client.fetchDetail('story', 999); } catch (e) { err = e; }
+check('story 真 404 → 抛「不存在」',
+  err?.message.includes('不存在') === true && calls.filter((c) => c === 'GET /api.php/v1/stories/999').length === 1);
+
+// toActions 精简映射（service 层纯函数）
+const mapped = toActions(v1StoryPayload.actions, BASE);
+check('toActions：desc 去时间前缀 + 去 HTML / comment 保占位符并提图片',
+  mapped.length === 2
+  && mapped[0].desc === '由 张三 创建。'
+  && mapped[1].desc === '由 李四 添加备注。'
+  && mapped[1].comment === '先等后端\n[图片：36123.png]'
+  && mapped[1].images.length === 1 && mapped[1].images[0].url === 'http://zentao.test/file-read-36123.png');
+
+const mappedHist = toActions([{ actor: '李四', action: 'edited', date: '2026-09-23 09:54:36', desc: '由 李四 编辑。', comment: '', history: [
+  { field: 'assignedTo', fieldName: '指派给', old: 'zhangsan', new: 'lisi' },
+  { field: 'desc', fieldName: '任务描述', old: `<p>${'x'.repeat(200)}</p>`, new: '' },
+] }], BASE);
+check('toActions：history 取中文 fieldName，长 HTML 值转文本截断（80+…）',
+  mappedHist[0].history.length === 2
+  && mappedHist[0].history[0].field === '指派给' && mappedHist[0].history[0].old === 'zhangsan' && mappedHist[0].history[0].new === 'lisi'
+  && mappedHist[0].history[1].old.length === 81 && mappedHist[0].history[1].old.endsWith('…'));
+
+check('toActions：desc/comment/history 全空的条目被滤掉 / 非数组入参 → []',
+  toActions([{ actor: 'x', comment: '', history: [] }, null], BASE).length === 0
+  && toActions(undefined, BASE).length === 0);
 
 globalThis.fetch = realFetch;
 console.log(failures === 0 ? '\n全部通过 ✅' : `\n${failures} 项失败 ❌`);

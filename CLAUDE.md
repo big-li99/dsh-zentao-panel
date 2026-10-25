@@ -407,6 +407,16 @@ Neko3000/deepseek-whalechan 公开规范——**注意其图片素材不在开�
 - 缓存 `dsh-zentao-panel.replies.v1`（key 同 links 构，值 `{sessionId, text, at, full}`）。**完整显示不截行**（2026-10-25 用户反馈「显示不全」后改：去 8 行 line-clamp；`REPLY_MAX_CHARS=20000` 仅防炸兜底，`full` 标记是否完整——旧版截 500 字的缓存无 full 字段 → 自动回读判不新鲜重拉）。**生命周期联动**：saveSessionLink 换会话 → 旧摘要作废（同会话重复保存不清）；syncPersistedStates 会话被删 → 连带删；cleanupStaleLinks 超期/孤儿摘要一并清。
 - UI：DetailView 元信息卡下加「处理结果（关联会话最新回复）」区：**markdown 渲染 + 限高 360px 内部滚动**（2026-10-25 用户要求；DSH 无可 require 的 markdown 组件——primitives 的 MarkdownText 被内联进 ui-chat bundle、模块表没有——自研 `MarkdownLite`：md → 块结构 → React 元素树，**不经 innerHTML 无 XSS 面**；支持标题/段落/粗斜体/行内代码/链接/围栏代码块/引用递归/缩进列表/分隔线/GFM 表格，段落内单换行渲染 `<br>`；`mdToBlocks/mdInlineNodes/mdListTree` 进 _test）+ 更新时间 + 「重新读取」；**自动回读**条件：详情打开 && resolveLiveState=done && 缓存非（完整+未过期）（TTL 10min），失败冷却 60s（`replyLastTry` 防抖）；running/ask 可手动刷新。`fetchReplyNow` 的 activeAcct/card/link 全由当前 render 传参（useCallback([]) 闭包坑，同 sendDispatch）。
 
+### 4.8 详情页「最近动态」时间线 + story 详情 404 修复（2026-10-25，提案 2）
+
+用户批准的提案 2：详情页看同事备注/流转记录/字段变更，不用切回禅道网页。探测结论在《计划书.md》§9（**必读**），要点：
+
+- **数据源零成本**：v1 详情接口 `/api.php/v1/{tasks,bugs,stories}/{id}` 响应自带 `actions` 数组，且**actor 已是真名、每条带 `desc` 现成中文句**（「由 张三 指派给 李四。」）——不用自建动作名翻译。`comment` 是 HTML（图片同描述归一）、`history` 带中文 `fieldName` + old→new。
+- **host**（`service.mjs`）：`toActions(raw, baseUrl)` 精简映射——desc 走 `htmlToText` + 剥时间戳前缀（date 字段独立存在）；comment 走 `htmlToText`（保留 `[图片：x]` 占位符，client 去掉）+ `extractImageRefs` 提图；history 值 `shortHistValue`（HTML 转文本、压空白、80 字截断，任务描述 diff 会很长）；desc/comment/history 全空的条目滤掉。`fetchDetail` 返回值加 `actions`。**host 改动 → 重装 + 重启桌面版**。
+- **client**（`client.js`）：DetailView「截图」区下加「最近动态（N）」区 + `ActionTimeline` 组件——时间正序、默认折叠只显示最近 5 条（`ACTION_FOLD_N`，`slice` 尾部）、「展开全部（N 条）/收起」按钮（fold state 在 `useEffect([props.actions])` 里重置，切卡片不残留展开态）；每条 = desc 主行 + `fmtActDate` 紧凑日期（今年 `MM-DD HH:mm`、往年带年份）+ 备注块（`stripImageMarkers`）+ 备注**图片复用 DetailImages 真实渲染** + 变更明细行（`field：old → new`，old 空只显 new）。样式 `.ztp-act*` 走 `--dsw-alias-*` token。
+- **⚠️ story 详情 404 真相（M3 起就坏）**：探测中曾误判为「session 产品上下文污染 + vision=rnd 重试可恢复」，写单测时揭穿——client 把 story 简单加 s 拼成 `/api.php/v1/storys/{id}`（正确复数 `stories`），**story 详情从 M3 起一直 404「不存在」**。修复：`zentao-client.mjs` 的 `V1_KIND_PATHS` 显式映射；vision 重试方案已删（错误归因的产物）。教训：某类对象接口整体 404 先查 URL 拼写。
+- 测试：`protocol` +5（stories 拼写 / 真 404 / toActions 3 项）、`client` +8（fmtActDate / ActionTimeline 折叠·展开·备注图·变更·空态；**fake createElement 不展平数组 children，children.flat(2) 后再断言**）、`host` +2（actions 透传、story detail 真机——实测 story#8 有 4 条动态）。**host 测试的 logout 会清掉借用凭据目录的账号**（/tmp/zt-smoke 的 config 已被消耗，下次跑 host.mjs 需重新提供凭据）。
+
 ### 5. DSH 插件体系（本机实测）
 
 - DSH Desktop **0.2.1-rc.2**，desktop profile，macOS
@@ -537,11 +547,13 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   ④ 重启后正在跑的 turn 若已死，**不**显示「处理中」（瞬态兜底只在监控未就绪的过渡期生效）。
   **仅 client 改动，⌘R 生效**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **201 项**（注册契约 8 项 +「处理」弹层/下发/时序/
+- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **209 项**（注册契约 8 项 +「处理」弹层/下发/时序/
   不跳转 +「插入对话」10 项（§4.5）+ M6 22 项（§4.4）+ 进度持久化 29 项（§4.6）+ **列表三件套 56 项**
   （§4.7：搜索排序 25 项含 smart 融合实时状态、mine.v1 7 项、replies/fetchLastReply 24 项含 Markdown 渲染 10 项）
   + **会话头部反向跳转 13 项（§4.3 末）**）、
-  `multi` 25 项、`protocol` 9 项；`host.mjs` 19 项（真机 20 张卡片）、`smoke.mjs` 需真实禅道凭据。
+  `multi` 25 项、`protocol` 14 项（+actions/stories 拼写 5 项，§4.8）；`host.mjs` 21 项（真机 20 张卡片；
+  actions 透传 + story detail 2 项为 §4.8 新增；**logout 测试会清空借用凭据目录的账号**——/tmp/zt-smoke
+  的 config 已被消耗，下次跑需重新提供凭据）、`smoke.mjs` 需真实禅道凭据。
   沙箱里跑 host.mjs 读不了 `~/.dsh/zentao-panel/config.json`（EPERM），需把凭据拷进
   `$DSH_HOME/zentao-panel/`，此时「status before config」一项会假失败（假设初始无配置）
 

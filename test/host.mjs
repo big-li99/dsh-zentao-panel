@@ -111,7 +111,20 @@ const first = m.value.cards.find((c) => c.kind === 'bug') ?? m.value.cards[0];
 const d = await rpc('zentao.detail', { kind: first.kind, id: first.id });
 check('detail via rpc', d.ok === true && d.value.id === first.id && typeof d.value.desc === 'string', `${first.kind}#${first.id} desc=${d.value.desc.length}字`);
 check('detail 带 images 数组', d.ok === true && Array.isArray(d.value.images));
+check('detail 带 actions 时间线（提案 2）', d.ok === true && Array.isArray(d.value.actions)
+  && d.value.actions.every((a) => typeof a.desc === 'string' && Array.isArray(a.history)),
+  `${d.value?.actions?.length ?? 0} 条动态`);
 console.log('  详情 url:', d.value.url);
+
+// story 详情（2026-10-25 修复：v1 路径复数是 stories，此前拼成 storys 一直 404）
+const storyCard = m.value.cards.find((c) => c.kind === 'story');
+if (storyCard) {
+  const sd = await rpc('zentao.detail', { kind: 'story', id: storyCard.id });
+  check('story detail 可用（stories 拼写修复）', sd.ok === true && sd.value.id === storyCard.id
+    && Array.isArray(sd.value.actions), `story#${storyCard.id} actions=${sd.value?.actions?.length ?? '-'}`);
+} else {
+  check('story detail 可用（stories 拼写修复）', false, '当前账号没有 story 卡片');
+}
 
 // 图片：mine 卡片 → zentao.image RPC（真实图片附件的数据来源）
 const withImage = m.value.cards.find((c) => Array.isArray(c.images) && c.images.length > 0);

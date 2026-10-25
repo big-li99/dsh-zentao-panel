@@ -31,6 +31,9 @@ DeepSeekRuntime 的禅道（ZenTao）工作台插件：在 DSH **左侧边栏**�
   「处理中」胶囊（三点跳动）；agent 等你拍板 → 琥珀色「等你决策」（呼吸描边）；后台会话跑完 →
   绿色「已完成」徽标，同时弹提醒条，点「去看看」直接跳回那个会话。提醒不依赖面板是否打开
   （正开着的会话完成不重复提醒；装了 dsh-notify-me 的话系统通知照发，两条通道独立）；
+- **详情页「最近动态」**：同事备注 / 流转记录（指派、转派、优先级与截止日变更）/ 字段新旧值对照，
+  以时间线直接显示在详情里（默认折叠显示最近 5 条，可展开全部；备注里的截图也以真实图片渲染），
+  不用切回禅道网页看讨论；
 - 登录态持久化（30 天免登），会话失效自动重登；
 - 全部颜色走 DSH 语义 token（`--dsw-alias-*`），日间 / 夜间自动跟随；
 - 只读，不回写禅道。
@@ -49,12 +52,15 @@ DeepSeekRuntime 的禅道（ZenTao）工作台插件：在 DSH **左侧边栏**�
   每账号独立 client/cookie/缓存、账号菜单切换/添加/按账号移除
 - **M6** ✅ 实时状态：卡片活性徽标（处理中/等你决策/已完成）+ 完成/等决策常驻提醒
   （信号来自 DSH 宿主 `uiSession.sessionStatus`，零轮询）
+- **M7** ✅ 详情页「最近动态」时间线（v1 actions：备注/流转/字段变更，折叠展示、备注截图真实渲染）；
+  修复需求（story）详情自 M3 起一直 404 的问题——v1 路径复数是 `stories`，此前误拼成 `storys`
 
 ## 测试
 
 ```bash
-node test/client.mjs                          # client 半边：bundle 装载 + 左侧栏注册契约（无需 DSH）
+node test/client.mjs                          # client 半边：bundle 装载 + 注册契约 + 纯函数（无需 DSH）
 node test/multi.mjs                           # 多账号：store 迁移/切换/缓存隔离/移除（mock，不打网络）
+node test/protocol.mjs                        # 禅道响应信封协议 + actions 映射（stub fetch，不打网络）
 DSH_HOME=/tmp/zt-smoke node test/smoke.mjs    # 直连真实禅道验证 client/service（需内网可达）
 DSH_HOME=/tmp/zt-host  node test/host.mjs     # apply() + RPC wire 协议端到端（mock ctx，真实禅道）
 ```
