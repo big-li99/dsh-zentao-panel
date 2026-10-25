@@ -1863,5 +1863,19 @@ check('DetailView：关联会话存在 → 「继续处理…」按钮渲染；o
   Boolean(contBtn) && contBtn.props.onClick() === undefined
   && !contMetaNo.children.some((n) => n && n.type === 'button' && n.children[0] === '继续处理…'));
 
+// ── 卡片回复摘要行（2026-10-25 迭代）：agent 最后回复一行预览 ──
+check('replyLine：压空白 + 60 字截断（程序生成避免手数）',
+  TT.replyLine('a  b\n c') === 'a b c'
+  && TT.replyLine('答'.repeat(70)) === '答'.repeat(60) + '…'
+  && TT.replyLine('短回复') === '短回复' && TT.replyLine(null) === '');
+const rlNode = TT.CardItem({
+  card: bc1, linkView: null, live: 'done', note: '备注', replySummary: '已定位到根因：并发写冲突',
+  onToggleMark: () => {}, onCopyTitle: () => {}, onInsert: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
+});
+const rlLine = rlNode.children.find((n) => n && n.props && n.props.className === 'ztp-reply-line');
+check('CardItem：备注行与回复摘要行并存，回复行在备注行之后',
+  Boolean(rlLine) && rlLine.children[1] === '已定位到根因：并发写冲突'
+  && rlNode.children.filter((n) => n && n.props && (n.props.className === 'ztp-note-line' || n.props.className === 'ztp-reply-line')).length === 2);
+
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);

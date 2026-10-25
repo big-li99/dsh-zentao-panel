@@ -159,6 +159,8 @@
         '.ztp-card.hiddenmark{opacity:.55;}',
         '.ztp-note-line{margin-top:3px;display:flex;align-items:flex-start;gap:4px;font-size:11.5px;line-height:1.4;color:var(--dsw-alias-label-caption);word-break:break-word;}',
         '.ztp-note-line svg{width:10px;height:10px;flex:none;margin-top:2px;}',
+        '.ztp-reply-line{margin-top:2px;display:flex;align-items:flex-start;gap:4px;font-size:11.5px;line-height:1.4;color:var(--dsw-alias-label-secondary);word-break:break-word;}',
+        '.ztp-reply-line svg{width:10px;height:10px;flex:none;margin-top:2px;opacity:.8;}',
         '.ztp-note-edit{display:flex;flex-direction:column;gap:6px;margin-top:12px;}',
         '.ztp-note-acts{display:flex;gap:6px;}',
         '.ztp-cont-box{display:flex;flex-direction:column;gap:6px;margin-top:8px;}',
@@ -1046,6 +1048,11 @@
       function noteLine(text) {
         var t = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
         return t.length > 50 ? t.slice(0, 50) + '…' : t;
+      }
+      /** agent 回复一行摘要（卡片摘要行）：压空白取前 60 字，超长加省略号。 */
+      function replyLine(text) {
+        var t = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+        return t.length > 60 ? t.slice(0, 60) + '…' : t;
       }
 
       // ───────── 完成闭环（2026-10-25 迭代）：已完成卡片深链到禅道操作页 ─────────
@@ -2714,6 +2721,8 @@
           h('div', { className: 'ztp-card-title' }, c.title || ''),
           props.note ? h('div', { className: 'ztp-note-line', title: '本地备注：' + props.note },
             h(NoteIcon), noteLine(props.note)) : null,
+          props.replySummary ? h('div', { className: 'ztp-reply-line', title: 'agent 最新回复：' + props.replySummary },
+            h(ChatIcon), replyLine(props.replySummary)) : null,
           sel ? null : h('div', { className: 'ztp-acts' },
             props.linkView ? h('button', {
               className: 'ztp-slink' + (props.linkView.state === 'dead' ? ' dead' : ''),
@@ -3931,6 +3940,13 @@
         function linkViewOf(card) {
           return sessionLinkView(linkMap[sessionLinkKey(activeAcct, card)] || null, sessionRows);
         }
+        /** 卡片回复摘要行数据：仅当缓存属当前关联会话时显示（再处理换会话后旧回复不带）。 */
+        function replySummaryOf(card) {
+          var k = sessionLinkKey(activeAcct, card);
+          var link = linkMap[k];
+          var r = replyMap[k];
+          return (link && r && r.sessionId === link.sessionId && r.text) ? r.text : '';
+        }
         /** 卡片活性：实时监控优先（running/ask/done）；实时拿不到 → 兜底持久化进度
          *  （done 粘性显示「已处理完」，running/ask 仅监控未就绪时短暂兜底，见 resolveLiveState）。 */
         var stateMap = useMemo(readStateMap, [linkRev[0], liveSnap[0]]);
@@ -4108,6 +4124,7 @@
               quickTitle: quickSummary,
               onQuick: quickRedispatch,
               note: getNote(noteMap, activeAcct, c),
+              replySummary: replySummaryOf(c),
             });
           }));
         }
@@ -4509,6 +4526,7 @@
         saveNote: saveNote,
         getNote: getNote,
         noteLine: noteLine,
+        replyLine: replyLine,
         saveLastDispatch: saveLastDispatch,
         lastDispatchSummary: lastDispatchSummary,
         toggleCardMark: toggleCardMark,
