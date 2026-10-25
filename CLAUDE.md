@@ -470,6 +470,11 @@ placeholder「拼到任务背景末尾，如：只分析定位原因，先不要
 （`readLastInstruction/saveLastInstruction`，读坏/不可用退进程内兜底，同 links.v1 模式）——
 弹层初值带出上次输入，send 时保存本次输入（含清空）。注意 `useState(readLastInstruction())` 的
 初值在 fake React（useState 恒返初值）下正好可测「带出上次输入」。
+**指令模板预设**（2026-10-25 二轮）：textarea 下方 `.ztp-instr-tps` chip 行——点 chip 填入 textarea
+（整体替换）、chip 的 × 删除、行尾「+ 存为预设」把当前输入存成模板。localStorage
+`dsh-zentao-panel.instr-presets.v1`（`[{id, text, at}]` 按插入序；`normInstrPresets` 全文去重留先出现、
+空文本滤掉、上限 12 条最旧先出；坏 JSON 回退内存兜底不抛错——注意坏 JSON 时读到的是上次写入的
+内存列表而非空表）。chip 预览 `instrChipLabel`（压空白 + 12 字截断加 …，title 放全文）。
 
 **② 完成后一键去禅道闭环**：`finishUrl(card)` 由 `card.url`（禅道查看页）把 `*-view-{id}.html` 替换为
 操作页：task→`task-finish-{id}.html`、bug→`bug-resolve-{id}.html`、story→`story-close-{id}.html`
@@ -610,12 +615,13 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   ④ 重启后正在跑的 turn 若已死，**不**显示「处理中」（瞬态兜底只在监控未就绪的过渡期生效）。
   **仅 client 改动，⌘R 生效**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **251 项**（注册契约 8 项 +「处理」弹层/下发/时序/
+- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **259 项**（注册契约 8 项 +「处理」弹层/下发/时序/
   不跳转 +「插入对话」10 项（§4.5）+ M6 22 项（§4.4）+ 进度持久化 29 项（§4.6）+ **列表三件套 56 项**
   （§4.7：搜索排序 25 项含 smart 融合实时状态、mine.v1 7 项、replies/fetchLastReply 24 项含 Markdown 渲染 10 项）
   + **会话头部反向跳转 13 项（§4.3 末）** + **账号别名 5 项（§6 多账号节：acctDisplayName 纯函数 +
   AccountSwitcher 展示/编辑态结构——fake useState 恒 null 只能测展示路径，行内编辑交互靠真机）**
-  + **附加指令 7 项 + 完成闭环 4 项（§4.11，DetailView 首次进 _test）**）、
+  + **附加指令 7 项 + 指令模板预设 8 项 + 完成闭环 4 项（§4.11，DetailView 首次进 _test；
+  指令模板弹层断言要 children.flat(2)——chips 是 map 出的嵌套数组，§4.8 同坑）**）、
   `multi` 42 项（别名 11 项 + **fetchImage 缓存 6 项（§4.10）**）、`protocol` 15 项（+actions/stories 拼写 5 项，§4.8）；`host.mjs` 21+6 项
   （真机 20 张卡片；actions 透传 + story detail 2 项为 §4.8 新增；**别名 6 项 + fetchImage 缓存已 2026-10-25
   用真实凭据复跑全绿**；host.mjs 凭据解析已改为「环境变量 → $DSH_HOME 配置激活账号 → 只读兜底真实

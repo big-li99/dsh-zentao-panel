@@ -262,6 +262,15 @@
         // 附加指令 textarea（弹层）：覆盖 .ztp-input 的高度/内边距，可纵向拉伸
         '.ztp-instr{height:auto;min-height:52px;padding:7px 10px;resize:vertical;line-height:1.5;}',
         '.ztp-instr:focus{border-color:var(--dsw-alias-border-l4);}',
+        // 指令模板预设 chip 行：填入按钮 + 删除 × + 存为预设
+        '.ztp-instr-tps{display:flex;flex-wrap:wrap;gap:5px;margin-top:6px;}',
+        '.ztp-tp{display:inline-flex;align-items:center;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-sm);background:var(--dsw-alias-bg-layer-2);overflow:hidden;}',
+        '.ztp-tp-btn{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;line-height:1;height:22px;padding:0 7px;cursor:pointer;max-width:13em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
+        '.ztp-tp-btn:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover);}',
+        '.ztp-tp-x{appearance:none;border:0;border-left:.5px solid var(--dsw-alias-border-l2);background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:11px;line-height:1;height:22px;padding:0 5px;cursor:pointer;}',
+        '.ztp-tp-x:hover{color:var(--dsw-alias-state-error-label);background:var(--dsw-alias-interactive-bg-hover);}',
+        '.ztp-tp-add{appearance:none;border:.5px dashed var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:11px;line-height:1;height:22px;padding:0 8px;cursor:pointer;}',
+        '.ztp-tp-add:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l4);}',
         '.ztp-input::placeholder{color:var(--dsw-alias-label-caption);}',
         '.ztp-input:focus{border-color:var(--dsw-alias-border-l4);box-shadow:0 0 0 1px var(--dsw-alias-border-l4);}',
 
@@ -739,6 +748,63 @@
         var t = String(instr == null ? '' : instr).trim();
         if (!t) return md;
         return String(md == null ? '' : md) + '\n\n## 处理要求\n\n' + t;
+      }
+
+      // ───────── 指令模板预设（2026-10-25 迭代）：附加指令的多套快捷模板 ─────────
+      // 存 localStorage（数组 [{id, text, at}]，按插入序），全文去重、上限 12 条（超限最旧先出）。
+      var INSTR_PRESETS_KEY = 'dsh-zentao-panel.instr-presets.v1';
+      var MAX_INSTR_PRESETS = 12;
+      var instrPresetsFallback = null; // localStorage 不可用时的进程内兜底
+
+      /** 规整预设数组：非对象/空文本滤掉，全文去重（留先出现的），超上限最旧先出。 */
+      function normInstrPresets(list) {
+        var seen = {};
+        var out = [];
+        var arr = Array.isArray(list) ? list : [];
+        for (var i = 0; i < arr.length; i++) {
+          var p = arr[i];
+          var text = String(p && p.text != null ? p.text : '').trim();
+          if (!text || seen[text]) continue;
+          seen[text] = true;
+          out.push({ id: String(p.id || ('p' + i + '-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8))), text: text, at: Number(p.at) || Date.now() });
+        }
+        return out.length > MAX_INSTR_PRESETS ? out.slice(out.length - MAX_INSTR_PRESETS) : out;
+      }
+      function readInstrPresets() {
+        try {
+          var s = root.localStorage;
+          var raw = s && s.getItem(INSTR_PRESETS_KEY);
+          if (raw) return normInstrPresets(JSON.parse(raw)); // 坏 JSON 会 throw → 兜底
+        } catch (e) { /* 坏数据当空 */ }
+        return normInstrPresets(instrPresetsFallback || []);
+      }
+      function writeInstrPresets(list) {
+        instrPresetsFallback = list;
+        try {
+          var s = root.localStorage;
+          if (s) s.setItem(INSTR_PRESETS_KEY, JSON.stringify(list));
+        } catch (e) { /* 配额满等 → 内存兜底已写 */ }
+      }
+      /** 存当前输入为模板（空白/已存在同文 = no-op）；返回新列表。 */
+      function saveInstrPreset(text) {
+        var t = String(text == null ? '' : text).trim();
+        if (!t) return readInstrPresets();
+        var list = readInstrPresets().filter(function (p) { return p.text !== t; });
+        list.push({ id: 'p' + Date.now() + '-' + Math.random().toString(36).slice(2, 8), text: t, at: Date.now() });
+        var next = normInstrPresets(list);
+        writeInstrPresets(next);
+        return next;
+      }
+      /** 删除指定模板；返回新列表。 */
+      function removeInstrPreset(id) {
+        var next = readInstrPresets().filter(function (p) { return p.id !== String(id); });
+        writeInstrPresets(next);
+        return next;
+      }
+      /** chip 预览文案：压空白取前 12 字，超长加省略号。 */
+      function instrChipLabel(text) {
+        var t = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+        return t.length > 12 ? t.slice(0, 12) + '…' : t;
       }
 
       // ───────── 完成闭环（2026-10-25 迭代）：已完成卡片深链到禅道操作页 ─────────
@@ -2835,6 +2901,7 @@
         var modelKey = useState(null); // 选中 'provider\u0000model' | null
         var effortSel = useState(null); // 选中思考强度 id | ''（提供商默认）| null
         var instr = useState(readLastInstruction()); // 附加指令（可选），默认带出上次输入
+        var presets = useState(readInstrPresets()); // 指令模板预设：chip 一键填入
         var busy = useState(false);
 
         useEffect(function () {
@@ -2970,6 +3037,24 @@
               placeholder: '拼到任务背景末尾，如：只分析定位原因，先不要改代码',
               onChange: function (e) { instr[1](e.target.value); },
             }),
+            // 指令模板预设：chip 点击填入 textarea、× 删除、「存为预设」存当前输入（空 = no-op）
+            h('div', { className: 'ztp-instr-tps' },
+              presets[0].map(function (p) {
+                return h('span', { key: p.id, className: 'ztp-tp' },
+                  h('button', {
+                    type: 'button', className: 'ztp-tp-btn', title: '填入：' + p.text,
+                    onClick: function () { instr[1](p.text); },
+                  }, instrChipLabel(p.text)),
+                  h('button', {
+                    type: 'button', className: 'ztp-tp-x', title: '删除该模板',
+                    onClick: function () { presets[1](removeInstrPreset(p.id)); },
+                  }, '×'));
+              }),
+              h('button', {
+                type: 'button', className: 'ztp-tp-add', disabled: busy[0],
+                title: '把当前输入存为模板（重复内容不重复存，最多 ' + MAX_INSTR_PRESETS + ' 条）',
+                onClick: function () { presets[1](saveInstrPreset(instr[0])); },
+              }, '+ 存为预设')),
 
             h('div', { className: 'ztp-disp-note' },
               insert
@@ -3889,6 +3974,11 @@
         appendInstruction: appendInstruction,
         readLastInstruction: readLastInstruction,
         saveLastInstruction: saveLastInstruction,
+        readInstrPresets: readInstrPresets,
+        saveInstrPreset: saveInstrPreset,
+        removeInstrPreset: removeInstrPreset,
+        instrChipLabel: instrChipLabel,
+        normInstrPresets: normInstrPresets,
         finishUrl: finishUrl,
         CardItem: CardItem,
         DetailView: DetailView,

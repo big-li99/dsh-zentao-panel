@@ -1394,6 +1394,44 @@ check('DispatchDialog：send 回传 instr 且记忆本次输入',
   && ddSent.md === 'BASE-MD');
 TT.saveLastInstruction(''); // 清场，不影响后续用例
 
+// ── 指令模板预设（2026-10-25 迭代）：附加指令多套快捷模板 ──
+window.localStorage.removeItem('dsh-zentao-panel.instr-presets.v1');
+check('指令模板：save 去空白后入列 / 空白与重复 no-op',
+  (TT.saveInstrPreset('  只分析不改代码  '), TT.readInstrPresets().length === 1
+    && TT.readInstrPresets()[0].text === '只分析不改代码')
+  && (TT.saveInstrPreset('   '), TT.readInstrPresets().length === 1)
+  && (TT.saveInstrPreset('只分析不改代码'), TT.readInstrPresets().length === 1));
+check('指令模板：normInstrPresets 过滤空文本/非对象 + 全文去重留先出现',
+  TT.normInstrPresets([{ text: 'a' }, null, { text: '  ' }, { text: 'a' }, { text: 'b' }]).map((p) => p.text).join(',') === 'a,b');
+check('指令模板：超上限 12 条最旧先出',
+  (() => { for (let i = 0; i < 15; i++) TT.saveInstrPreset('模板' + i); const l = TT.readInstrPresets(); return l.length === 12 && l[0].text === '模板3' && l[11].text === '模板14'; })());
+const tp1 = TT.readInstrPresets()[0];
+check('指令模板：remove 按 id 删除',
+  (TT.removeInstrPreset(tp1.id), !TT.readInstrPresets().some((p) => p.id === tp1.id))
+  && TT.readInstrPresets().length === 11);
+check('指令模板：chip 预览压空白 + 12 字截断加省略号',
+  TT.instrChipLabel('只分析定位原因先不要改代码哦') === '只分析定位原因先不要改代…'
+  && TT.instrChipLabel('短指令') === '短指令'
+  && TT.instrChipLabel(null) === ''
+  && TT.instrChipLabel('只分析  定位原因') === '只分析 定位原因');
+window.localStorage.setItem('dsh-zentao-panel.instr-presets.v1', '{bad json');
+check('指令模板：坏 JSON 不抛错，回退内存兜底（上次写入的 11 条）', TT.readInstrPresets().length === 11);
+window.localStorage.setItem('dsh-zentao-panel.instr-presets.v1', JSON.stringify([{ id: 'tpx', text: '先跑测试再交', at: 1 }]));
+// 弹层结构：预置模板后渲染 chip（填入/删除按钮）+ 存为预设按钮；点 × 删除同步落盘
+TT.saveInstrPreset('先跑测试再交');
+const ddTp = TT.DispatchDialog({ card: bc1, images: [], md: 'x', intent: 'dispatch', activeAcct: 'a', onSend: () => {}, onClose: () => {} });
+const tpRow = ddTp.children[0].children.find((n) => n && n.props && n.props.className === 'ztp-instr-tps');
+const tpKids = tpRow.children.flat(2); // fake createElement 不展平数组 children（§4.8 同坑）
+const tpChip = tpKids.find((n) => n && n.props && n.props.className === 'ztp-tp');
+check('DispatchDialog：模板 chip 行渲染（填入按钮带全文 title + 删除 ×）+ 存为预设按钮',
+  Boolean(tpChip) && tpChip.children[0].props.title === '填入：先跑测试再交'
+  && tpChip.children[0].children[0] === '先跑测试再交'
+  && tpChip.children[1].props.title === '删除该模板'
+  && tpKids.some((n) => n && n.props && n.props.className === 'ztp-tp-add')
+  && tpKids.filter((n) => n && n.props && n.props.className === 'ztp-tp').length === 1);
+tpChip.children[1].props.onClick();
+check('DispatchDialog：点 × 删除模板（localStorage 同步清空）', TT.readInstrPresets().length === 0);
+
 // ── 完成闭环（2026-10-25 迭代）：finishUrl 深链 + 详情 done 态按钮 ──
 check('finishUrl：三类卡片替换为操作页（同 base 同 id）',
   TT.finishUrl({ kind: 'bug', id: 123, url: 'http://z:8090/bug-view-123.html' }) === 'http://z:8090/bug-resolve-123.html'
