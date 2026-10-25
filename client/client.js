@@ -79,6 +79,28 @@
         '.ztp-qf.on{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);border-color:transparent;}',
         '.ztp-qf.on:hover{background:var(--dsw-alias-button-primary-hover);color:var(--dsw-alias-label-primary-foreground);}',
         '.ztp-qf .ztp-num{font-size:10px;opacity:.85;}',
+        '.ztp-viewseg{flex:none;display:inline-flex;align-items:center;gap:2px;}',
+        '.ztp-view-btn{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;line-height:1;height:24px;padding:0 9px;border-radius:var(--dsw-alias-radius-sm,var(--dsw-radius-sm));cursor:pointer;}',
+        '.ztp-view-btn:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover);}',
+        '.ztp-view-btn.on{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary);}',
+        // 流程看板：四列泳道（不做装饰动画，信息密度优先）
+        '.ztp-board{flex:1;display:flex;gap:10px;padding:12px 14px;min-height:0;overflow-x:auto;}',
+        '.ztp-bcol{flex:1;min-width:180px;display:flex;flex-direction:column;min-height:0;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-alias-radius-lg,var(--dsw-radius-lg));background:var(--dsw-alias-bg-layer-1);overflow:hidden;}',
+        '.ztp-bcol-h{flex:none;display:flex;align-items:center;gap:6px;padding:8px 10px;font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary);border-bottom:.5px solid var(--dsw-alias-border-l2);}',
+        '.ztp-bcol-dot{width:7px;height:7px;border-radius:50%;flex:none;}',
+        '.ztp-bcol-dot.todo{background:var(--dsw-alias-label-tertiary);}',
+        '.ztp-bcol-dot.running{background:var(--dsw-alias-state-business-primary);}',
+        '.ztp-bcol-dot.ask{background:var(--dsw-alias-state-warn-primary);}',
+        '.ztp-bcol-dot.done{background:var(--dsw-alias-state-success-primary);}',
+        '.ztp-bcol-h .ztp-num{font-weight:400;opacity:.75;}',
+        '.ztp-bcol-b{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px;}',
+        '.ztp-bcol-empty{color:var(--dsw-alias-label-caption);text-align:center;padding:14px 0;font-size:12px;}',
+        '.ztp-bcard{border:.5px solid var(--dsw-alias-border-l3);border-left-width:3px;border-radius:var(--dsw-alias-radius-sm,var(--dsw-radius-sm));background:var(--dsw-alias-bg-layer-2);padding:7px 9px;cursor:pointer;}',
+        '.ztp-bcard:hover{border-color:var(--dsw-alias-border-l4);background:var(--dsw-alias-interactive-bg-hover);}',
+        '.ztp-bcard.od{border-left-color:var(--dsw-alias-state-error-primary);}',
+        '.ztp-bcard.sn{border-left-color:var(--dsw-alias-state-warn-primary);}',
+        '.ztp-bcard-t{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--dsw-alias-label-secondary);flex-wrap:wrap;}',
+        '.ztp-bcard-title{margin-top:3px;font-size:12px;line-height:1.4;color:var(--dsw-alias-label-primary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;}',
         '@media (max-width:719px){.ztp-search{width:110px;}}',
 
         // 图标按钮
@@ -723,6 +745,31 @@
           }
         }
         return m;
+      }
+
+      // ───────── 流程看板（2026-10-25 用户提案）：按处理阶段四列泳道 ─────────
+      var BOARD_COLS = [
+        { id: 'todo', label: '待处理' },
+        { id: 'running', label: '处理中' },
+        { id: 'ask', label: '等你决策' },
+        { id: 'done', label: '已完成待闭环' },
+      ];
+      /** 卡片按处理阶段分四列（禅道终态卡不出现在看板；段内按截止↑优先级↑排）。
+       *  liveOf(card) → 'ask'|'running'|'done'|null；null（含从未下发/进度已清）归「待处理」。 */
+      function boardColumns(cards, liveOf, now) {
+        var out = { todo: [], running: [], ask: [], done: [] };
+        var list = Array.isArray(cards) ? cards : [];
+        for (var i = 0; i < list.length; i++) {
+          var c = list[i];
+          if (!c || isFinalCard(c)) continue;
+          var st = liveOf ? liveOf(c) : null;
+          if (st === 'ask') out.ask.push(c);
+          else if (st === 'running') out.running.push(c);
+          else if (st === 'done') out.done.push(c);
+          else out.todo.push(c);
+        }
+        for (var k in out) out[k] = sortCards(out[k], 'deadline', now, null);
+        return out;
       }
 
       // ───────────── 自动轮询 + 新指派检测（Idea 1，2026-10-25）─────────────
@@ -2612,6 +2659,46 @@
       }
 
       /**
+       * 流程看板（2026-10-25 用户提案·方案 A）：四列泳道同屏——待处理 → 处理中 →
+       * 等你决策 → 已完成待闭环。纯信息密度（不做装饰动画，鲸鱼娘办公室的教训），
+       * 点缩略卡回列表视图并打开详情。数据来自现有 links/states/实时监控，零新增 RPC。
+       */
+      function BoardView(props) {
+        var cols = boardColumns(props.cards || [], props.liveOf || null, undefined);
+        return h('div', { className: 'ztp-board' },
+          BOARD_COLS.map(function (col) {
+            var list = cols[col.id] || [];
+            return h('div', { key: col.id, className: 'ztp-bcol c-' + col.id },
+              h('div', { className: 'ztp-bcol-h' },
+                h('i', { className: 'ztp-bcol-dot ' + col.id }),
+                col.label,
+                h('span', { className: 'ztp-num' }, list.length)),
+              h('div', { className: 'ztp-bcol-b' },
+                list.length
+                  ? list.map(function (c) {
+                    var dl = deadlineInfo(c.deadline);
+                    return h('div', {
+                      key: c.kind + '-' + c.id,
+                      className: 'ztp-bcard ztp-k-' + c.kind
+                        + (dl && dl.overdue ? ' od' : dl && dl.soon ? ' sn' : ''),
+                      title: (KIND_LABEL[c.kind] || c.kind) + ' #' + c.id + ' · 点击回列表打开详情',
+                      onClick: function () { props.onPick(c); },
+                    },
+                      h('div', { className: 'ztp-bcard-t' },
+                        h(KindTag, { kind: c.kind }),
+                        props.flaggedOf && props.flaggedOf(c)
+                          ? h('span', { className: 'ztp-flagdot' }, h(FlagIcon)) : null,
+                        h('span', { className: 'ztp-id' }, '#' + c.id),
+                        dl ? h('span', {
+                          className: 'ztp-dl' + (dl.overdue ? ' overdue' : dl.soon ? ' soon' : ''),
+                        }, (dl.overdue ? '逾期 ' : '') + fmtDate(c.deadline)) : null),
+                      h('div', { className: 'ztp-bcard-title' }, c.title || ''));
+                  })
+                  : h('div', { className: 'ztp-bcol-empty' }, '—')));
+          }));
+      }
+
+      /**
        * 快捷筛选条（2026-10-25 迭代）：等你决策/处理中/逾期/今天到期/已完成的
        * 一键过滤 chip（跨任务/Bug/需求）。单选：再点同一个清除；counts 由调用方
        * 在「搜索过滤后的全量卡片」上统计（数字随搜索联动）。
@@ -3623,13 +3710,14 @@
       // 切回会话视图（selectPanel(null)）或别的面板时禅道面板卸载——初始 state 直接取
       // 缓存，重挂瞬间就是完整列表，不闪 loading/骨架；后台 RPC 照常静默刷新。
       // 登出/切账号时这些 state 被置 null，缓存同步为 null，下次重挂走登录/重拉。
-      var paneCache = { tab: 'task', status: null, mine: null, detailCard: null, focus: null };
+      var paneCache = { tab: 'task', status: null, mine: null, detailCard: null, focus: null, view: 'list' };
       // 结果摘要自动回读的失败冷却（linkKey → 上次尝试时刻；模块级，避免重渲染干扰）
       var replyLastTry = {};
 
       function ZentaoPane(props) {
         props = props || {};
         var tab = useState(paneCache.tab);
+        var viewMode = useState(paneCache.view === 'board' ? 'board' : 'list'); // 列表 / 流程看板
         var status = useState(paneCache.status);   // {configured, account, baseUrl, loggedIn, cacheAt, activeId, accounts[]}
         var mine = useState(paneCache.mine);       // {cards, cached, at}
         var loading = useState(false);
@@ -3679,6 +3767,7 @@
         // mine 到手后顺带清理：已不在「指派给我」列表超过宽限期的事项 → 关联/进度一起删
         useEffect(function () {
           paneCache.tab = tab[0];
+          paneCache.view = viewMode[0];
           paneCache.status = status[0];
           paneCache.mine = mine[0];
           paneCache.detailCard = detailCard[0];
@@ -3687,7 +3776,7 @@
             linkRev[1](function (v) { return v + 1; });
           }
           watchPoke();
-        }, [tab[0], status[0], mine[0], detailCard[0]]);
+        }, [tab[0], viewMode[0], status[0], mine[0], detailCard[0]]);
 
         var loadStatus = useCallback(function () {
           Promise.resolve(rpc('zentao.status'))
@@ -4245,7 +4334,7 @@
 
           // 分段 tab 行（未配置/登录视图时不渲染，标题已在 mast 上）；右侧搜索 + 排序
           configured ? h('div', { className: 'ztp-head' },
-            h('div', { className: 'ztp-seg', role: 'tablist' }, KIND_ORDER.map(function (k) {
+            viewMode[0] === 'board' ? null : h('div', { className: 'ztp-seg', role: 'tablist' }, KIND_ORDER.map(function (k) {
               return h('button', {
                 key: k, type: 'button', role: 'tab',
                 'aria-selected': tab[0] === k ? 'true' : 'false',
@@ -4254,8 +4343,20 @@
               }, KIND_LABEL[k], counts[k] ? h('span', { className: 'ztp-num' }, counts[k]) : null);
             })),
             h('div', { className: 'ztp-grow' }),
-            // 批量选择入口（Idea 2）：进入后卡片点击=勾选，底部浮出批量操作条
-            h('button', {
+            // 视图切换（流程看板提案）：board 模式是跨分类全局视图，tab/筛选/批量只在列表模式出现
+            h('div', { className: 'ztp-viewseg', role: 'tablist', 'aria-label': '视图' },
+              h('button', {
+                type: 'button', role: 'tab', 'aria-selected': viewMode[0] === 'list' ? 'true' : 'false',
+                className: 'ztp-view-btn' + (viewMode[0] === 'list' ? ' on' : ''),
+                title: '分类列表视图', onClick: function () { viewMode[1]('list'); },
+              }, '列表'),
+              h('button', {
+                type: 'button', role: 'tab', 'aria-selected': viewMode[0] === 'board' ? 'true' : 'false',
+                className: 'ztp-view-btn' + (viewMode[0] === 'board' ? ' on' : ''),
+                title: '流程看板：待处理 / 处理中 / 等你决策 / 已完成待闭环 四列泳道',
+                onClick: function () { viewMode[1]('board'); selMode[1](false); },
+              }, '流程')),
+            viewMode[0] === 'board' ? null : h('button', {
               className: 'ztp-tool', type: 'button',
               title: selMode[0] ? '退出批量选择' : '批量选择多项一起处理',
               style: selMode[0] ? { color: 'var(--dsw-alias-state-business-primary)' } : undefined,
@@ -4267,7 +4368,7 @@
               title: '按标题、#ID、状态、创建人/指派人过滤当前列表（多词空格分隔，全部命中才显示）',
               onChange: function (e) { search[1](e.target.value); },
             }),
-            h('select', {
+            viewMode[0] === 'board' ? null : h('select', {
               className: 'ztp-sort', value: sortMode[0], title: '排序方式',
               'aria-label': '排序方式',
               onChange: function (e) { sortMode[1](e.target.value); },
@@ -4278,13 +4379,23 @@
               h('option', { value: 'origin' }, '默认顺序'))) : null,
 
           // 快捷筛选条（2026-10-25 迭代）：一键只看 等你决策/处理中/逾期/今天到期/已完成（跨分类）
-          configured && cards.length ? h(QfBar, {
+          configured && viewMode[0] === 'list' && cards.length ? h(QfBar, {
             counts: qfCounts,
             active: qf[0],
             onPick: function (id) { qf[1](id); detailCard[1](null); },
           }) : null,
 
-          middle,
+          // 流程看板（方案 A）：board 模式占满主体；点卡回列表并打开详情
+          configured && viewMode[0] === 'board' ? h(BoardView, {
+            cards: visCards.filter(function (c) { return matchSearch(c, search[0]); }),
+            liveOf: liveOf,
+            flaggedOf: flaggedOf,
+            onPick: function (card) {
+              viewMode[1]('list');
+              tab[1](card.kind); qf[1](null);
+              detailCard[1](card);
+            },
+          }) : middle,
 
           // 离线常驻横条（Idea 1）：拉取失败但仍有数据可展示时提示「正在看缓存」；
           // 无数据时错误视图（renderList 内）已抢占，不重复显示
@@ -4551,6 +4662,9 @@
         quickFilterCounts: quickFilterCounts,
         QUICK_FILTERS: QUICK_FILTERS,
         QfBar: QfBar,
+        BoardView: BoardView,
+        boardColumns: boardColumns,
+        BOARD_COLS: BOARD_COLS,
         copyToClipboard: copyToClipboard,
         readLastDispatch: readLastDispatch,
         continueInSession: continueInSession,

@@ -1898,5 +1898,45 @@ check('决策应答台：ask 态渲染（标题/说明/一键同意/自定义入
   && askSent.length === 1 && askSent[0][0] === bc1 && askSent[0][1] === '同意，请继续执行。'
   && !askDvNo.children.some((n) => n && n.props && n.props.className === 'ztp-ask-box'));
 
+// ── 流程看板（2026-10-25 用户提案·方案 A）：四列泳道 ──
+const bdLive = (c) => ({ 11: 'running', 12: 'ask', 13: 'done', 15: 'running' }[c.id] || null);
+const bdCards = [
+  qfToday, qfOverdue, qfTomorrow, qfLive, // id 11,12,13,15 → running/ask/done/running
+  bc1, // id 1 无活性 → todo
+  { kind: 'bug', id: 99, title: '已关闭', status: 'closed' }, // 禅道终态 → 不入板
+];
+const bdCols = TT.boardColumns(bdCards, bdLive, nowTs);
+check('boardColumns：null→待处理 / running/ask/done 各归列 / 禅道终态不入板',
+  bdCols.todo.map((c) => c.id).join() === '1'
+  && bdCols.running.map((c) => c.id).join() === '11,15'
+  && bdCols.ask.map((c) => c.id).join() === '12'
+  && bdCols.done.map((c) => c.id).join() === '13'
+  && !JSON.stringify(bdCols).includes('"id":99'));
+check('boardColumns：段内按截止升序（running 列 11(今天) 在 15(无截止) 前）',
+  bdCols.running[0].id === 11);
+let bdPicked = null;
+const bdNode = TT.BoardView({
+  cards: bdCards, liveOf: bdLive, flaggedOf: (c) => c.id === 11,
+  onPick: (c) => { bdPicked = c; },
+});
+const bdColNodes = bdNode.children; // BOARD_COLS.map 直接是四列（无嵌套——map 是唯一 child？需 flat 防坑）
+const bdFlat = bdNode.children.length === 4 ? bdNode.children : bdNode.children.flat(2);
+check('BoardView：四列带标题与计数（含旗标点与逾期类）',
+  bdFlat.length === 4
+  && bdFlat[0].children[0].children[1] === '待处理' && bdFlat[0].children[0].children[2].children[0] === 1
+  && bdFlat[1].children[0].children[1] === '处理中' && bdFlat[1].children[0].children[2].children[0] === 2
+  && bdFlat[3].children[0].children[1] === '已完成待闭环');
+const bdRunningCards = bdFlat[1].children[1].children.flat(2); // map 嵌套（§4.8 同坑第 4 踩）
+const bdFirstCard = bdRunningCards[0];
+bdFirstCard.props.onClick();
+const bdTodoCards = bdFlat[0].children[1].children.flat(2);
+const bdAskCards = bdFlat[2].children[1].children.flat(2);
+check('BoardView：点缩略卡回传 onPick；running 列首卡是今天到期的 bug（sn 类）、逾期卡在 ask 列带 od 类',
+  bdPicked && bdPicked.id === 11
+  && bdFirstCard.props.className.split(' ').includes('ztp-k-bug')
+  && bdFirstCard.props.className.split(' ').includes('sn')
+  && bdAskCards.some((n) => n && n.props && n.props.className.split(' ').includes('od'))
+  && bdTodoCards.length === 1);
+
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);
