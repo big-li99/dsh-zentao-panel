@@ -152,6 +152,13 @@
         '.ztp-btn.primary:hover{background:var(--dsw-alias-button-primary-hover);}',
         '.ztp-btn:disabled{opacity:.45;cursor:default;}',
         '.ztp-btn svg{width:13px;height:13px;}',
+        // 纯图标小按钮（旗标/隐藏/复制）与激活态；隐藏态卡片淡化
+        '.ztp-btn.icon{padding:0 7px;color:var(--dsw-alias-label-tertiary);}',
+        '.ztp-btn.icon:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover);}',
+        '.ztp-btn.icon.on{color:var(--dsw-alias-state-business-primary);}',
+        '.ztp-card.hiddenmark{opacity:.55;}',
+        '.ztp-flagdot{display:inline-flex;color:var(--dsw-alias-state-business-primary);}',
+        '.ztp-flagdot svg{width:11px;height:11px;}',
 
         // 关联会话 chip（「处理」过的卡片左侧显示会话标题，点击跳回该会话）
         '.ztp-slink{display:inline-flex;align-items:center;gap:4px;max-width:58%;height:22px;padding:0 8px;margin-right:auto;border-radius:999px;border:.5px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;cursor:pointer;box-sizing:border-box;min-width:0;}',
@@ -173,6 +180,8 @@
         // 页脚
         '.ztp-foot{flex:none;display:flex;align-items:center;gap:8px;height:30px;padding:0 16px;border-top:.5px solid var(--dsw-alias-border-l1);font-size:11px;color:var(--dsw-alias-label-tertiary);box-sizing:border-box;overflow:hidden;white-space:nowrap;}',
         '.ztp-foot-dim{opacity:.75;}',
+        '.ztp-foot-hide{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;height:18px;padding:0 4px;border-radius:var(--dsw-radius-sm);cursor:pointer;text-decoration:underline dotted;}',
+        '.ztp-foot-hide:hover{color:var(--dsw-alias-label-primary);}',
 
         // ───────── Idea 1（2026-10-25）：连接状态点 + 离线提示条 ─────────
         // mast 右侧小圆点：绿=已连禅道 / 红=不可达（闪烁）/ 灰=未知（刚打开还没拉过）
@@ -467,6 +476,19 @@
           h('path', { d: 'M10.5 3.5v-.2c0-.72-.58-1.3-1.3-1.3H3.8c-.72 0-1.3.58-1.3 1.3v5.4c0 .72.58 1.3 1.3 1.3H4', stroke: 'currentColor', strokeWidth: 1.1, strokeLinecap: 'round' }),
         );
       }
+      /** 旗标（卡片动作行）：小旗。 */
+      function FlagIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('path', { d: 'M4 13.5V3.2c2-.9 3.9-.9 6 .2 1.6.8 3 .9 4 .4V9c-1 .5-2.4.4-4-.4-2.1-1.1-4-1.1-6-.2', stroke: 'currentColor', strokeWidth: 1.1, strokeLinejoin: 'round', strokeLinecap: 'round' }),
+        );
+      }
+      /** 隐藏（卡片动作行）：圈斜杠。 */
+      function HideIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('circle', { cx: 8, cy: 8, r: 5.6, stroke: 'currentColor', strokeWidth: 1.1 }),
+          h('path', { d: 'M4 12 12 4', stroke: 'currentColor', strokeWidth: 1.1, strokeLinecap: 'round' }),
+        );
+      }
       /** 批量选择入口（工具栏）：方框 + 勾。 */
       function BatchIcon() {
         return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
@@ -643,13 +665,16 @@
       var QUICK_FILTERS = [
         { id: 'ask', label: '等你决策' },
         { id: 'running', label: '处理中' },
+        { id: 'flagged', label: '已标记' },
         { id: 'overdue', label: '逾期' },
         { id: 'today', label: '今天到期' },
         { id: 'done', label: '已完成' },
       ];
 
-      /** 单卡是否命中快捷筛选；liveOf(card) → 'ask'|'running'|'done'|null（同列表排序注入）。 */
-      function quickFilterHit(card, qf, liveOf, now) {
+      /** 单卡是否命中快捷筛选；liveOf(card) → 'ask'|'running'|'done'|null（同列表排序注入）；
+       *  flaggedOf(card) → bool（本地旗标，缺省恒 false）。 */
+      function quickFilterHit(card, qf, liveOf, now, flaggedOf) {
+        if (qf === 'flagged') return Boolean(flaggedOf) && flaggedOf(card) === true;
         if (qf === 'ask' || qf === 'running' || qf === 'done') {
           return Boolean(liveOf) && liveOf(card) === qf;
         }
@@ -661,18 +686,18 @@
         return false;
       }
       /** 按快捷筛选过滤（qf 空 = 原样返回副本）。 */
-      function quickFilterCards(cards, qf, liveOf, now) {
+      function quickFilterCards(cards, qf, liveOf, now, flaggedOf) {
         var list = Array.isArray(cards) ? cards : [];
         if (!qf) return list.slice();
-        return list.filter(function (c) { return quickFilterHit(c, qf, liveOf, now); });
+        return list.filter(function (c) { return quickFilterHit(c, qf, liveOf, now, flaggedOf); });
       }
       /** 各筛选维度的计数（调用方先过搜索，chip 数字随搜索联动）。 */
-      function quickFilterCounts(cards, liveOf, now) {
-        var m = { ask: 0, running: 0, overdue: 0, today: 0, done: 0 };
+      function quickFilterCounts(cards, liveOf, now, flaggedOf) {
+        var m = { ask: 0, running: 0, flagged: 0, overdue: 0, today: 0, done: 0 };
         var list = Array.isArray(cards) ? cards : [];
         for (var i = 0; i < list.length; i++) {
           for (var j = 0; j < QUICK_FILTERS.length; j++) {
-            if (quickFilterHit(list[i], QUICK_FILTERS[j].id, liveOf, now)) m[QUICK_FILTERS[j].id]++;
+            if (quickFilterHit(list[i], QUICK_FILTERS[j].id, liveOf, now, flaggedOf)) m[QUICK_FILTERS[j].id]++;
           }
         }
         return m;
@@ -865,6 +890,65 @@
       function instrChipLabel(text) {
         var t = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
         return t.length > 12 ? t.slice(0, 12) + '…' : t;
+      }
+
+      // ───────── 旗标与隐藏（2026-10-25 迭代）：卡片本地标记 ─────────
+      // marks.v1 与 links.v1 同构 key（<activeId>/<kind>-<id>），值 {flag?, hide?, at}。
+      // 旗标 = 重点关注（快捷筛选加「已标记」维度）；隐藏 = 本地不想看（默认从列表滤掉，
+      // 页脚「显示已隐藏」临时查看，宽限期后由 cleanupStaleLinks 一并清）。
+      var MARKS_KEY = 'dsh-zentao-panel.marks.v1';
+      var marksFallback = null; // localStorage 不可用时的进程内兜底
+
+      function readMarkMap() {
+        try {
+          var s = root.localStorage;
+          var raw = s && s.getItem(MARKS_KEY);
+          if (raw) {
+            var v = JSON.parse(raw); // 坏 JSON → 兜底
+            if (v && typeof v === 'object') return v;
+          } else {
+            return marksFallback || (marksFallback = {});
+          }
+        } catch (e) { /* 坏数据当空 */ }
+        return marksFallback || (marksFallback = {});
+      }
+      function writeMarkMap(map) {
+        marksFallback = map;
+        try {
+          var s = root.localStorage;
+          if (s) s.setItem(MARKS_KEY, JSON.stringify(map));
+        } catch (e) { /* 配额满等 → 内存兜底已写 */ }
+      }
+      /** 切换旗标/隐藏；条目变空自动删。返回新 map。（组件内有同名局部，故加 Store 后缀语义词） */
+      function toggleCardMark(activeId, card, field, now) {
+        var map = readMarkMap();
+        var key = sessionLinkKey(activeId, card);
+        var v = map[key] && typeof map[key] === 'object' ? Object.assign({}, map[key]) : {};
+        if (v[field]) delete v[field];
+        else { v[field] = 1; v.at = (typeof now === 'number' && now) || Date.now(); }
+        if (v.flag || v.hide) map[key] = v;
+        else delete map[key];
+        writeMarkMap(map);
+        return map;
+      }
+      /** 卡片标记视图：{flag:bool, hide:bool}（缺省全 false）。 */
+      function markOf(map, activeId, card) {
+        var v = map && map[sessionLinkKey(activeId, card)];
+        return {
+          flag: Boolean(v && v.flag),
+          hide: Boolean(v && v.hide),
+        };
+      }
+      /** 当前账号的隐藏数量（页脚「显示已隐藏」入口用）。 */
+      function hiddenCount(map, activeId) {
+        var acct = String(activeId || 'anon');
+        var n = 0;
+        for (var key in map) {
+          if (!Object.prototype.hasOwnProperty.call(map, key) || key === '__proto__') continue;
+          var pk = parseLinkKey(key);
+          if (pk && pk.activeId === acct && map[key] && map[key].hide) n++;
+        }
+        return n;
       }
 
       // ───────── 完成闭环（2026-10-25 迭代）：已完成卡片深链到禅道操作页 ─────────
@@ -1699,11 +1783,27 @@
           var rref = Number(replies[rk] && replies[rk].at) || t;
           if (t - rref > LINK_GRACE_MS) { delete replies[rk]; dirtyReplies = true; }
         }
+        // 本地标记（旗标/隐藏）同样按宽限期清：卡片离开「指派给我」太久，标记跟着失效
+        var marks = readMarkMap();
+        var dirtyMarks = false;
+        for (var mk in marks) {
+          if (!Object.prototype.hasOwnProperty.call(marks, mk) || mk === '__proto__') continue;
+          var mpk = parseLinkKey(mk);
+          if (!mpk || mpk.activeId !== acct) continue;
+          if (seen[mpk.kind + '-' + mpk.id]) {
+            var mls = Number(marks[mk] && marks[mk].lastSeen) || 0;
+            if (t - mls > 3600 * 1000) { marks[mk].lastSeen = t; dirtyMarks = true; }
+            continue;
+          }
+          var mref = Number(marks[mk] && (marks[mk].lastSeen || marks[mk].at)) || 0;
+          if (t - mref > LINK_GRACE_MS) { delete marks[mk]; dirtyMarks = true; }
+        }
+        if (dirtyMarks) writeMarkMap(marks);
         if (dirtyLinks) writeLinkMap(links);
         if (dirtyStates) writeStateMap(states);
         if (dirtyReplies) writeReplyMap(replies);
         if (dirtyLinks || dirtyStates || dirtyReplies) watchPoke();
-        return dirtyLinks || dirtyStates || dirtyReplies;
+        return dirtyLinks || dirtyStates || dirtyReplies || dirtyMarks;
       }
 
       // ───────────── 列表快照持久化（mine.v1）：重启/重挂秒开 + 离线兜底 ─────────────
@@ -2419,6 +2519,7 @@
           className: 'ztp-card ztp-k-' + c.kind
             + (props.active ? ' on' : '')
             + (sel && props.selected ? ' sel' : '')
+            + (props.hidden ? ' hiddenmark' : '')
             + (live === 'ask' ? ' ztp-live-ask' : live === 'done' ? ' ztp-live-done' : ''),
           draggable: !sel,
           title: sel ? '点击选中/取消选中' : '点击查看详情，可拖拽到对话输入框',
@@ -2437,6 +2538,7 @@
             sel ? h('span', { className: 'ztp-check' + (props.selected ? ' on' : '') },
               props.selected ? h(CheckMarkIcon) : null) : null,
             h(KindTag, { kind: c.kind }),
+            props.flagged ? h('span', { className: 'ztp-flagdot', title: '已标记重点关注' }, h(FlagIcon)) : null,
             live ? h(LiveBadge, { state: live, since: props.liveSince || null }) : null,
             h('span', { className: 'ztp-id' }, '#' + c.id),
             // 禅道超链接在卡片上（详情里不再放链接/按钮）；draggable 关掉避免链接拖拽覆盖卡片 Markdown 拖拽
@@ -2465,6 +2567,17 @@
               onClick: function (e) { e.stopPropagation(); props.onOpenSession(c); },
             }, h(SlinkDot, { state: live }), h(ChatIcon), h('span', { className: 'ztp-slink-t' },
               props.linkView.state === 'dead' ? '会话已删除' : props.linkView.title)) : null,
+            // 旗标/隐藏（本地标记，不回写禅道）：旗标进「已标记」筛选；隐藏从列表滤掉（页脚可临时显示）
+            h('button', {
+              className: 'ztp-btn icon' + (props.flagged ? ' on' : ''), type: 'button',
+              title: props.flagged ? '取消标记（重点关注）' : '标记为重点关注（快捷筛选「已标记」可一键过滤）',
+              onClick: function (e) { e.stopPropagation(); props.onToggleMark(c, 'flag'); },
+            }, h(FlagIcon)),
+            h('button', {
+              className: 'ztp-btn icon' + (props.hidden ? ' on' : ''), type: 'button',
+              title: props.hidden ? '取消隐藏，恢复在列表显示' : '本地隐藏（不回写禅道；页脚「显示已隐藏」可找回）',
+              onClick: function (e) { e.stopPropagation(); props.onToggleMark(c, 'hide'); },
+            }, h(HideIcon)),
             h('button', {
               className: 'ztp-btn', type: 'button',
               title: '复制「#' + c.id + ' ' + (c.title || '') + '」到剪贴板（贴 IM 用）',
@@ -3287,6 +3400,8 @@
         var search = useState('');       // 列表搜索（标题/#id/状态/人员，纯前端过滤）
         var sortMode = useState('smart');// 列表排序（smart/deadline/pri/origin）
         var qf = useState(null);         // 快捷筛选（ask/running/overdue/today/done；激活时跨分类，null = 分类视图）
+        var markRev = useState(0);       // 本地标记（旗标/隐藏）版本号，toggle 后 bump 重读 marks.v1
+        var showHidden = useState(false);// 临时显示已隐藏卡片（页脚开关，不入 paneCache）
         var replyRev = useState(0);      // 结果摘要存储版本号（回读保存后 bump 重读）
         var replyBusy = useState(null);  // 正在回读的 linkKey（详情页 spinner 用）
         var offline = useState(null);    // 连接状态（Idea 1）：null 未知 / true 离线 / false 在线
@@ -3593,22 +3708,38 @@
           var info = liveInfoOf(card);
           return info ? info.since : null;
         }
+        // 本地标记（旗标/隐藏）：marks.v1 按 <activeId>/<kind>-<id> 隔离；hidden 默认从列表滤掉
+        var markMap = useMemo(readMarkMap, [markRev[0]]);
+        function flaggedOf(card) {
+          return markOf(markMap, activeAcct, card).flag;
+        }
+        var hiddenN = useMemo(function () {
+          return hiddenCount(markMap, activeAcct);
+        }, [markMap, activeAcct]);
+        var visCards = useMemo(function () {
+          if (showHidden[0]) return cards;
+          return cards.filter(function (c) { return !markOf(markMap, activeAcct, c).hide; });
+        }, [cards, markMap, activeAcct, showHidden[0]]);
+        var toggleMark = useCallback(function (card, field) {
+          toggleCardMark(activeAcct, card, field);
+          markRev[1](function (v) { return v + 1; });
+        }, [activeAcct]);
         var filtered = useMemo(function () {
           // 快捷筛选激活 → 跨分类（全量卡片过搜索 + 过筛选）；否则当前分类过搜索
           var pool = qf[0]
-            ? cards.filter(function (c) { return matchSearch(c, search[0]); })
-            : cards.filter(function (c) { return c.kind === tab[0] && matchSearch(c, search[0]); });
-          return sortCards(quickFilterCards(pool, qf[0], liveOf), sortMode[0], undefined, liveOf);
-        }, [cards, tab[0], search[0], sortMode[0], qf[0], linkRev[0], liveSnap[0]]);
+            ? visCards.filter(function (c) { return matchSearch(c, search[0]); })
+            : visCards.filter(function (c) { return c.kind === tab[0] && matchSearch(c, search[0]); });
+          return sortCards(quickFilterCards(pool, qf[0], liveOf, undefined, flaggedOf), sortMode[0], undefined, liveOf);
+        }, [visCards, tab[0], search[0], sortMode[0], qf[0], markRev[0], linkRev[0], liveSnap[0]]);
         // 快捷筛选计数：在「搜索过滤后的全量卡片」上统计（chip 数字随搜索联动）
         var qfCounts = useMemo(function () {
-          return quickFilterCounts(cards.filter(function (c) { return matchSearch(c, search[0]); }), liveOf);
-        }, [cards, search[0], linkRev[0], liveSnap[0]]);
+          return quickFilterCounts(visCards.filter(function (c) { return matchSearch(c, search[0]); }), liveOf, undefined, flaggedOf);
+        }, [visCards, search[0], markRev[0], linkRev[0], liveSnap[0]]);
         var counts = useMemo(function () {
           var m = { task: 0, bug: 0, story: 0 };
-          for (var i = 0; i < cards.length; i++) m[cards[i].kind] = (m[cards[i].kind] || 0) + 1;
+          for (var i = 0; i < visCards.length; i++) m[visCards[i].kind] = (m[visCards[i].kind] || 0) + 1;
           return m;
-        }, [cards]);
+        }, [visCards]);
 
         // ───── 多选模式（Idea 2）：选中集合跨 tab 保留（切 tab 再选，批量时一起下发）；
         // 退出多选/切账号/下发发起时清空；面板卸载重挂自然清空（不入 paneCache）。
@@ -3726,6 +3857,9 @@
               onOpen: function (x) { detailCard[1](x); },
               onInsert: insertToChat, onDispatch: dispatchCard,
               onCopyTitle: copyCardTitle,
+              flagged: flaggedOf(c),
+              hidden: Boolean(markOf(markMap, activeAcct, c).hide),
+              onToggleMark: toggleMark,
             });
           }));
         }
@@ -3881,10 +4015,15 @@
 
           configured && mine[0] ? h('div', { className: 'ztp-foot' },
             h('span', null, '共 ' + (qf[0]
-              ? filtered.length + '/' + cards.length
+              ? filtered.length + '/' + visCards.length
               : (String(search[0] || '').trim()
                 ? filtered.length + '/' + (counts[tab[0]] || 0)
-                : cards.length)) + ' 条'),
+                : visCards.length)) + ' 条'),
+            hiddenN ? h('button', {
+              className: 'ztp-foot-hide', type: 'button',
+              title: showHidden[0] ? '收起已隐藏的卡片' : '临时显示本地隐藏的卡片（在卡片上点 ⊘ 取消隐藏）',
+              onClick: function () { showHidden[1](!showHidden[0]); },
+            }, (showHidden[0] ? '收起' : '显示') + '已隐藏 ' + hiddenN) : null,
             h('span', { className: 'ztp-foot-dim' }, '·'),
             h('span', { className: 'ztp-foot-dim' },
               mine[0].cached ? new Date(mine[0].at).toLocaleTimeString() + ' 缓存' : '刚刚拉取'),
@@ -4113,6 +4252,10 @@
         QUICK_FILTERS: QUICK_FILTERS,
         QfBar: QfBar,
         copyToClipboard: copyToClipboard,
+        toggleCardMark: toggleCardMark,
+        markOf: markOf,
+        readMarkMap: readMarkMap,
+        hiddenCount: hiddenCount,
         searchHaystack: searchHaystack,
         // 列表快照持久化（mine.v1）
         readMineSnapshot: readMineSnapshot,

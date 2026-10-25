@@ -771,6 +771,17 @@ check('cleanupStaleLinks：幂等（紧接着再跑无动作 → false，1h 内�
   TT.cleanupStaleLinks('acct1', mineCards, NOW + 1000) === false
   && JSON.parse(lsBacking.get('dsh-zentao-panel.links.v1'))['acct1/bug-1'].lastSeen === NOW);
 
+// 本地标记（旗标/隐藏）随 cleanup 清理：在线卡刷新 lastSeen，离线超宽限删除，他账号不动
+lsBacking.delete('dsh-zentao-panel.marks.v1');
+TT.toggleCardMark('acct1', { kind: 'bug', id: 1 }, 'flag', NOW);            // 在线卡（mineCards 内）
+TT.toggleCardMark('acct1', { kind: 'task', id: 99 }, 'hide', NOW);          // 离线孤儿
+TT.toggleCardMark('acct2', { kind: 'bug', id: 1 }, 'flag', NOW - 100 * 3600 * 1000); // 他账号 + 超宽限
+check('cleanupStaleLinks 顺带清 marks：在线保留 / 孤儿超宽限删 / 他账号不动',
+  TT.cleanupStaleLinks('acct1', mineCards, NOW + 80 * 3600 * 1000) === true
+  && TT.readMarkMap()['acct1/bug-1'] !== undefined
+  && TT.readMarkMap()['acct1/task-99'] === undefined
+  && TT.readMarkMap()['acct2/bug-1'] !== undefined);
+
 // saveSessionLink 值带 lastSeen；再处理会清掉旧进度记录
 lsBacking.clear();
 const nl = TT.saveSessionLink('acct1', { kind: 'bug', id: 42, title: 'x' }, 's-42');
@@ -1456,25 +1467,29 @@ check('quickFilterHit：截止维度（overdue/today）排除终态/无截止/�
 check('quickFilterCards：空筛选返回副本；按维度过滤',
   TT.quickFilterCards([qfToday, qfOverdue, qfTomorrow], null, null, nowTs).length === 3
   && TT.quickFilterCards([qfToday, qfOverdue, qfTomorrow], 'overdue', null, nowTs).map((c) => c.id).join() === '12');
-check('quickFilterCounts：全量集合按五维计数',
+check('quickFilterCounts：全量集合按六维计数（含已标记）',
   JSON.stringify(TT.quickFilterCounts([qfToday, qfOverdue, qfTomorrow, qfLive], liveStub, nowTs))
-    === '{"ask":1,"running":1,"overdue":1,"today":1,"done":1}');
+    === '{"ask":1,"running":1,"flagged":0,"overdue":1,"today":1,"done":1}'
+  && JSON.stringify(TT.quickFilterCounts([qfToday], null, nowTs, (c) => c.id === 11))
+    === '{"ask":0,"running":0,"flagged":1,"overdue":0,"today":1,"done":0}'
+  && TT.quickFilterHit(qfToday, 'flagged', null, nowTs, undefined) === false);
 const qfPicks = [];
 const qfBarNode = TT.QfBar({
-  counts: { ask: 2, running: 0, overdue: 1, today: 0, done: 0 },
+  counts: { ask: 2, running: 0, flagged: 0, overdue: 1, today: 0, done: 0 },
   active: 'ask',
   onPick: (id) => { qfPicks.push(id); },
 });
 const qfChips = qfBarNode.children.flat(2); // map 出的 chips 是嵌套数组（§4.8 同坑）
-check('QfBar：5 个 chip 带文案/计数/激活态/零值淡化',
-  qfChips.length === 5
+check('QfBar：6 个 chip 带文案/计数/激活态/零值淡化（含「已标记」）',
+  qfChips.length === 6
   && qfChips[0].props.className === 'ztp-qf on'
   && qfChips[0].children[0] === '等你决策'
   && qfChips[0].children[1].children[0] === 2
   && qfChips[1].props.className.split(' ').includes('zero')
-  && qfChips[2].children[1].children[0] === 1);
+  && qfChips[2].children[0] === '已标记'
+  && qfChips[3].children[1].children[0] === 1);
 qfChips[0].props.onClick();
-qfChips[2].props.onClick();
+qfChips[3].props.onClick();
 check('QfBar：点激活项 = 清除（pick null）；点其他项 = 切换',
   qfPicks[0] === null && qfPicks[1] === 'overdue');
 
@@ -1508,6 +1523,45 @@ cpMdBtn.props.onClick();
 check('DetailView：返回栏有「复制 Markdown」按钮（fake useEffect 下 detail=null）',
   Boolean(cpMdBtn) && typeof cpMdBtn.children[0].type === 'function' && cpMdBtn.children[1] === '复制 Markdown'
   && cpMd[0] === bc1 && cpMd[1] === null);
+
+// ── 旗标与隐藏（2026-10-25 迭代）：marks.v1 本地标记 ──
+window.localStorage.removeItem('dsh-zentao-panel.marks.v1');
+check('marks：toggleCardMark 旗标/隐藏开合 + 空条目自动删',
+  (TT.toggleCardMark('acctM', bc1, 'flag'), TT.markOf(TT.readMarkMap(), 'acctM', bc1).flag === true)
+  && (TT.toggleCardMark('acctM', bc1, 'flag'), TT.markOf(TT.readMarkMap(), 'acctM', bc1).flag === false)
+  && TT.readMarkMap()['acctM/bug-1'] === undefined
+  && (TT.toggleCardMark('acctM', bc2, 'hide'), TT.markOf(TT.readMarkMap(), 'acctM', bc2).hide === true));
+check('marks：账号隔离 + hiddenCount 只数当前账号',
+  TT.toggleCardMark('acctN', bc1, 'hide') && TT.hiddenCount(TT.readMarkMap(), 'acctM') === 1
+  && TT.hiddenCount(TT.readMarkMap(), 'acctN') === 1
+  && TT.markOf(TT.readMarkMap(), 'acctN', bc1).hide === true);
+check('marks：同一卡旗标+隐藏并存，去掉一个另一个保留',
+  TT.toggleCardMark('acctM', bc2, 'flag')
+  && TT.markOf(TT.readMarkMap(), 'acctM', bc2).hide === true
+  && TT.markOf(TT.readMarkMap(), 'acctM', bc2).flag === true
+  && (TT.toggleCardMark('acctM', bc2, 'hide'), TT.markOf(TT.readMarkMap(), 'acctM', bc2).hide === false
+    && TT.markOf(TT.readMarkMap(), 'acctM', bc2).flag === true));
+window.localStorage.setItem('dsh-zentao-panel.marks.v1', '{bad');
+check('marks：坏 JSON 不抛错，回退内存兜底（上次写入的列表）',
+  TT.readMarkMap()['acctM/bug-2'] && TT.readMarkMap()['acctM/bug-2'].flag === 1);
+window.localStorage.removeItem('dsh-zentao-panel.marks.v1');
+let mkArgs = null;
+const mkNode = TT.CardItem({
+  card: bc1, linkView: null, live: null, flagged: true, hidden: true,
+  onToggleMark: (c, f) => { mkArgs = [c, f]; },
+  onCopyTitle: () => {}, onInsert: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
+});
+const mkActs = mkNode.children.find((n) => n && n.props && n.props.className === 'ztp-acts');
+const mkFlagBtn = mkActs.children.find((n) => n && n.type === 'button' && String(n.props.title).includes('取消标记'));
+const mkHideBtn = mkActs.children.find((n) => n && n.type === 'button' && String(n.props.title).includes('取消隐藏'));
+mkFlagBtn.props.onClick({ stopPropagation() {} });
+const mkFlagArg = mkArgs;
+mkHideBtn.props.onClick({ stopPropagation() {} });
+check('CardItem：旗标/隐藏按钮（激活态文案切换）+ 卡片旗标点与隐藏淡化类',
+  mkFlagArg[0] === bc1 && mkFlagArg[1] === 'flag'
+  && mkArgs[1] === 'hide'
+  && mkNode.props.className.split(' ').includes('hiddenmark')
+  && mkNode.children[0].children.some((n) => n && n.props && n.props.className === 'ztp-flagdot'));
 
 // ── 完成闭环（2026-10-25 迭代）：finishUrl 深链 + 详情 done 态按钮 ──
 check('finishUrl：三类卡片替换为操作页（同 base 同 id）',
