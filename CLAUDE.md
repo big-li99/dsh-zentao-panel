@@ -23,7 +23,7 @@
 | M1 host 插件（登录/取数/RPC） | ✅ 代码完成，测试全绿，**已装入 desktop profile 加载树**（重启 DSH Desktop 激活） |
 | M2 client 左侧栏全局面板 | ✅ 2026-10-24 已改为**左侧栏全局面板**入口（对齐 dsh-mnemon「记忆系统」：`sidebar.panellist` 图标行 + `main` keyed 面板，见 §5.1），样式走 DSH token 支持日/夜；注册契约有测试，待真机目视确认 |
 | M3 插入输入框 + 新会话下发 | ✅ 服务级 `setDraft` 真机可用；**描述里的截图改为真实图片附件**（`conversation.createDrafts` + `facade.addAttachments`，见 §4.1）；新会话下发待真机复验 |
-| M4 打磨 | 🔄 进行中：2026-10-24 修会话超时静默空白（超时信封识别→自动重登）+ 拉取失败 toast/错误视图；同日改「处理」为**弹层确认式**（先选工作区、接入模型与思考强度再下发，见 §4.2，待真机目视确认）；同日新增**关联会话 chip：处理过的卡片可看会话标题并一键跳回**（见 §4.3，待真机目视确认）；同日晚修复弹层卡「创建中」闭包 bug（§4.2 末）与下发时序优化（预取并行 + setDraft 提前）；同日更晚**入口改为左侧栏全局面板**（§5.1，原右栏「面板固定/跟随」三层修补随之删除——全局面板天然不随会话切换；待真机目视确认）；同日夜按用户要求改**「处理」不自动跳转新会话**（sessions.retain 后台保活替代 openSession，见 §4.2 末，待真机目视确认）；2026-10-25 按用户要求改**「插入对话」为弹层式新会话**（同「处理」弹层，但建会话后**自动跳转**过去、只填草稿**不自动发送**，见 §4.5，待真机目视确认）；其余未做 |
+| M4 打磨 | 🔄 进行中（细节见各节）：2026-10-24 修会话超时静默空白 + 拉取失败 toast/错误视图；「处理」改弹层确认式（§4.2）+ 关联会话 chip（§4.3）+ 弹层闭包 bug 修复与下发时序优化 + 入口改左侧栏全局面板（§5.1）+「处理」不自动跳转（§4.2 末）；2026-10-25「插入对话」改弹层式新会话自动跳转不自动发（§4.5）；**同日新增列表三件套：搜索/排序/逾期高亮 + mine.v1 快照秒开 + 处理结果回读（§4.7，待真机目视确认）**；其余未做（自动轮询、禅道不可达文案） |
 | M5 多账号 | ✅ 2026-10-24 完成：schema v2（accounts[]+activeId，旧格式自动迁移）、每账号独立 client/cookie/缓存、账号菜单切换/添加/按账号移除；测试全绿（multi 25 项 + host 新增 4 项），待真机目视确认 |
 | M6 实时状态 | ✅ 2026-10-24 完成：**禅道卡片活性徽标（处理中/等你决策/已完成）+ 完成/等决策常驻提醒 toast（「去看看」跳回会话）**，信号来自 DSH 宿主 `uiSession.sessionStatus`（见 §4.4）。当天先做过一版「鲸鱼娘办公室」可视化面板（左侧栏第二面板 + 自绘 SVG 工位场景，角色参考 Neko3000/deepseek-whalechan），**用户看过后明确否决（「太垃圾」）已整体移除**——不要再做办公室/娘化角色类可视化；保留监控内核改为卡片上的活性体现。2026-10-25 补**处理进度持久化（states.v1）+ 不在面板列表事项的定时清理**（见 §4.6，待真机目视确认）。仅 client 改动，⌘R 生效 |
 
@@ -377,6 +377,20 @@ Neko3000/deepseek-whalechan 公开规范——**注意其图片素材不在开�
 - `saveSessionLink` 值新增 `lastSeen`（= at，清理计时基准）。
 - 测试：`test/client.mjs` 新增 29 项（states.v1 自愈 / statusMapReady / syncPersistedStates 8 项含粘性 done、running 归零升级 done、sessionSeen 通道、重启防护、会话删除 / resolveLiveState 5 项 / cleanupStaleLinks 7 项含宽限保留、旧格式退回、他账号不动、孤儿清理、幂等 / saveSessionLink lastSeen 与换会话作废 / watchEval 联动落盘 + statusReady / 重启恢复 2 项）。⚠️ 测试注意：cleanup 会 `watchPoke` → watchEval，fake `sessions.list` 的 byId 必须覆盖全部关联会话，否则被误判「会话已删」连带删 done 记录。
 
+### 4.7 列表增强三件套：搜索/排序/逾期高亮 + 快照秒开 + 处理结果回读（2026-10-25，用户批准的三提案）
+
+按 1→2→3 顺序全做，**全部仅 client 改动，⌘R 生效**。测试 +38 项（见文末测试现状）。
+
+**① 搜索 + 排序 + 临期/逾期高亮（纯渲染层）**：`.ztp-head` 右侧加搜索框（`.ztp-search`）+ 排序下拉（`.ztp-sort`）。`matchSearch`：标题/#id/状态名/创建人/指派人拼 haystack，**多词空格 AND**、大小写不敏感、空查询恒 true；无命中空态给「清空搜索」，页脚变「共 X/Y 条」。`sortCards(cards, mode, now)`：**smart**（默认：终态沉底 → 逾期 > 临期(≤3天) > 有截止 > 无截止 → 段内截止↑ 优先级↑ id↓）/ **deadline** / **pri** / **origin**（禅道原序）。`deadlineInfo(deadline, now)`（now 可注入）：截止日 23:59:59 → `{ts, days, overdue, soon}`（soon 沿用旧 isUrgent ≤3 天语义，**isUrgent 已删**）；终态（`FINAL_STATUS`：done/closed/cancel）不着色不置顶；卡片/详情截止 span 换 `.ztp-dl(.soon|.overdue)`（warn/error token），逾期显示「逾期 M-d」+ title 逾期天数。
+
+**② 列表快照 mine.v1：重启/重开秒开 + 离线兜底**：localStorage `dsh-zentao-panel.mine.v1`，`{activeId: {cards, at, savedAt}}`，读坏自愈，**上限 400 卡/账号、4 账号（按 savedAt 淘汰）**。ZentaoPane 的 activeId effect **先** `readMineSnapshot` 水合（值带 `cached:true`，页脚「HH:mm 缓存」）**再** `loadMine(false)` 后台替换——首屏不闪骨架；禅道不可达时快照即兜底视图（错误视图只在 cards 为空时抢占）。`loadMine` 成功后 `writeMineSnapshot(paneCache.status.activeId, …)`——**activeId 必须从 paneCache 读**（loadMine 是 useCallback([rpc])，闭包 status 是旧值）。登出/移除账号 → `removeMineSnapshot`。
+
+**③ 处理结果摘要回读 replies.v1：不出面板看 agent 最后说了什么**：
+- **源码事实（0.2.1-rc.2 已核实）**：`sessions.retain(id,{source})` 内部即 `reference.attachOpening(manager.get(id).open())`（session-controller client.js:3849）——**retain 即自动开事件流并回放最近历史窗口**（maxMessages 500/minTurns 2）；`sessions.binding(id).eventSource.getSnapshot()` → `{entries, hasMore, revision, change}`（binding 在 retainScope materialize 后同步可用，borrow 不续命）；`assistant/message` 文本在 `event.data.message.content` **块数组**（dsh-client-ui-chat `toAssistantBlocks` 同款 `{type:'text', text}`/reasoning/工具块）。
+- `fetchLastReply(sessionId, timeoutMs)`：retain('zentao-panel') → eventSource 订阅+即查（窗口就绪立即命中）→ 超时兜底（默认 5s）→ **成败都 release**；环节缺失 → `{ok:false, reason:'unsupported'|'retain'|'timeout'}` 不抛错。提取：`assistantEntryText`（拼接 text 块跳过 reasoning；只有 reasoning → null）+ `lastAssistantText`（entries 从尾往头）。
+- 缓存 `dsh-zentao-panel.replies.v1`（key 同 links 构，值 `{sessionId, text, at, full}`）。**完整显示不截行**（2026-10-25 用户反馈「显示不全」后改：去 8 行 line-clamp；`REPLY_MAX_CHARS=20000` 仅防炸兜底，`full` 标记是否完整——旧版截 500 字的缓存无 full 字段 → 自动回读判不新鲜重拉）。**生命周期联动**：saveSessionLink 换会话 → 旧摘要作废（同会话重复保存不清）；syncPersistedStates 会话被删 → 连带删；cleanupStaleLinks 超期/孤儿摘要一并清。
+- UI：DetailView 元信息卡下加「处理结果（关联会话最新回复）」区：**markdown 渲染 + 限高 360px 内部滚动**（2026-10-25 用户要求；DSH 无可 require 的 markdown 组件——primitives 的 MarkdownText 被内联进 ui-chat bundle、模块表没有——自研 `MarkdownLite`：md → 块结构 → React 元素树，**不经 innerHTML 无 XSS 面**；支持标题/段落/粗斜体/行内代码/链接/围栏代码块/引用递归/缩进列表/分隔线/GFM 表格，段落内单换行渲染 `<br>`；`mdToBlocks/mdInlineNodes/mdListTree` 进 _test）+ 更新时间 + 「重新读取」；**自动回读**条件：详情打开 && resolveLiveState=done && 缓存非（完整+未过期）（TTL 10min），失败冷却 60s（`replyLastTry` 防抖）；running/ask 可手动刷新。`fetchReplyNow` 的 activeAcct/card/link 全由当前 render 传参（useCallback([]) 闭包坑，同 sendDispatch）。
+
 ### 5. DSH 插件体系（本机实测）
 
 - DSH Desktop **0.2.1-rc.2**，desktop profile，macOS
@@ -437,13 +451,7 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   一直回落到 `#fff` 兜底色——这就是夜间模式错色的根因，改样式时不要再写这些名字。
 - 旧版 DSH 没有 `main`/`sidebar.panellist` slot 时（2.5s 内没注册上），插件退回 `shell.overlay`
   悬浮按钮 + 侧滑面板（同一套组件）。
-- **历史（2026-10-23~24 曾用右侧栏 `sidebarRightTabs` 入口，已弃用）**：右栏是 per-session 的
-  （surface 存 `store.bySession[sessionId]` 跟随主视图会话），当时为此做了三层修补——tab 类型
-  `keepMounted:true`（retainTab 防 retire）、`ctx.sidebarRight.openTab(kind, {replaceTab?})` 面板跟随
-  （followZentaoTabTo）、paneCache。改全局面板后前两层连同 `followZentaoTabTo` 已删（全局面板不随
-  会话切换、openSession 自动 reveal），paneCache 保留给「面板切走卸载」场景。若要回右栏形态，
-  `sidebar.right.pane.tab(.title)` 的 key 用 tab 类型 **id**（`entryKey = definition.id ?? tab.kind`）、
-  `MAX_DESCRIBED_ENTRIES=4`（第 5 张引导卡片起全部不显示 description）这两条坑仍然有效。
+- **历史（2026-10-23~24 曾用右侧栏 `sidebarRightTabs` 入口，已弃用）**：右栏 per-session（surface 存 `store.bySession[sessionId]`），当时的 keepMounted/面板跟随两层修补已随全局面板删除，paneCache 保留。若回右栏形态，`sidebar.right.pane.tab(.title)` 的 key 用 tab 类型 **id**（`entryKey = definition.id ?? tab.kind`）、`MAX_DESCRIBED_ENTRIES=4`（第 5 张引导卡片起不显示 description）两条坑仍有效。
 
 ### 6. 设计决策记录
 
@@ -482,15 +490,11 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
 - M3 图片附件（2026-10-23 新增，host 有改动 → **必须重启桌面版**才生效）：列表卡片或详情点「插入对话」→
   输入框上方应出现图片缩略图（附件 rail），发送后消息里是真实图片；「处理」新会话同理。
   若只看到文本 + toast「图片未能附加」，说明 host 还是旧代码（`zentao.image` 404）或禅道图片下载失败，看 console/日志
-- M3 处理（新会话下发，2026-10-24 已改弹层式 + **不自动跳转**）：点「处理」→ `DispatchDialog` 弹层选工作区、模型
-  （provider/模型，optgroup 分组）与思考强度（见 §4.2）→ `sessions.create({workspaceId|cwd})`
-  → `sessions.retain({source:'zentao-panel'})` 后台保活（**不调 openSession、不切视图**，见 §4.2 末）
-  → `remote.session.selectModel({sessionId, provider, model, reasoningEffort?})`
-  → `conversation.input.for(scope).setDraft` + 延迟 250ms `submit()`；selectModel 被拒则只填草稿不自动发；
-  服务不可用时降级插入当前会话。真机重点验证：① 点「处理」并下发后**视图仍停在禅道面板**（不跳新会话），
-  toast 提示「已在后台新会话发送…卡片标签可跳回」；② 卡片动作行的会话 chip 点一下才真正跳到那个新会话，
-  且输入框/消息已就位（文本 + 图片附件都在）；③ 弹层三个下拉有值且默认项合理（工作区=当前会话归属；
-  模型/思考强度=当前会话在用）、选不同工作区/模型后新会话确实落在所选位置和模型上。**本次仅 client 改动，⌘R 即可生效，无需重装**
+- M3 处理（弹层式 + **不自动跳转**，见 §4.2）：弹层选工作区/模型/思考强度 → create → retain 后台保活 →
+  selectModel → setDraft + 250ms submit（被拒只留草稿；服务缺失降级插当前会话）。真机重点验证：
+  ① 下发后**视图停在禅道面板**，toast「已在后台新会话发送…卡片标签可跳回」；② 点会话 chip 跳到新会话，
+  草稿/图片就位；③ 弹层三个下拉默认项合理（工作区=当前会话归属；模型/思考强度=当前会话在用）、
+  改选后新会话确实落在所选位置和模型上。**仅 client 改动，⌘R 即可生效，无需重装**
 - M4 关联会话 chip（2026-10-24，见 §4.3）：「处理」成功 → 卡片 actions 行左侧出现会话 chip（显示
   `sessions.list` 的 `displayTitle`）→ 切到别的会话后点 chip 应回到处理时创建的那个会话；再点一次「处理」
   → chip 更新为最新会话；把该会话删掉 → chip 显示「会话已删除」，点击清除并 toast。**仅 client 改动，⌘R 生效**
@@ -517,18 +521,12 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   ④ 重启后正在跑的 turn 若已死，**不**显示「处理中」（瞬态兜底只在监控未就绪的过渡期生效）。
   **仅 client 改动，⌘R 生效**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-25 复跑，client 132 项）：`test/client.mjs` 132 项（左侧栏注册契约 8 项：main/panellist
-  配对注册、key=id 同值、label/order、不挂悬浮兜底；「处理」弹层上下文收集 + workspaceId 传参
-  + selectModel 按会话设置 provider/model/思考强度 + 被拒时不自动发送 + 会话关联存取/三态视图/跳转清理
-  + 下发时序优化 5 项 + **「处理」不跳转 4 项**（只 retain 不 openSession / retain 后 setDraft 先于
-  drafts / facade 缺失返回 unavailable / 降级释放 retain）；
-  **「插入对话」改版 10 项**（传工作区建会话 / 自动跳转 / setDraft 先于 open / 不 submit /
-  跳转后释放 retain / selectModel 照常 / 附件照常 / 草稿就位 / uiWorkspace 缺失不释放 / conversation
-  缺失降级+释放，见 §4.5）；M6 实时状态 22 项，见 §4.4；**进度持久化 + 清理 29 项，见 §4.6**）、
-  `test/multi.mjs` 25 项、`test/protocol.mjs` 9 项全绿；`test/host.mjs` 19 项（真机 20 张卡片：task 2 / bug 8 / story 10）、
-  `test/smoke.mjs`（含 `extractImageRefs` / `fetchImage` 真图下载）需真实禅道凭据。
-  注意：沙箱会话里跑 host.mjs 读不了 `~/.dsh/zentao-panel/config.json`（EPERM），需把凭据文件拷进
-  `$DSH_HOME/zentao-panel/`，此时「status before config」一项会因预置配置而假失败（该测试项假设初始无配置）
+- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **181 项**（注册契约 8 项 +「处理」弹层/下发/时序/
+  不跳转 +「插入对话」10 项（§4.5）+ M6 22 项（§4.4）+ 进度持久化 29 项（§4.6）+ **列表三件套 49 项**
+  （§4.7：搜索排序 18 项、mine.v1 7 项、replies/fetchLastReply 24 项含 Markdown 渲染 10 项））、
+  `multi` 25 项、`protocol` 9 项；`host.mjs` 19 项（真机 20 张卡片）、`smoke.mjs` 需真实禅道凭据。
+  沙箱里跑 host.mjs 读不了 `~/.dsh/zentao-panel/config.json`（EPERM），需把凭据拷进
+  `$DSH_HOME/zentao-panel/`，此时「status before config」一项会假失败（假设初始无配置）
 
 ### 2. M4 打磨
 - 自动刷新（面板打开时轮询，间隔可选——计划书里定的 30s/1m/5m/10m/关闭）

@@ -813,5 +813,271 @@ const infoDone = TT.resolveLiveState(
 check('重启场景：关闭期间跑完（完成事件已丢）→ 持久化 done 仍显示「已完成」',
   infoDone && infoDone.state === 'done' && infoDone.since === NOW);
 
+// ── 列表搜索 + 排序 + 临期/逾期（2026-10-25 提案 1）──
+// deadlineInfo 的解析基准是本地时区日期串，测试用本地零点作 now 保证与平台无关
+const NOWD = Date.parse('2026-10-25T00:00:00');
+const DI = (d) => TT.deadlineInfo(d, NOWD);
+check('deadlineInfo：截止日已过 → overdue + 可算逾期天数',
+  DI('2026-10-20').overdue === true && DI('2026-10-20').soon === false
+  && TT.overdueDays(DI('2026-10-20')) === 5);
+check('deadlineInfo：≤3 天 → soon（含边界）',
+  DI('2026-10-25').soon === true && DI('2026-10-27').soon === true && DI('2026-10-28').soon === false);
+check('deadlineInfo：远期 → 正常；空/坏值 → null',
+  DI('2026-11-20').overdue === false && DI('2026-11-20').soon === false
+  && TT.deadlineInfo(null, NOWD) === null && DI('乱写') === null);
+check('isFinalCard：done/closed/cancel 终态 → true，进行中 → false',
+  TT.isFinalCard({ status: 'done' }) === true && TT.isFinalCard({ status: 'closed' }) === true
+  && TT.isFinalCard({ status: 'cancel' }) === true && TT.isFinalCard({ status: 'doing' }) === false
+  && TT.isFinalCard(null) === false);
+
+const sc = [
+  { kind: 'bug', id: 5, title: '无截止', status: 'wait' },
+  { kind: 'bug', id: 1, title: '已关闭', status: 'closed', deadline: '2026-10-20' },
+  { kind: 'bug', id: 2, title: '逾期', status: 'doing', deadline: '2026-10-19' },
+  { kind: 'bug', id: 3, title: '临期', status: 'doing', deadline: '2026-10-26' },
+  { kind: 'bug', id: 4, title: '远期', status: 'doing', deadline: '2026-11-26' },
+];
+check('sortCards smart：逾期 > 临期 > 有截止 > 无截止，终态沉底',
+  TT.sortCards(sc, 'smart', NOWD).map((c) => c.id).join(',') === '2,3,4,5,1');
+const sc2 = [
+  { id: 10, deadline: '2026-11-05', pri: 2 },
+  { id: 11, deadline: '2026-11-01', pri: 3 },
+  { id: 12, deadline: '2026-11-01', pri: 1 },
+  { id: 9, deadline: '2026-11-01', pri: 1 },
+];
+check('sortCards smart 段内：截止↑ → 优先级↑ → id↓',
+  TT.sortCards(sc2, 'smart', NOWD).map((c) => c.id).join(',') === '12,9,11,10');
+check('sortCards deadline：截止↑，无截止最后，终态沉底',
+  TT.sortCards([{ id: 1 }, { id: 2, deadline: '2026-11-01' }, { id: 3, status: 'done', deadline: '2026-10-01' }], 'deadline', NOWD)
+    .map((c) => c.id).join(',') === '2,1,3');
+check('sortCards pri：优先级↑，缺省沉底',
+  TT.sortCards([{ id: 1, pri: 3 }, { id: 2, pri: 1 }, { id: 3 }], 'pri', NOWD)
+    .map((c) => c.id).join(',') === '2,1,3');
+check('sortCards origin：保持禅道返回顺序',
+  TT.sortCards(sc, 'origin', NOWD).map((c) => c.id).join(',') === '5,1,2,3,4');
+check('sortCards 未知 mode → 回落 smart', JSON.stringify(TT.sortCards(sc, 'garbage', NOWD)) === JSON.stringify(TT.sortCards(sc, 'smart', NOWD)));
+
+const mcard = { kind: 'bug', id: 123, title: '登录页报错', status: 'active', openedBy: '张三' };
+check('matchSearch：标题 / 裸 id / #id / 状态名 / 创建人命中',
+  TT.matchSearch(mcard, '登录') === true && TT.matchSearch(mcard, '123') === true
+  && TT.matchSearch(mcard, '#123') === true && TT.matchSearch({ ...mcard, status: 'doing' }, '进行中') === true
+  && TT.matchSearch(mcard, '张三') === true);
+check('matchSearch：未命中词 → false（大小写不敏感在英文下成立）',
+  TT.matchSearch(mcard, '已解决') === false
+  && TT.matchSearch({ kind: 'bug', id: 1, title: 'login page' }, 'LOGIN') === true);
+check('matchSearch：多词 AND（全命中才显示）/ 空查询恒 true',
+  TT.matchSearch(mcard, '登录 123') === true && TT.matchSearch(mcard, '登录 456') === false
+  && TT.matchSearch(mcard, '') === true && TT.matchSearch(mcard, '   ') === true);
+
+// ── 列表快照持久化 mine.v1（2026-10-25 提案 2）：重启秒开 + 离线兜底 ──
+const MKEY = 'dsh-zentao-panel.mine.v1';
+lsBacking.set(MKEY, '{oops');
+check('mine.v1 存储损坏时读作空（自愈）', TT.readMineSnapshot('a1') === null);
+lsBacking.delete(MKEY);
+TT.writeMineSnapshot('a1', { cards: [{ kind: 'bug', id: 1, title: 'x' }], at: 123 });
+const msnap = TT.readMineSnapshot('a1');
+check('writeMineSnapshot → readMineSnapshot 往返（cached:true 供页脚显示缓存时间）',
+  msnap && msnap.cached === true && msnap.at === 123 && Array.isArray(msnap.cards) && msnap.cards[0].id === 1);
+check('readMineSnapshot：其它账号 / 空 activeId → null',
+  TT.readMineSnapshot('a2') === null && TT.readMineSnapshot(null) === null);
+TT.writeMineSnapshot('a2', { cards: Array.from({ length: 500 }, (_, i) => ({ kind: 'bug', id: i })), at: 1 });
+check('快照卡片数截断到上限（防配额爆）', TT.readMineSnapshot('a2').cards.length === 400);
+for (const a of ['a3', 'a4', 'a5', 'a6']) TT.writeMineSnapshot(a, { cards: [], at: 1 });
+check('快照最多保留 4 个账号（按 savedAt 淘汰最旧）',
+  Object.keys(JSON.parse(lsBacking.get(MKEY))).length === 4
+  && !('a1' in JSON.parse(lsBacking.get(MKEY))) && TT.readMineSnapshot('a6') !== null);
+TT.removeMineSnapshot('a6');
+check('removeMineSnapshot 清指定账号（账号移除时用）',
+  TT.readMineSnapshot('a6') === null && TT.readMineSnapshot('a3') !== null);
+lsBacking.delete(MKEY);
+
+// ── 处理结果摘要回读（replies.v1 + 事件窗口，2026-10-25 提案 3）──
+const RKEY = 'dsh-zentao-panel.replies.v1';
+lsBacking.set(RKEY, '{oops');
+check('replies.v1 存储损坏时读作空表（自愈）', typeof TT.readReplyMap() === 'object' && TT.readReplyMap() !== null);
+lsBacking.delete(RKEY);
+
+const mkMsg = (seq, blocks) => ({ event: { seq, type: 'assistant/message', data: { message: { content: blocks } } } });
+check('assistantEntryText：拼接 text 块（跳过 reasoning/工具块，块内 trim）',
+  TT.assistantEntryText(mkMsg(1, [{ type: 'text', text: '第一步' }, { type: 'reasoning', text: '内心' }, { type: 'text', text: '  第二步 ' }])) === '第一步\n\n第二步');
+check('assistantEntryText：只有 reasoning/空 content → null（无可展示文本）',
+  TT.assistantEntryText(mkMsg(1, [{ type: 'reasoning', text: 'x' }])) === null
+  && TT.assistantEntryText(mkMsg(1, [])) === null);
+check('assistantEntryText：非 assistant/message / 坏结构 → null',
+  TT.assistantEntryText({ event: { type: 'user/message', data: {} } }) === null
+  && TT.assistantEntryText(null) === null);
+check('lastAssistantText：从尾往头取最后一条有文本的',
+  TT.lastAssistantText([mkMsg(1, [{ type: 'text', text: '早' }]), { event: { type: 'tool/result' } },
+    mkMsg(3, [{ type: 'reasoning', text: 'r' }]), mkMsg(4, [{ type: 'text', text: '晚' }])]) === '晚');
+check('lastAssistantText：空 / 全无文本 → null',
+  TT.lastAssistantText([]) === null && TT.lastAssistantText(null) === null);
+
+// fetchLastReply：retain → binding.eventSource 窗口 → 取文本 → release
+let replyReleased = 0;
+let replyEntries = [mkMsg(7, [{ type: 'text', text: '马上就好' }])];
+let replySub = null;
+ctx.get = function (name) {
+  if (name === 'sessions') return {
+    retain(id, o) { return { sessionId: id, opts: o, release() { replyReleased++; } }; },
+    binding() {
+      return { eventSource: {
+        getSnapshot: () => ({ entries: replyEntries, hasMore: false, revision: 1 }),
+        subscribe(cb) { replySub = cb; return () => {}; },
+      } };
+    },
+  };
+  return undefined;
+};
+replyReleased = 0;
+const fr1 = await TT.fetchLastReply('s-r1', 1000);
+check('fetchLastReply：窗口已就绪 → 取到回复并释放 retain',
+  fr1.ok === true && fr1.text === '马上就好' && replyReleased === 1);
+
+replyEntries = [];
+replyReleased = 0;
+const fr2P = TT.fetchLastReply('s-r2', 2000);
+await sleep(10);
+replyEntries = [mkMsg(9, [{ type: 'text', text: '后台到的' }])];
+if (replySub) replySub();
+const fr2 = await fr2P;
+check('fetchLastReply：窗口异步回放（retain 自动开事件流）→ subscribe 唤醒后取到',
+  fr2.ok === true && fr2.text === '后台到的' && replyReleased === 1);
+
+replyEntries = [];
+replyReleased = 0;
+const fr3 = await TT.fetchLastReply('s-r3', 30);
+check('fetchLastReply：窗口一直没内容 → 超时失败且释放 retain',
+  fr3.ok === false && fr3.reason === 'timeout' && replyReleased === 1);
+
+ctx.get = function () { return undefined; };
+check('fetchLastReply：sessions 服务缺失 → unsupported（不抛错）',
+  (await TT.fetchLastReply('s-x', 10)).reason === 'unsupported');
+ctx.get = function (name) {
+  if (name === 'sessions') return { retain() { throw new Error('no'); }, binding() { return {}; } };
+  return undefined;
+};
+check('fetchLastReply：retain 抛错 → reason retain', (await TT.fetchLastReply('s-x', 10)).reason === 'retain');
+ctx.get = function (name) {
+  if (name === 'sessions') return {
+    retain() { return { release() { replyReleased++; } }; },
+    binding() { return {}; }, // 无 eventSource（旧版 DSH）
+  };
+  return undefined;
+};
+replyReleased = 0;
+check('fetchLastReply：binding 无 eventSource → unsupported 且释放 retain',
+  (await TT.fetchLastReply('s-x', 10)).reason === 'unsupported' && replyReleased === 1);
+
+// replies.v1 存取 + 生命周期联动
+const rcard = { kind: 'bug', id: 321, title: 't' };
+TT.saveReply('acct1', rcard, 's1', '短回复');
+check('saveReply/getReply 往返（带账号隔离）',
+  TT.getReply('acct1', rcard).sessionId === 's1' && TT.getReply('acct1', rcard).text === '短回复'
+  && TT.getReply('acct2', rcard) === null);
+TT.saveReply('acct1', rcard, 's1', 'x'.repeat(600));
+check('saveReply 正常长度存完整文本（full:true，不截断）',
+  TT.getReply('acct1', rcard).text === 'x'.repeat(600) && TT.getReply('acct1', rcard).full === true);
+TT.saveReply('acct1', rcard, 's1', 'y'.repeat(TT.REPLY_MAX_CHARS + 5));
+check('saveReply 超防炸上限截断 + 省略号（full:false）',
+  TT.getReply('acct1', rcard).text.length === TT.REPLY_MAX_CHARS + 1
+  && TT.getReply('acct1', rcard).full === false);
+TT.removeReply('acct1', rcard);
+check('removeReply 清除指定条目', TT.getReply('acct1', rcard) === null);
+
+lsBacking.clear();
+ctx.get = function (name) {
+  if (name === 'uiSession') return {
+    sessionStatus: { getSnapshot: () => new Map(), subscribe() { return () => {}; } },
+  };
+  if (name === 'sessions') return {
+    list: { getSnapshot: () => ({ byId: { 's-old': {}, 's-new': {}, 's-g': {} } }), subscribe() { return () => {}; } },
+  };
+  return undefined;
+};
+TT.saveSessionLink('acct1', rcard, 's-old');
+TT.saveReply('acct1', rcard, 's-old', '旧会话的回复');
+TT.saveSessionLink('acct1', rcard, 's-new');
+check('再处理换会话 → 旧结果摘要作废（同 states 语义）', TT.getReply('acct1', rcard) === null);
+TT.saveReply('acct1', rcard, 's-new', '新回复');
+TT.saveSessionLink('acct1', rcard, 's-new');
+check('同会话重复保存关联 → 已有摘要保留', TT.getReply('acct1', rcard) !== null);
+
+const rcard2 = { kind: 'bug', id: 322, title: 't2' };
+TT.saveSessionLink('acct1', rcard2, 's-g');
+TT.saveReply('acct1', rcard2, 's-g', '会被连带清理的回复');
+const SGONE = [{ key: 'acct1/bug-322', sessionId: 's-g', kind: 'bug', id: 322, title: 't2' }];
+TT.syncPersistedStates(SGONE, { 's-g': 'done' }, { byId: { 's-g': {} }, byIdReady: true, statusReady: true }, NOW);
+TT.syncPersistedStates(SGONE, { 's-g': null }, { byId: {}, byIdReady: true, statusReady: true }, NOW);
+check('syncPersistedStates：会话被删 → 结果摘要一起清', TT.getReply('acct1', rcard2) === null);
+
+// cleanupStaleLinks 连带清 replies（超期离线 + 孤儿）
+lsBacking.clear();
+lsBacking.set('dsh-zentao-panel.links.v1', JSON.stringify({
+  'acct1/bug-1': { sessionId: 's-1', at: NOW - 100 * H, lastSeen: NOW - 100 * H, kind: 'bug', id: 1, title: 'a' },
+  'acct1/bug-2': { sessionId: 's-2', at: NOW - 200 * H, lastSeen: NOW - 200 * H, kind: 'bug', id: 2, title: 'b' },
+}));
+lsBacking.set(RKEY, JSON.stringify({
+  'acct1/bug-2': { sessionId: 's-2', text: 'x', at: NOW - 200 * H },
+  'acct1/bug-8': { sessionId: 's-8', text: '孤儿', at: NOW - 300 * H },
+}));
+TT.cleanupStaleLinks('acct1', [{ kind: 'bug', id: 1 }], NOW);
+const rmAfter = JSON.parse(lsBacking.get(RKEY));
+check('cleanupStaleLinks：超期事项的结果摘要一起删 / 孤儿摘要同样清理',
+  rmAfter['acct1/bug-2'] === undefined && rmAfter['acct1/bug-8'] === undefined);
+
+// ── Markdown 子集渲染 + 摘要限高滚动（2026-10-25 用户要求）──
+check('CSS：处理结果限高滚动 + markdown 排版样式已注入',
+  appended[0].textContent.includes('max-height:360px') && appended[0].textContent.includes('.ztp-md table'));
+
+const MD = TT.mdToBlocks('## 结论\n\n已修复 **登录超时** 与 `cookie` 问题。\n详情见 [禅道](http://z/bug-view-1.html)。');
+check('mdToBlocks：标题 + 段落',
+  MD.length === 2 && MD[0].type === 'h' && MD[0].level === 2 && MD[0].text === '结论'
+  && MD[1].type === 'p' && MD[1].text.includes('登录超时'));
+
+const mdCode = TT.mdToBlocks('前文\n```js\nvar a = 1;\nvar b = 2;\n```\n后文');
+check('mdToBlocks：围栏代码块（带语言，前后段落切分）',
+  mdCode.length === 3 && mdCode[1].type === 'code' && mdCode[1].lang === 'js'
+  && mdCode[1].text === 'var a = 1;\nvar b = 2;' && mdCode[2].text === '后文');
+
+const mdq = TT.mdToBlocks('> 引用一行\n> 引用二行\n\n正文');
+check('mdToBlocks：引用块递归解析（内含段落）',
+  mdq[0].type === 'quote' && mdq[0].blocks.length === 1 && mdq[0].blocks[0].type === 'p'
+  && mdq[0].blocks[0].text === '引用一行\n引用二行' && mdq[1].type === 'p');
+
+const mdl = TT.mdToBlocks('- a\n- b\n  - b1\n  - b2\n1. one\n2. two');
+check('mdToBlocks：列表（无序 + 缩进子级 + 有序混排）',
+  mdl.length === 1 && mdl[0].type === 'list' && mdl[0].items.length === 6
+  && mdl[0].items[2].depth === 1 && mdl[0].items[2].text === 'b1'
+  && mdl[0].items[4].ordered === true);
+
+const mdt = TT.mdToBlocks('| 列1 | 列2 |\n|---|---|\n| a | b |\n| c | d |');
+check('mdToBlocks：GFM 表格（表头 + 分隔行 + 数据行）',
+  mdt.length === 1 && mdt[0].type === 'table' && JSON.stringify(mdt[0].head) === '["列1","列2"]'
+  && mdt[0].rows.length === 2 && mdt[0].rows[1][0] === 'c');
+
+check('mdToBlocks：分隔线 / 未闭合代码块到 EOF / 空文本不抛错',
+  TT.mdToBlocks('---')[0].type === 'hr'
+  && TT.mdToBlocks('```\ncode')[0].type === 'code' && TT.mdToBlocks('```\ncode')[0].text === 'code'
+  && TT.mdToBlocks('')[0] === undefined && TT.mdToBlocks(null)[0] === undefined);
+
+const nodes = TT.mdInlineNodes('前 **粗** 中 *斜* 后 `code` 尾 [禅道](http://z) 完', 'k');
+const types = nodes.filter((x) => x && x.type).map((x) => x.type);
+check('mdInlineNodes：粗体/斜体/行内代码/链接 → strong/em/code/a',
+  types.join(',') === 'strong,em,code,a'
+  && nodes.find((x) => x && x.type === 'strong').children[0] === '粗'
+  && nodes.find((x) => x && x.type === 'a').props.href === 'http://z');
+check('mdInlineNodes：纯文本返回单字符串数组 / 空文本不抛错',
+  JSON.stringify(TT.mdInlineNodes('纯文本', 'k')) === '["纯文本"]'
+  && TT.mdInlineNodes('', 'k').length === 1);
+
+const tree = TT.mdListTree([
+  { depth: 0, ordered: false, text: 'a' },
+  { depth: 1, ordered: false, text: 'a1' },
+  { depth: 0, ordered: false, text: 'b' },
+]);
+check('mdListTree：缩进子级挂到上一项 children',
+  tree.length === 2 && tree[0].children.length === 1 && tree[0].children[0].text === 'a1'
+  && tree[1].text === 'b' && tree[1].children.length === 0);
+
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);

@@ -64,6 +64,14 @@
         '.ztp-seg-btn[aria-selected="true"] .ztp-num{color:var(--dsw-alias-label-secondary);}',
         '.ztp-grow{flex:1;min-width:6px;}',
 
+        // 列表工具行（tab 行右侧）：搜索框 + 排序下拉
+        '.ztp-search{flex:none;height:26px;width:150px;box-sizing:border-box;padding:0 9px;border-radius:var(--dsw-radius-md);border:.5px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;outline:none;}',
+        '.ztp-search::placeholder{color:var(--dsw-alias-label-caption);}',
+        '.ztp-search:focus{border-color:var(--dsw-alias-border-l4);box-shadow:0 0 0 1px var(--dsw-alias-border-l4);}',
+        '.ztp-sort{flex:none;height:26px;box-sizing:border-box;padding:0 2px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;outline:none;cursor:pointer;}',
+        '.ztp-sort:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
+        '@media (max-width:719px){.ztp-search{width:110px;}}',
+
         // 图标按钮
         '.ztp-tool{width:28px;height:28px;flex:none;display:inline-flex;align-items:center;justify-content:center;padding:6px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;line-height:1;box-sizing:border-box;}',
         '.ztp-tool:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
@@ -122,6 +130,10 @@
         '.ztp-pri.p1{color:var(--dsw-alias-state-error-primary);}',
         '.ztp-pri.p2{color:var(--dsw-alias-state-warn-primary);}',
         '.ztp-warn{color:var(--dsw-alias-state-warn-primary);}',
+        // 截止时间强调：逾期红 / 临期（≤3 天）橙（终态状态不着色）
+        '.ztp-dl{font-variant-numeric:tabular-nums;}',
+        '.ztp-dl.soon{color:var(--dsw-alias-state-warn-primary);font-weight:600;}',
+        '.ztp-dl.overdue{color:var(--dsw-alias-state-error-primary);font-weight:600;}',
 
         // 按钮
         '.ztp-acts{display:flex;justify-content:flex-end;gap:6px;margin-top:8px;}',
@@ -167,6 +179,34 @@
         '.ztp-kv dd{margin:0;word-break:break-word;}',
         '.ztp-desc{margin-top:10px;padding:10px 12px;border-radius:var(--dsw-radius-md);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);font-size:12.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word;}',
         '.ztp-section{font-size:11.5px;color:var(--dsw-alias-label-tertiary);margin:14px 2px 6px;}',
+        // 处理结果摘要（关联会话最新回复，replies.v1 缓存）：详情页回读 agent 最后说了什么。
+        // 限高 360px 内部滚动（完整内容不截断）；正文按 markdown 子集渲染（见 MarkdownLite）
+        '.ztp-reply{padding:10px 12px;border-radius:var(--dsw-radius-md);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 7%,var(--dsw-alias-interactive-bg-hover));color:var(--dsw-alias-label-primary);font-size:12.5px;line-height:1.7;word-break:break-word;max-height:360px;overflow-y:auto;scrollbar-gutter:stable;scrollbar-width:thin;}',
+        '.ztp-reply::-webkit-scrollbar{width:6px;}',
+        '.ztp-reply::-webkit-scrollbar-thumb{background:var(--dsw-alias-border-l4);border-radius:3px;}',
+        '.ztp-reply::-webkit-scrollbar-track{background:transparent;}',
+        '.ztp-reply-meta{display:flex;align-items:center;gap:8px;margin-top:5px;font-size:11px;color:var(--dsw-alias-label-caption);}',
+        '.ztp-reply-refresh{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;height:20px;padding:0 5px;border-radius:var(--dsw-radius-sm);cursor:pointer;}',
+        '.ztp-reply-refresh:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover);}',
+        // MarkdownLite 排版（agent 回复常用子集；尺寸按详情栏紧凑调过）
+        '.ztp-md{font-size:12.5px;line-height:1.7;color:var(--dsw-alias-label-primary);}',
+        '.ztp-md>*:first-child{margin-top:0;}',
+        '.ztp-md>*:last-child{margin-bottom:0;}',
+        '.ztp-md h1,.ztp-md h2,.ztp-md h3,.ztp-md h4,.ztp-md h5,.ztp-md h6{margin:10px 0 6px;line-height:1.4;font-weight:600;color:var(--dsw-alias-label-primary);}',
+        '.ztp-md h1{font-size:15px;}.ztp-md h2{font-size:14px;}.ztp-md h3{font-size:13.5px;}.ztp-md h4,.ztp-md h5,.ztp-md h6{font-size:12.5px;}',
+        '.ztp-md p{margin:6px 0;}',
+        '.ztp-md ul,.ztp-md ol{margin:6px 0;padding-left:20px;}',
+        '.ztp-md li{margin:2px 0;}',
+        '.ztp-md blockquote{margin:6px 0;padding:2px 10px;border-left:2px solid var(--dsw-alias-border-l4);color:var(--dsw-alias-label-secondary);}',
+        '.ztp-md code{font-family:var(--dsh-font-mono,ui-monospace,SFMono-Regular,Menlo,Consolas,monospace);font-size:11.5px;background:var(--dsw-alias-interactive-bg-hover);border-radius:4px;padding:1px 4px;}',
+        '.ztp-md pre{margin:8px 0;padding:10px 12px;border-radius:var(--dsw-radius-md);background:var(--dsw-alias-interactive-bg-hover);overflow-x:auto;}',
+        '.ztp-md pre code{background:transparent;padding:0;white-space:pre;display:block;min-width:max-content;}',
+        '.ztp-md a{color:var(--dsw-alias-link);text-decoration:none;}',
+        '.ztp-md a:hover{text-decoration:underline;}',
+        '.ztp-md hr{border:0;border-top:.5px solid var(--dsw-alias-border-l3);margin:10px 0;}',
+        '.ztp-md table{border-collapse:collapse;margin:8px 0;font-size:12px;max-width:100%;display:block;overflow-x:auto;}',
+        '.ztp-md th,.ztp-md td{border:.5px solid var(--dsw-alias-border-l3);padding:4px 8px;text-align:left;vertical-align:top;}',
+        '.ztp-md th{background:var(--dsw-alias-interactive-bg-hover);font-weight:600;white-space:nowrap;}',
         // 详情截图画廊：host 归一后的图片引用 → zentao.image RPC 取字节 → data: URL 渲染
         // （DSH 会话 UI 渲染附件图片就是 data:/blob: 两手，无 CSP 拦截）；点击放大
         '.ztp-imgs{display:flex;flex-direction:column;gap:8px;}',
@@ -376,13 +416,109 @@
           return String(baseUrl || '').replace(/^https?:\/\//, '').split('/')[0];
         }
       }
-      /** 距截止 ≤3 天标黄。 */
-      function isUrgent(d) {
-        if (!d) return false;
-        var t = Date.parse(String(d).slice(0, 10) + 'T23:59:59');
-        if (!Number.isFinite(t)) return false;
-        var days = (t - Date.now()) / 86400000;
-        return days >= 0 && days <= 3;
+      // ───────────── 列表搜索 / 排序 / 截止强调（纯函数，进 _test）─────────────
+      /** 终态（已完成/已关闭/已取消）：不再参与逾期/临期强调，排序沉底。 */
+      var FINAL_STATUS = { done: true, closed: true, cancel: true };
+      function isFinalCard(c) { return FINAL_STATUS[(c && c.status) || ''] === true; }
+
+      /**
+       * 截止时间解析（now 可注入供测试）：逾期（截止日 23:59:59 已过）/
+       * 临期（≤3 天，沿用旧 isUrgent 语义）/ 正常；解析不了返回 null。
+       */
+      function deadlineInfo(deadline, now) {
+        if (!deadline) return null;
+        var t = Date.parse(String(deadline).slice(0, 10) + 'T23:59:59');
+        if (!Number.isFinite(t)) return null;
+        var days = (t - (typeof now === 'number' ? now : Date.now())) / 86400000;
+        return { ts: t, days: days, overdue: days < 0, soon: days >= 0 && days <= 3 };
+      }
+      /** 已逾期天数（向上取整，当天过期不算）；未逾期返回 0。 */
+      function overdueDays(info) {
+        if (!info || !info.overdue) return 0;
+        return Math.floor(-info.days) + 1;
+      }
+
+      function priWeight(c) {
+        var p = Number(c && c.pri);
+        return Number.isFinite(p) && p > 0 ? p : 99;
+      }
+      function cmpIdDesc(a, b) { return Number(b && b.id) - Number(a && a.id); }
+      /** 段序：逾期 0 / 临期 1 / 有截止 2 / 无截止 3（终态在 smart 里先行沉底）。 */
+      function deadlineBucket(c, now) {
+        var d = deadlineInfo(c && c.deadline, now);
+        if (!d) return 3;
+        return d.overdue ? 0 : d.soon ? 1 : 2;
+      }
+      function cmpDeadlineAsc(a, b, now) {
+        var da = deadlineInfo(a && a.deadline, now), db = deadlineInfo(b && b.deadline, now);
+        if (!da && !db) return 0;
+        if (!da) return 1;
+        if (!db) return -1;
+        return da.ts - db.ts;
+      }
+      /**
+       * 排序比较器（smart 是默认值）：
+       * - smart：终态沉底 → 逾期 > 临期 > 有截止 > 无截止 → 段内截止↑ → 优先级↑ → id↓；
+       * - deadline：截止↑（无截止最后，终态沉底）；
+       * - pri：优先级↑ → 截止↑ → id↓；
+       * - origin：保持禅道返回顺序。
+       */
+      var SORT_MAKERS = {
+        smart: function (now) {
+          return function (a, b) {
+            var fa = isFinalCard(a), fb = isFinalCard(b);
+            if (fa !== fb) return fa ? 1 : -1;
+            var ba = deadlineBucket(a, now), bb = deadlineBucket(b, now);
+            if (ba !== bb) return ba - bb;
+            var dl = cmpDeadlineAsc(a, b, now);
+            if (dl !== 0) return dl;
+            var pa = priWeight(a), pb = priWeight(b);
+            if (pa !== pb) return pa - pb;
+            return cmpIdDesc(a, b);
+          };
+        },
+        deadline: function (now) {
+          return function (a, b) {
+            var fa = isFinalCard(a), fb = isFinalCard(b);
+            if (fa !== fb) return fa ? 1 : -1;
+            var dl = cmpDeadlineAsc(a, b, now);
+            if (dl !== 0) return dl;
+            return cmpIdDesc(a, b);
+          };
+        },
+        pri: function (now) {
+          return function (a, b) {
+            var pa = priWeight(a), pb = priWeight(b);
+            if (pa !== pb) return pa - pb;
+            var dl = cmpDeadlineAsc(a, b, now);
+            if (dl !== 0) return dl;
+            return cmpIdDesc(a, b);
+          };
+        },
+        origin: function () { return null; },
+      };
+      function sortCards(cards, mode, now) {
+        var list = Array.isArray(cards) ? cards.slice() : [];
+        var maker = SORT_MAKERS[mode] || SORT_MAKERS.smart;
+        var cmp = maker(typeof now === 'number' ? now : Date.now());
+        return cmp ? list.sort(cmp) : list;
+      }
+
+      /** 搜索命中域：标题 + #id + 状态名 + 创建人/指派人（大小写不敏感）。 */
+      function searchHaystack(card) {
+        return ((card && card.title || '') + ' #' + (card && card.id) + ' '
+          + statusLabel(card && card.status) + ' ' + (card && card.openedBy || '')
+          + ' ' + (card && card.assignedTo || '')).toLowerCase();
+      }
+      /** 多关键词 AND 匹配（空格分隔，每个词都要命中）；空查询恒 true。 */
+      function matchSearch(card, q) {
+        var terms = String(q == null ? '' : q).trim().toLowerCase().split(/\s+/).filter(Boolean);
+        if (!terms.length) return true;
+        var hay = searchHaystack(card);
+        for (var i = 0; i < terms.length; i++) {
+          if (hay.indexOf(terms[i]) === -1) return false;
+        }
+        return true;
       }
 
       /**
@@ -973,9 +1109,11 @@
         var map = readLinkMap();
         map[key] = link;
         writeLinkMap(map);
-        // 换了新会话 → 旧会话的进度记录作废（避免徽标短暂显示旧会话的陈旧状态）
+        // 换了新会话 → 旧会话的进度记录与结果摘要作废（避免徽标/回复显示旧会话的陈旧内容）
         var sm = readStateMap();
         if (sm[key]) { delete sm[key]; writeStateMap(sm); }
+        var rm = readReplyMap();
+        if (rm[key] && rm[key].sessionId !== String(sessionId)) { delete rm[key]; writeReplyMap(rm); }
         watchPoke(); // 监控立即跟进新关联
         return link;
       }
@@ -1047,6 +1185,7 @@
       function syncPersistedStates(entries, states, opts, now) {
         var t = (typeof now === 'number' && now) || Date.now();
         var map = null, dirty = false;
+        var rmap = null, rdirty = false; // 结果摘要（replies.v1）：会话删了跟着删
         for (var i = 0; i < entries.length; i++) {
           var en = entries[i];
           var live = states[en.sessionId] || null;
@@ -1064,6 +1203,8 @@
             if (gone) {
               delete map[en.key];
               dirty = true;
+              if (!rmap) rmap = readReplyMap();
+              if (rmap[en.key]) { delete rmap[en.key]; rdirty = true; }
             } else if (cur.state === 'done') {
               // 粘性进度记录：看过会话/重启后实时归零也保留
             } else if (!confirmed) {
@@ -1080,7 +1221,8 @@
           }
         }
         if (dirty && map) writeStateMap(map);
-        return dirty;
+        if (rdirty && rmap) writeReplyMap(rmap);
+        return dirty || rdirty;
       }
 
       /** 卡片徽标取值（渲染查询入口）：实时监控优先，实时拿不到 → 兜底持久化进度。
@@ -1115,7 +1257,8 @@
         }
         var links = readLinkMap();
         var states = readStateMap();
-        var dirtyLinks = false, dirtyStates = false;
+        var replies = readReplyMap();
+        var dirtyLinks = false, dirtyStates = false, dirtyReplies = false;
         for (var key in links) {
           if (!Object.prototype.hasOwnProperty.call(links, key) || key === '__proto__') continue;
           var pk = parseLinkKey(key);
@@ -1131,9 +1274,10 @@
           if (t - ref > LINK_GRACE_MS) {
             delete links[key]; dirtyLinks = true;
             if (Object.prototype.hasOwnProperty.call(states, key)) { delete states[key]; dirtyStates = true; }
+            if (Object.prototype.hasOwnProperty.call(replies, key)) { delete replies[key]; dirtyReplies = true; }
           }
         }
-        // 孤儿进度记录（关联已没了）同样按宽限期清
+        // 孤儿进度/结果记录（关联已没了）同样按宽限期清
         for (var sk in states) {
           if (!Object.prototype.hasOwnProperty.call(states, sk) || sk === '__proto__') continue;
           var spk = parseLinkKey(sk);
@@ -1141,10 +1285,205 @@
           var sref = Number(states[sk] && states[sk].at) || t;
           if (t - sref > LINK_GRACE_MS) { delete states[sk]; dirtyStates = true; }
         }
+        for (var rk in replies) {
+          if (!Object.prototype.hasOwnProperty.call(replies, rk) || rk === '__proto__') continue;
+          var rpk = parseLinkKey(rk);
+          if (!rpk || rpk.activeId !== acct || links[rk]) continue;
+          var rref = Number(replies[rk] && replies[rk].at) || t;
+          if (t - rref > LINK_GRACE_MS) { delete replies[rk]; dirtyReplies = true; }
+        }
         if (dirtyLinks) writeLinkMap(links);
         if (dirtyStates) writeStateMap(states);
-        if (dirtyLinks || dirtyStates) watchPoke();
-        return dirtyLinks || dirtyStates;
+        if (dirtyReplies) writeReplyMap(replies);
+        if (dirtyLinks || dirtyStates || dirtyReplies) watchPoke();
+        return dirtyLinks || dirtyStates || dirtyReplies;
+      }
+
+      // ───────────── 列表快照持久化（mine.v1）：重启/重挂秒开 + 离线兜底 ─────────────
+      // paneCache 是内存的，DSH 重启后首屏要等「RPC → 禅道探活 → 三类拉取」整条链路。
+      // 这里把每次拉取成功的 mine 按账号存 localStorage：面板打开先用上次快照渲染
+      // （值带 cached:true，页脚显示「HH:mm 缓存」），后台静默刷新替换；禅道不可达
+      // 时快照 + 时间戳就是兜底视图，不再是一片骨架/错误。读坏自愈，同 links 模式。
+      var MINE_KEY = 'dsh-zentao-panel.mine.v1';
+      var MINE_SNAPSHOT_MAX_CARDS = 400;   // 卡片数上限（超出截断，正常远用不到）
+      var MINE_SNAPSHOT_MAX_ACCOUNTS = 4;  // 账号数上限（按 savedAt 淘汰最旧）
+
+      function readMineSnapshots() {
+        var s = linkStorage();
+        if (s) {
+          try {
+            var v = s.getItem(MINE_KEY) ? JSON.parse(s.getItem(MINE_KEY)) : null;
+            if (v && typeof v === 'object') return v;
+          } catch (e) { /* 坏数据当空 */ }
+          return {};
+        }
+        return {};
+      }
+      /** 该账号的上次列表快照 → 直接可作 mine state 的形态（{cards, at, cached:true}）；无则 null。 */
+      function readMineSnapshot(activeId) {
+        if (!activeId) return null;
+        var v = readMineSnapshots()[String(activeId)];
+        if (!v || !Array.isArray(v.cards)) return null;
+        return { cards: v.cards, at: Number(v.at) || 0, cached: true, savedAt: Number(v.savedAt) || 0 };
+      }
+      function writeMineSnapshot(activeId, mine) {
+        if (!activeId || !mine || !Array.isArray(mine.cards)) return;
+        var s = linkStorage();
+        if (!s) return;
+        var all = readMineSnapshots();
+        all[String(activeId)] = {
+          cards: mine.cards.slice(0, MINE_SNAPSHOT_MAX_CARDS),
+          at: Number(mine.at) || Date.now(),
+          savedAt: Date.now(),
+        };
+        var keys = Object.keys(all);
+        if (keys.length > MINE_SNAPSHOT_MAX_ACCOUNTS) {
+          keys.sort(function (a, b) { return (all[a].savedAt || 0) - (all[b].savedAt || 0); });
+          for (var i = 0; i < keys.length - MINE_SNAPSHOT_MAX_ACCOUNTS; i++) delete all[keys[i]];
+        }
+        try { s.setItem(MINE_KEY, JSON.stringify(all)); } catch (e) { /* 配额满：放弃快照，不影响主流程 */ }
+      }
+      /** 账号被移除（凭据清除）时一并清它的列表快照。 */
+      function removeMineSnapshot(activeId) {
+        if (!activeId) return;
+        var s = linkStorage();
+        if (!s) return;
+        var all = readMineSnapshots();
+        if (!Object.prototype.hasOwnProperty.call(all, String(activeId))) return;
+        delete all[String(activeId)];
+        try { s.setItem(MINE_KEY, JSON.stringify(all)); } catch (e) { /* 忽略 */ }
+      }
+
+      // ───────────── 处理结果摘要回读（replies.v1 + 关联会话事件窗口）─────────────
+      // 不跳会话就知道 agent 最后说了什么：retain 关联会话（retain 即自动打开事件流
+      // 并回放最近历史窗口，HISTORY_PAGE_OPTIONS：maxMessages 500 / minTurns 2）→
+      // binding(id).eventSource 快照的 entries 里找最后一条 assistant/message
+      // （event.data.message.content 是块数组，源码 dsh-client-ui-chat toAssistantBlocks
+      // 同款取 text 块）→ 截断后缓存 replies.v1（key 与 links 同构）→ release。
+      var REPLIES_KEY = 'dsh-zentao-panel.replies.v1';
+      var REPLY_MAX_CHARS = 20000;         // 防炸兜底上限（正常回复远达不到，达到也只是文末加省略号）
+      var REPLY_TTL_MS = 10 * 60 * 1000;   // 详情打开自动回读的缓存有效期
+      var repliesFallback = null;
+
+      function readReplyMap() {
+        var s = linkStorage();
+        if (s) {
+          try {
+            var v = s.getItem(REPLIES_KEY) ? JSON.parse(s.getItem(REPLIES_KEY)) : null;
+            if (v && typeof v === 'object') return v;
+          } catch (e) { /* 坏数据当空 */ }
+          return {};
+        }
+        return repliesFallback || (repliesFallback = {});
+      }
+      function writeReplyMap(map) {
+        var s = linkStorage();
+        if (s) {
+          try { s.setItem(REPLIES_KEY, JSON.stringify(map)); return; } catch (e) { /* 配额满 → 退内存 */ }
+        }
+        repliesFallback = map;
+      }
+
+      function getReply(activeId, card) {
+        var v = readReplyMap()[sessionLinkKey(activeId, card)];
+        return (v && typeof v.sessionId === 'string' && v.sessionId && typeof v.text === 'string')
+          ? v : null;
+      }
+      function saveReply(activeId, card, sessionId, text) {
+        var raw = String(text == null ? '' : text);
+        var clipped = raw.length > REPLY_MAX_CHARS;
+        var t = clipped ? raw.slice(0, REPLY_MAX_CHARS) + '…' : raw;
+        var map = readReplyMap();
+        // full 标记本次是否存了完整文本：旧版截 500 字的缓存没有该字段 → 视为不完整，自动重拉
+        var entry = { sessionId: String(sessionId), text: t, at: Date.now(), full: !clipped };
+        map[sessionLinkKey(activeId, card)] = entry;
+        writeReplyMap(map);
+        return entry;
+      }
+      function removeReply(activeId, card) {
+        var map = readReplyMap();
+        delete map[sessionLinkKey(activeId, card)];
+        writeReplyMap(map);
+      }
+
+      /** assistant/message 事件 → 可展示文本（拼接 text 块；只有 reasoning/工具块 → null）。 */
+      function assistantEntryText(entry) {
+        try {
+          var ev = entry && entry.event;
+          if (!ev || ev.type !== 'assistant/message') return null;
+          var content = ev.data && ev.data.message && ev.data.message.content;
+          if (!Array.isArray(content)) return null;
+          var out = [];
+          for (var i = 0; i < content.length; i++) {
+            var b = content[i];
+            if (b && b.type === 'text' && typeof b.text === 'string' && b.text.trim()) out.push(b.text.trim());
+          }
+          return out.length ? out.join('\n\n') : null;
+        } catch (e) { return null; }
+      }
+      /** 事件窗口里最后一条有文本的 assistant 消息（从尾往头找；无 → null）。 */
+      function lastAssistantText(entries) {
+        if (!Array.isArray(entries)) return null;
+        for (var i = entries.length - 1; i >= 0; i--) {
+          var t = assistantEntryText(entries[i]);
+          if (t) return t;
+        }
+        return null;
+      }
+
+      /**
+       * 读取会话里最后一条 assistant 回复：retain（自动打开事件流并回放历史窗口）→
+       * 等窗口里出现文本（subscribe + 超时兜底）→ 释放 retain。任何环节不可用 →
+       * {ok:false, reason}，不抛错。手动刷新传较短超时；默认 5s。
+       */
+      function fetchLastReply(sessionId, timeoutMs) {
+        var sessions = lookupService('sessions');
+        if (!sessions || typeof sessions.retain !== 'function' || typeof sessions.binding !== 'function') {
+          return Promise.resolve({ ok: false, reason: 'unsupported' });
+        }
+        var ref = null;
+        try { ref = sessions.retain(sessionId, { source: 'zentao-panel' }); } catch (e) { ref = null; }
+        if (!ref) return Promise.resolve({ ok: false, reason: 'retain' });
+        var release = function () {
+          try { if (ref && typeof ref.release === 'function') ref.release(); } catch (e) { /* 已被释放 */ }
+        };
+        var binding = null;
+        try { binding = sessions.binding(sessionId); } catch (e) { binding = null; }
+        var es = binding && binding.eventSource;
+        if (!es || typeof es.getSnapshot !== 'function') {
+          release();
+          return Promise.resolve({ ok: false, reason: 'unsupported' });
+        }
+        return new Promise(function (resolve) {
+          var settled = false;
+          var un = null, timer = null;
+          var finish = function (r) {
+            if (settled) return;
+            settled = true;
+            if (un) { try { un(); } catch (e) { /* 忽略 */ } }
+            if (timer) { try { clearTimeout(timer); } catch (e) { /* 忽略 */ } }
+            release();
+            resolve(r);
+          };
+          var grab = function () {
+            try {
+              var snap = es.getSnapshot();
+              var text = lastAssistantText(snap && snap.entries);
+              if (text) return { ok: true, text: text };
+            } catch (e) { /* 忽略，等下一次 */ }
+            return null;
+          };
+          var check = function () {
+            var r = grab();
+            if (r) finish(r);
+          };
+          if (typeof es.subscribe === 'function') un = es.subscribe(check);
+          check();
+          timer = setTimeout(function () {
+            var r = grab();
+            finish(r || { ok: false, reason: 'timeout' });
+          }, (typeof timeoutMs === 'number' && timeoutMs > 0) ? timeoutMs : 5000);
+        });
       }
 
       /**
@@ -1500,7 +1839,9 @@
 
       function CardItem(props) {
         var c = props.card;
-        var urgent = isUrgent(c.deadline);
+        var dl = deadlineInfo(c.deadline);
+        var dlCls = (!isFinalCard(c) && dl)
+          ? (dl.overdue ? ' overdue' : dl.soon ? ' soon' : '') : '';
         var live = props.live || null;
         return h('div', {
           className: 'ztp-card ztp-k-' + c.kind
@@ -1530,7 +1871,10 @@
               h(StatusChip, { status: c.status }),
               c.pri != null ? h('span', { className: 'ztp-pri p' + c.pri }, 'P' + c.pri) : null,
               c.severity != null ? h('span', null, '严重 ' + c.severity) : null,
-              c.deadline ? h('span', { className: urgent ? 'ztp-warn' : '' }, '截止 ' + fmtDate(c.deadline)) : null,
+              c.deadline ? h('span', {
+                className: 'ztp-dl' + dlCls,
+                title: dlCls ? (dl.overdue ? '已逾期 ' + overdueDays(dl) + ' 天' : '距截止不足 3 天') : '',
+              }, (dlCls.indexOf('overdue') !== -1 ? '逾期 ' : '截止 ') + fmtDate(c.deadline)) : null,
               c.openedBy ? h('span', null, c.openedBy + ' 创建') : null)),
           h('div', { className: 'ztp-card-title' }, c.title || ''),
           h('div', { className: 'ztp-acts' },
@@ -1556,6 +1900,211 @@
         );
       }
 
+      // ───────────── 极简 Markdown 渲染（MarkdownLite）─────────────
+      // 免构建零依赖：md → 块结构 → React 元素树（不经 innerHTML，无 XSS 面）。
+      // 覆盖 agent 回复常用子集：标题 / 段落 / **粗体** / *斜体* / `行内代码` /
+      // [链接](http…) / 围栏代码块 / 引用（递归解析）/ 有序无序列表（缩进分级）/
+      // 分隔线 / GFM 表格。段落内单个换行渲染为 <br>（贴合聊天文本习惯）。
+      // ⚠️ DSH 没有可 require 的 markdown 组件（dsh-client-ui-primitives 的
+      // MarkdownText 被内联进 ui-chat 的 bundle，模块表里没有），才自研这份子集。
+      var MD_INLINE_RE = /(\*\*|__)([\s\S]+?)\1|\*([^*\n]+?)\*|`([^`\n]+)`|\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g;
+
+      /** 行内标记 → 子节点数组（字符串与元素混排）。 */
+      function mdInlineNodes(text, keyPrefix) {
+        var s = String(text == null ? '' : text);
+        var out = [];
+        var last = 0, m = null, n = 0;
+        MD_INLINE_RE.lastIndex = 0;
+        while ((m = MD_INLINE_RE.exec(s)) !== null) {
+          if (m.index > last) out.push(s.slice(last, m.index));
+          if (m[2] !== undefined) out.push(h('strong', { key: keyPrefix + 'b' + n }, m[2]));
+          else if (m[3] !== undefined) out.push(h('em', { key: keyPrefix + 'i' + n }, m[3]));
+          else if (m[4] !== undefined) out.push(h('code', { key: keyPrefix + 'c' + n }, m[4]));
+          else if (m[5] !== undefined) {
+            out.push(h('a', { key: keyPrefix + 'a' + n, href: m[6], target: '_blank', rel: 'noreferrer' }, m[5]));
+          }
+          n++;
+          last = m.index + m[0].length;
+        }
+        if (last < s.length) out.push(s.slice(last));
+        return out.length ? out : [s];
+      }
+      /** 行内标记 + 单换行 <br>（段落 / 列表项文本用）。 */
+      function mdInlineNodesWithBreaks(text, keyPrefix) {
+        var lines = String(text == null ? '' : text).split('\n');
+        var out = [];
+        for (var i = 0; i < lines.length; i++) {
+          if (i) out.push(h('br', { key: keyPrefix + 'br' + i }));
+          var part = mdInlineNodes(lines[i], keyPrefix + 'l' + i + '-');
+          for (var j = 0; j < part.length; j++) out.push(part[j]);
+        }
+        return out;
+      }
+      function mdSplitCells(row) {
+        var s = String(row).trim();
+        if (s.charAt(0) === '|') s = s.slice(1);
+        if (s.charAt(s.length - 1) === '|' && s.slice(-2) !== '\\|') s = s.slice(0, -1);
+        return s.split('|').map(function (c) { return c.trim(); });
+      }
+      var MD_IS_TABLE_SEP = function (line) {
+        return line.indexOf('|') !== -1 && line.indexOf('-') !== -1 && /^[\s|:\-]+$/.test(line);
+      };
+
+      /** markdown 文本 → 块数组：h/p/code/quote/hr/list/table。 */
+      function mdToBlocks(md) {
+        var lines = String(md == null ? '' : md).replace(/\r\n?/g, '\n').split('\n');
+        var blocks = [];
+        var i = 0;
+        while (i < lines.length) {
+          var line = lines[i];
+          if (!line.trim()) { i++; continue; }
+          // 围栏代码块（``` 或 ~~~，任意围栏行闭合，未闭合到 EOF 也收）
+          var fence = /^\s*(`{3,}|~{3,})(.*)$/.exec(line);
+          if (fence) {
+            var buf = [];
+            i++;
+            while (i < lines.length && !/^\s*(`{3,}|~{3,})\s*$/.test(lines[i])) { buf.push(lines[i]); i++; }
+            if (i < lines.length) i++;
+            blocks.push({ type: 'code', lang: fence[2].trim(), text: buf.join('\n') });
+            continue;
+          }
+          var hm = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
+          if (hm) { blocks.push({ type: 'h', level: hm[1].length, text: hm[2] }); i++; continue; }
+          if (/^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(line)) { blocks.push({ type: 'hr' }); i++; continue; }
+          // 引用：连续 > 行去掉标记后递归解析
+          if (/^\s{0,3}>/.test(line)) {
+            var qs = [];
+            while (i < lines.length && /^\s{0,3}>/.test(lines[i])) {
+              qs.push(lines[i].replace(/^\s{0,3}>\s?/, ''));
+              i++;
+            }
+            blocks.push({ type: 'quote', blocks: mdToBlocks(qs.join('\n')) });
+            continue;
+          }
+          // GFM 表格：表头行 + 分隔行（| : - 组成）
+          if (line.indexOf('|') !== -1 && i + 1 < lines.length && MD_IS_TABLE_SEP(lines[i + 1])) {
+            var head = mdSplitCells(line);
+            i += 2;
+            var rows = [];
+            while (i < lines.length && lines[i].trim() && lines[i].indexOf('|') !== -1) {
+              rows.push(mdSplitCells(lines[i]));
+              i++;
+            }
+            blocks.push({ type: 'table', head: head, rows: rows });
+            continue;
+          }
+          // 列表（缩进每 2 空格一级，封顶 3 级；带缩进的普通行并入上一项作软换行）
+          var lm = /^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$/.exec(line);
+          if (lm) {
+            var items = [];
+            while (i < lines.length) {
+              var m2 = /^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$/.exec(lines[i]);
+              if (m2) {
+                items.push({
+                  depth: Math.min(Math.floor(m2[1].replace(/\t/g, '  ').length / 2), 3),
+                  ordered: m2[2].charAt(0) >= '0' && m2[2].charAt(0) <= '9',
+                  text: m2[3],
+                });
+                i++;
+                continue;
+              }
+              if (items.length && /^\s+\S/.test(lines[i])
+                && !/^\s*(`{3,}|~{3,}|#{1,6}\s|>)/.test(lines[i])) {
+                items[items.length - 1].text += '\n' + lines[i].replace(/^\s+/, '');
+                i++;
+                continue;
+              }
+              break;
+            }
+            blocks.push({ type: 'list', items: items });
+            continue;
+          }
+          // 段落：吃到空行或任意块起始
+          var ps = [line];
+          i++;
+          while (i < lines.length) {
+            var l2 = lines[i];
+            if (!l2.trim()
+              || /^\s*(`{3,}|~{3,})/.test(l2)
+              || /^#{1,6}\s/.test(l2)
+              || /^\s{0,3}>/.test(l2)
+              || /^\s{0,3}([-*_])(\s*\1){2,}\s*$/.test(l2)
+              || /^(\s*)([-*+]|\d{1,3}[.)])\s+/.test(l2)
+              || (l2.indexOf('|') !== -1 && i + 1 < lines.length && MD_IS_TABLE_SEP(lines[i + 1]))) break;
+            ps.push(l2);
+            i++;
+          }
+          blocks.push({ type: 'p', text: ps.join('\n') });
+        }
+        return blocks;
+      }
+
+      /** 扁平列表项（带 depth）→ 树（缩进跳级时挂到最近的浅级项下）。 */
+      function mdListTree(items) {
+        var roots = [];
+        var stack = [];
+        for (var k = 0; k < items.length; k++) {
+          var it = items[k];
+          var node = { ordered: it.ordered, text: it.text, children: [] };
+          while (stack.length && stack[stack.length - 1].depth >= it.depth) stack.pop();
+          if (!stack.length) roots.push(node);
+          else stack[stack.length - 1].node.children.push(node);
+          stack.push({ depth: it.depth, node: node });
+        }
+        return roots;
+      }
+      /** 列表树 → ul/ol 元素数组（连续同类型根合并进同一个列表）。 */
+      function mdListGroup(nodes, kp) {
+        var groups = [];
+        var cur = null;
+        for (var r = 0; r < nodes.length; r++) {
+          if (!cur || cur.ordered !== nodes[r].ordered) {
+            cur = { ordered: nodes[r].ordered, items: [] };
+            groups.push(cur);
+          }
+          cur.items.push(nodes[r]);
+        }
+        return groups.map(function (grp, gi) {
+          return h(grp.ordered ? 'ol' : 'ul', { key: kp + 'g' + gi },
+            grp.items.map(function (nd, ii) {
+              var k = kp + 'g' + gi + 'i' + ii;
+              var kids = mdInlineNodesWithBreaks(nd.text, k + '-');
+              if (nd.children.length) {
+                var subs = mdListGroup(nd.children, k + 'c');
+                for (var s = 0; s < subs.length; s++) kids.push(subs[s]);
+              }
+              return h('li', { key: k }, kids);
+            }));
+        });
+      }
+      function renderMdBlocks(blocks, kp) {
+        return blocks.map(function (b, i) {
+          var k = kp + '-' + i;
+          if (b.type === 'h') return h('h' + b.level, { key: k }, mdInlineNodes(b.text, k + '-'));
+          if (b.type === 'p') return h('p', { key: k }, mdInlineNodesWithBreaks(b.text, k + '-'));
+          if (b.type === 'code') return h('pre', { key: k, 'data-lang': b.lang || undefined }, h('code', null, b.text));
+          if (b.type === 'quote') return h('blockquote', { key: k }, renderMdBlocks(b.blocks, k + 'q'));
+          if (b.type === 'hr') return h('hr', { key: k });
+          if (b.type === 'table') {
+            return h('table', { key: k },
+              h('thead', { key: k + 'th' }, h('tr', { key: k + 'thr' },
+                b.head.map(function (c, ci) { return h('th', { key: ci }, mdInlineNodes(c, k + 'h' + ci + '-')); }))),
+              h('tbody', { key: k + 'tb' }, b.rows.map(function (row, ri) {
+                return h('tr', { key: ri }, row.map(function (c, ci) {
+                  return h('td', { key: ci }, mdInlineNodes(c, k + 'c' + ri + '_' + ci + '-'));
+                }));
+              })));
+          }
+          if (b.type === 'list') return mdListGroup(mdListTree(b.items), k);
+          return null;
+        });
+      }
+      /** markdown 子集渲染组件（处理结果摘要用；纯函数组件，无 hooks）。 */
+      function MarkdownLite(props) {
+        return h('div', { className: 'ztp-md' },
+          renderMdBlocks(mdToBlocks((props && props.text) || ''), 'md'));
+      }
+
       function DetailView(props) {
         var card = props.card;
         var detail = useState(null), err = useState(null);
@@ -1573,7 +2122,10 @@
         }, [card.kind, card.id]);
 
         var d = detail[0] || {};
-        var urgent = isUrgent(card.deadline || d.deadline);
+        var dlAll = card.deadline || d.deadline;
+        var dl = deadlineInfo(dlAll);
+        var dlCls = (!isFinalCard(card) && dl)
+          ? (dl.overdue ? ' overdue' : dl.soon ? ' soon' : '') : '';
         // 图片以真实截图渲染（DetailImages），文本里的 [图片：xxx] 占位标记随之去掉
         var desc = stripImageMarkers(d.desc || card.descBrief || '');
         var imgs = imagesOf(card, detail[0]);
@@ -1593,7 +2145,10 @@
               h(StatusChip, { status: card.status }),
               card.pri != null ? h('span', { className: 'ztp-pri p' + card.pri }, 'P' + card.pri) : null,
               card.severity != null ? h('span', null, '严重 ' + card.severity) : null,
-              (card.deadline || d.deadline) ? h('span', { className: urgent ? 'ztp-warn' : '' }, '截止 ' + fmtDate(card.deadline || d.deadline)) : null),
+              (card.deadline || d.deadline) ? h('span', {
+                className: 'ztp-dl' + dlCls,
+                title: dlCls ? (dl.overdue ? '已逾期 ' + overdueDays(dl) + ' 天' : '距截止不足 3 天') : '',
+              }, (dlCls.indexOf('overdue') !== -1 ? '逾期 ' : '截止 ') + fmtDate(card.deadline || d.deadline)) : null),
 
             h('dl', { className: 'ztp-kv' },
               h('dt', null, '指派给'), h('dd', null, card.assignedTo || '—'),
@@ -1604,6 +2159,24 @@
               d.resolvedBuild ? h('dt', null, '解决版本') : null, d.resolvedBuild ? h('dd', null, String(d.resolvedBuild)) : null)),
 
           err[0] ? h('div', { className: 'ztp-err' }, err[0]) : null,
+
+          // 处理结果摘要（提案 3）：关联会话里最后一条 assistant 回复（replies.v1 缓存，
+          // 详情打开且「已完成」时自动回读，TTL 内不重复拉；可手动刷新）
+          props.replyLink ? h('div', { className: 'ztp-reply-wrap' },
+            h('div', { className: 'ztp-section' }, '处理结果（关联会话最新回复）'),
+            props.reply
+              ? h('div', { className: 'ztp-reply' }, h(MarkdownLite, { text: props.reply.text }))
+              : (props.replyLoading
+                ? h('div', { className: 'ztp-reply', style: { color: 'var(--dsw-alias-label-tertiary)', display: 'block' } },
+                    h('span', { className: 'ztp-spin', style: { display: 'inline-block', verticalAlign: '-2px' } }), ' 正在读取…')
+                : h('div', { className: 'ztp-reply', style: { color: 'var(--dsw-alias-label-tertiary)', display: 'block' } }, '暂无缓存的回复，可点下方「重新读取」')),
+            h('div', { className: 'ztp-reply-meta' },
+              props.reply ? h('span', null, '更新于 ' + fmtLinkAt(props.reply.at)) : null,
+              props.onRefreshReply ? h('button', {
+                className: 'ztp-reply-refresh', type: 'button', disabled: !!props.replyLoading,
+                onClick: props.onRefreshReply,
+                title: '重新从关联会话读取最新回复',
+              }, '重新读取') : null)) : null,
 
           h('div', { className: 'ztp-section' }, card.kind === 'bug' ? '重现步骤 / 描述' : '描述'),
           desc
@@ -1938,6 +2511,8 @@
       // 缓存，重挂瞬间就是完整列表，不闪 loading/骨架；后台 RPC 照常静默刷新。
       // 登出/切账号时这些 state 被置 null，缓存同步为 null，下次重挂走登录/重拉。
       var paneCache = { tab: 'task', status: null, mine: null, detailCard: null };
+      // 结果摘要自动回读的失败冷却（linkKey → 上次尝试时刻；模块级，避免重渲染干扰）
+      var replyLastTry = {};
 
       function ZentaoPane(props) {
         props = props || {};
@@ -1953,6 +2528,10 @@
         var dispatch = useState(null);   // 「处理」/「插入对话」确认弹层：{card, md, images, intent}
         var linkRev = useState(0);       // 会话关联存储版本号（保存/清除后 bump 重读）
         var liveSnap = useState(watchGetSnapshot()); // 关联会话活性（M6 监控快照）
+        var search = useState('');       // 列表搜索（标题/#id/状态/人员，纯前端过滤）
+        var sortMode = useState('smart');// 列表排序（smart/deadline/pri/origin）
+        var replyRev = useState(0);      // 结果摘要存储版本号（回读保存后 bump 重读）
+        var replyBusy = useState(null);  // 正在回读的 linkKey（详情页 spinner 用）
 
         // 订阅常驻监控：会话 running/等你决策/完成未读 的变化即时反映到卡片徽标上
         useEffect(function () {
@@ -2003,6 +2582,9 @@
               loading[1](false);
               if (r && r.ok) {
                 mine[1](r.value);
+                // 列表快照落盘（按激活账号，paneCache.status 由先前的同步 effect 更新）：
+                // DSH 重启/面板重开时先渲染这份快照，禅道不可达时它就是兜底视图
+                writeMineSnapshot((paneCache.status && paneCache.status.activeId) || null, r.value);
                 status[1](function (s) { return s ? Object.assign({}, s, { cacheAt: r.value.at }) : s; });
               } else {
                 var m = (r && r.error && r.error.message) || '数据加载失败';
@@ -2017,9 +2599,15 @@
         }, [rpc]);
 
         useEffect(function () { loadStatus(); }, [loadStatus]);
-        // 激活账号变化（登录/切换/移除）→ 清旧数据重新拉取
+        // 激活账号变化（登录/切换/移除）→ 先用上次快照秒开（标 cached），再后台拉取替换
         useEffect(function () {
-          if (status[0] && status[0].configured) loadMine(false);
+          if (status[0] && status[0].configured) {
+            if (!mine[0]) {
+              var snap = readMineSnapshot(status[0].activeId);
+              if (snap && snap.cards.length) mine[1](snap);
+            }
+            loadMine(false);
+          }
         }, [status[0] && status[0].configured, status[0] && status[0].activeId]);
 
         // 「插入对话」（2026-10-25 改版）：与「处理」同款弹层选工作区/模型，确认后
@@ -2088,8 +2676,42 @@
           linkRev[1](function (v) { return v + 1; });
         }, []);
 
+        // 回读关联会话的最新 assistant 回复（activeAcct/card/link 全部由当前 render 的
+        // 调用方传入——useCallback([]) 闭包读不到最新 state，同 sendDispatch 的坑）
+        var fetchReplyNow = useCallback(function (activeAcct, card, link) {
+          if (!link || !link.sessionId) return;
+          var key = sessionLinkKey(activeAcct, card);
+          replyLastTry[key] = Date.now(); // 自动回读的失败冷却基准（60s 内不重试）
+          replyBusy[1](key);
+          Promise.resolve(fetchLastReply(link.sessionId, 6000)).then(function (r) {
+            replyBusy[1](null);
+            if (r && r.ok) {
+              saveReply(activeAcct, card, link.sessionId, r.text);
+              replyRev[1](function (v) { return v + 1; });
+            }
+          }, function () { replyBusy[1](null); });
+        }, []);
+
+        // 详情打开且该卡「已完成」→ 自动回读一次（TTL 内有缓存就不重复拉；其余状态手动刷新）
+        useEffect(function () {
+          var card = detailCard[0];
+          if (!card) return;
+          var key = sessionLinkKey(activeAcct, card);
+          var link = linkMap[key];
+          if (!link || replyBusy[0]) return;
+          var st = resolveLiveState(link, liveSnap[0], stateMap[key] || null);
+          if (!st || st.state !== 'done') return;
+          var cached = getReply(activeAcct, card);
+          // 只有「完整文本 + 未过期」才算新鲜；旧版截 500 字的缓存（无 full 字段）重拉一次
+          if (cached && cached.sessionId === link.sessionId && cached.full
+            && Date.now() - (Number(cached.at) || 0) < REPLY_TTL_MS) return;
+          if (Date.now() - (Number(replyLastTry[key]) || 0) < 60000) return; // 失败冷却
+          fetchReplyNow(activeAcct, card, link);
+        }, [detailCard[0], linkRev[0], liveSnap[0], replyRev[0]]);
+
         var logout = useCallback(function () {
           Promise.resolve(rpc('zentao.logout')).then(function () {
+            removeMineSnapshot(paneCache.status && paneCache.status.activeId); // 凭据没了，快照一并清
             mine[1](null); detailCard[1](null); status[1](null); adding[1](false); acctOpen[1](false);
             loadStatus();
           });
@@ -2104,10 +2726,11 @@
             .catch(function () { /* host 未就绪 */ });
         }, [rpc]);
 
-        // 移除指定账号（登出该账号、清它的本机凭据）
+        // 移除指定账号（登出该账号、清它的本机凭据与列表快照）
         var removeAccount = useCallback(function (a) {
           acctOpen[1](false);
           mine[1](null); detailCard[1](null); err[1](null); adding[1](false);
+          removeMineSnapshot(a && a.id);
           Promise.resolve(rpc('zentao.logout', { id: a.id }))
             .then(function (r) { if (r && r.ok) status[1](r.value); })
             .catch(function () { loadStatus(); });
@@ -2117,6 +2740,7 @@
         var configured = Boolean(st && st.configured);
         var cards = mine[0] ? mine[0].cards : [];
         var linkMap = useMemo(readLinkMap, [linkRev[0]]);
+        var replyMap = useMemo(readReplyMap, [linkRev[0], replyRev[0]]);
         // 会话标题/存活判定：sessions.list 快照（有 sessions 服务的 DSH 才有；拿不到 → unknown 态）
         var sessionRows = null;
         try {
@@ -2144,8 +2768,11 @@
           return info ? info.since : null;
         }
         var filtered = useMemo(function () {
-          return cards.filter(function (c) { return c.kind === tab[0]; });
-        }, [cards, tab[0]]);
+          var list = cards.filter(function (c) {
+            return c.kind === tab[0] && matchSearch(c, search[0]);
+          });
+          return sortCards(list, sortMode[0]);
+        }, [cards, tab[0], search[0], sortMode[0]]);
         var counts = useMemo(function () {
           var m = { task: 0, bug: 0, story: 0 };
           for (var i = 0; i < cards.length; i++) m[cards[i].kind] = (m[cards[i].kind] || 0) + 1;
@@ -2174,6 +2801,17 @@
                 h('button', { className: 'ztp-err-retry', type: 'button', onClick: function () { loadMine(true); } }, '重试')));
           }
           if (!filtered.length) {
+            var q = String(search[0] || '').trim();
+            if (q) {
+              return h('div', { className: 'ztp-empty' },
+                '没有匹配「' + q + '」的' + (KIND_LABEL[tab[0]] || '内容'),
+                h('br'),
+                h('button', {
+                  className: 'ztp-err-retry', type: 'button',
+                  style: { marginTop: '8px' },
+                  onClick: function () { search[1](''); },
+                }, '清空搜索'));
+            }
             return h('div', { className: 'ztp-empty' },
               '没有指派给你的' + (KIND_LABEL[tab[0]] || '内容'),
               h('br'),
@@ -2203,11 +2841,20 @@
               h('br'),
               h('span', { className: 'ztp-foot-dim' }, '支持拖拽到对话输入框'));
           }
+          var dCard = detailCard[0];
+          var dKey = sessionLinkKey(activeAcct, dCard);
+          var dLink = linkMap[dKey] || null;
+          var dReply = replyMap[dKey] || null;
           return h(DetailView, {
-            key: detailCard[0].kind + '-' + detailCard[0].id,
-            rpc: rpc, card: detailCard[0],
-            live: liveOf(detailCard[0]),
-            liveSince: liveSinceOf(detailCard[0]),
+            key: dCard.kind + '-' + dCard.id,
+            rpc: rpc, card: dCard,
+            live: liveOf(dCard),
+            liveSince: liveSinceOf(dCard),
+            replyLink: dLink,
+            // 只展示当前关联会话的缓存（再处理换会话后旧回复不显示）
+            reply: (dLink && dReply && dReply.sessionId === dLink.sessionId) ? dReply : null,
+            replyLoading: replyBusy[0] === dKey,
+            onRefreshReply: dLink ? function () { fetchReplyNow(activeAcct, dCard, dLink); } : null,
             onBack: function () { detailCard[1](null); },
           });
         }
@@ -2253,7 +2900,7 @@
               className: 'ztp-tool', type: 'button', title: '关闭', onClick: props.onClose,
             }, h(CloseIcon)) : null),
 
-          // 分段 tab 行（未配置/登录视图时不渲染，标题已在 mast 上）
+          // 分段 tab 行（未配置/登录视图时不渲染，标题已在 mast 上）；右侧搜索 + 排序
           configured ? h('div', { className: 'ztp-head' },
             h('div', { className: 'ztp-seg', role: 'tablist' }, KIND_ORDER.map(function (k) {
               return h('button', {
@@ -2262,12 +2909,30 @@
                 className: 'ztp-seg-btn',
                 onClick: function () { tab[1](k); detailCard[1](null); },
               }, KIND_LABEL[k], counts[k] ? h('span', { className: 'ztp-num' }, counts[k]) : null);
-            }))) : null,
+            })),
+            h('div', { className: 'ztp-grow' }),
+            h('input', {
+              className: 'ztp-search', type: 'text', value: search[0], spellCheck: false,
+              placeholder: '搜索' + (KIND_LABEL[tab[0]] ? ' ' + KIND_LABEL[tab[0]] : '') + ' / #ID',
+              title: '按标题、#ID、状态、创建人/指派人过滤当前列表（多词空格分隔，全部命中才显示）',
+              onChange: function (e) { search[1](e.target.value); },
+            }),
+            h('select', {
+              className: 'ztp-sort', value: sortMode[0], title: '排序方式',
+              'aria-label': '排序方式',
+              onChange: function (e) { sortMode[1](e.target.value); },
+            },
+              h('option', { value: 'smart' }, '智能排序'),
+              h('option', { value: 'deadline' }, '按截止'),
+              h('option', { value: 'pri' }, '按优先级'),
+              h('option', { value: 'origin' }, '默认顺序'))) : null,
 
           middle,
 
           configured && mine[0] ? h('div', { className: 'ztp-foot' },
-            h('span', null, '共 ' + cards.length + ' 条'),
+            h('span', null, '共 ' + (String(search[0] || '').trim()
+              ? filtered.length + '/' + (counts[tab[0]] || 0)
+              : cards.length) + ' 条'),
             h('span', { className: 'ztp-foot-dim' }, '·'),
             h('span', { className: 'ztp-foot-dim' },
               mine[0].cached ? new Date(mine[0].at).toLocaleTimeString() + ' 缓存' : '刚刚拉取'),
@@ -2459,6 +3124,31 @@
         resolveLiveState: resolveLiveState,
         cleanupStaleLinks: cleanupStaleLinks,
         LINK_GRACE_MS: LINK_GRACE_MS,
+        // 列表搜索 / 排序 / 截止强调
+        deadlineInfo: deadlineInfo,
+        overdueDays: overdueDays,
+        isFinalCard: isFinalCard,
+        sortCards: sortCards,
+        matchSearch: matchSearch,
+        searchHaystack: searchHaystack,
+        // 列表快照持久化（mine.v1）
+        readMineSnapshot: readMineSnapshot,
+        writeMineSnapshot: writeMineSnapshot,
+        removeMineSnapshot: removeMineSnapshot,
+        // 处理结果摘要回读（replies.v1 + 事件窗口）
+        readReplyMap: readReplyMap,
+        getReply: getReply,
+        saveReply: saveReply,
+        removeReply: removeReply,
+        assistantEntryText: assistantEntryText,
+        lastAssistantText: lastAssistantText,
+        fetchLastReply: fetchLastReply,
+        REPLY_MAX_CHARS: REPLY_MAX_CHARS,
+        REPLY_TTL_MS: REPLY_TTL_MS,
+        // Markdown 子集渲染（处理结果摘要用）
+        mdToBlocks: mdToBlocks,
+        mdInlineNodes: mdInlineNodes,
+        mdListTree: mdListTree,
       };
       return module.exports;
     },
