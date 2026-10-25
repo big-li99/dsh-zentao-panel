@@ -23,7 +23,7 @@
 | M1 host 插件（登录/取数/RPC） | ✅ 代码完成，测试全绿，**已装入 desktop profile 加载树**（重启 DSH Desktop 激活） |
 | M2 client 左侧栏全局面板 | ✅ 2026-10-24 已改为**左侧栏全局面板**入口（对齐 dsh-mnemon「记忆系统」：`sidebar.panellist` 图标行 + `main` keyed 面板，见 §5.1），样式走 DSH token 支持日/夜；注册契约有测试，待真机目视确认 |
 | M3 插入输入框 + 新会话下发 | ✅ 服务级 `setDraft` 真机可用；**描述里的截图改为真实图片附件**（`conversation.createDrafts` + `facade.addAttachments`，见 §4.1）；新会话下发待真机复验 |
-| M4 打磨 | 🔄 进行中：2026-10-24 修会话超时静默空白（超时信封识别→自动重登）+ 拉取失败 toast/错误视图；同日改「处理」为**弹层确认式**（先选工作区、接入模型与思考强度再下发，见 §4.2，待真机目视确认）；同日新增**关联会话 chip：处理过的卡片可看会话标题并一键跳回**（见 §4.3，待真机目视确认）；同日晚修复弹层卡「创建中」闭包 bug（§4.2 末）与下发时序优化（预取并行 + setDraft 提前）；同日更晚**入口改为左侧栏全局面板**（§5.1，原右栏「面板固定/跟随」三层修补随之删除——全局面板天然不随会话切换；待真机目视确认）；同日夜按用户要求改**「处理」不自动跳转新会话**（sessions.retain 后台保活替代 openSession，见 §4.2 末，待真机目视确认）；其余未做 |
+| M4 打磨 | 🔄 进行中：2026-10-24 修会话超时静默空白（超时信封识别→自动重登）+ 拉取失败 toast/错误视图；同日改「处理」为**弹层确认式**（先选工作区、接入模型与思考强度再下发，见 §4.2，待真机目视确认）；同日新增**关联会话 chip：处理过的卡片可看会话标题并一键跳回**（见 §4.3，待真机目视确认）；同日晚修复弹层卡「创建中」闭包 bug（§4.2 末）与下发时序优化（预取并行 + setDraft 提前）；同日更晚**入口改为左侧栏全局面板**（§5.1，原右栏「面板固定/跟随」三层修补随之删除——全局面板天然不随会话切换；待真机目视确认）；同日夜按用户要求改**「处理」不自动跳转新会话**（sessions.retain 后台保活替代 openSession，见 §4.2 末，待真机目视确认）；2026-10-25 按用户要求改**「插入对话」为弹层式新会话**（同「处理」弹层，但建会话后**自动跳转**过去、只填草稿**不自动发送**，见 §4.5，待真机目视确认）；其余未做 |
 | M5 多账号 | ✅ 2026-10-24 完成：schema v2（accounts[]+activeId，旧格式自动迁移）、每账号独立 client/cookie/缓存、账号菜单切换/添加/按账号移除；测试全绿（multi 25 项 + host 新增 4 项），待真机目视确认 |
 | M6 实时状态 | ✅ 2026-10-24 完成：**禅道卡片活性徽标（处理中/等你决策/已完成）+ 完成/等决策常驻提醒 toast（「去看看」跳回会话）**，信号来自 DSH 宿主 `uiSession.sessionStatus`（见 §4.4）。当天先做过一版「鲸鱼娘办公室」可视化面板（左侧栏第二面板 + 自绘 SVG 工位场景，角色参考 Neko3000/deepseek-whalechan），**用户看过后明确否决（「太垃圾」）已整体移除**——不要再做办公室/娘化角色类可视化；保留监控内核改为卡片上的活性体现。仅 client 改动，⌘R 生效 |
 
@@ -351,6 +351,18 @@ Neko3000/deepseek-whalechan 公开规范——**注意其图片素材不在开�
   fake store 用真 `new Map` 跨 vm context 传入没问题（`typeof statusMap.get === 'function'` 判定兼容
   Map 和普通对象）。
 
+### 4.5 「插入对话」改版：弹层 + 新会话 + 自动跳转不自动发（2026-10-25，用户要求）
+
+用户要求：「插入对话」改成和「处理」差不多（弹层选工作区/模型/思考强度、新建会话），但**会自动跳转到新对话**（与「处理」相反，§4.2 末）且**不会自动开始对话**（只填草稿不 submit）。仅 client 改动，⌘R 生效。
+
+- **实现拆分**：原 `dispatchToNewSession` 的前半段（create 与图片预取并行 → `retain('zentao-panel')` → `facade.setDraft`）抽成 **`createDraftSession(md, images, choice)`** 共用；`dispatchToNewSession` 行为不变（并行 selectModel+附件 → 模型 OK 才 submit → 3s release；被拒只留草稿）。
+- **新 `insertToNewSession(md, images, choice)`**：`createDraftSession` → 发起 selectModel + 附件注册（后台、不阻塞）→ **`uiWorkspace.openSession(sessionId)` 自动跳转** → 立即 `release()` 自己的 retain（openSession 内部 `retain(mainView)` 同步接管保活，refcount 不归零、scope 不 retire）→ **不 submit**。跳转前 setDraft 已先行——落在新会话时文本草稿已就位（§4.2「切过去空白 2 秒」的教训），图片附件稍后在附件 rail 陆续出现。
+- **跳转失败**（uiWorkspace 缺失/抛错）：草稿已在新会话里，**保留 retain**（release → retireScope 丢草稿），返回 `{ok:true, mode:'draft'}` 提示从会话列表打开。**前段失败**（sessions/conversation 缺失）→ `ok:false` → 上层 `sendDispatch` 降级 `insertToCurrentChat`（= 旧版「插入对话」行为：服务级 setDraft → DOM composer → 剪贴板，该函数保留）。
+- **弹层 `DispatchDialog` 加 `intent`**（'dispatch'|'insert'，缺省 dispatch）：标题「插入到新会话 …」、说明「将新建会话并跳转过去…不会自动发送」、确认按钮「新建并跳转」（dispatch 仍为「发送」）；`onSend(choice, data)` 的 data 带 intent。`sendDispatch` 按 intent 分流；sticky 过程 toast 文案区分（insert「正在新建会话并跳转…」）。
+- **「插入对话」成功也 `saveSessionLink`**：卡片 chip/活性徽标（§4.3/§4.4）照常工作——用户在新会话里手动发送后，卡片会亮「处理中」徽标。
+- **注意**：跳转 = openSession 内部 `selectPanel(null)` → 禅道面板卸载，面板 toast 随之消失——sticky 提示只覆盖跳转前的准备期，结果以用户落点（新会话里的草稿/附件）为准，别在跳转后再指望面板 toast。
+- 测试：`test/client.mjs` 新增 10 项（传工作区建会话不掺 cwd / 自动跳转 openSession / setDraft 先于 open / 不 submit / 跳转后释放 retain / selectModel 照常 / 附件照常 / 草稿文本就位 / uiWorkspace 缺失 draft 模式不释放 / conversation 缺失 unavailable+释放）。
+
 ### 5. DSH 插件体系（本机实测）
 
 - DSH Desktop **0.2.1-rc.2**，desktop profile，macOS
@@ -426,6 +438,8 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
 - **RPC 通道选型**：直接挂自己 inject 的 webServer（dsh-pocket v2 模式），回退 `ctx.connection.rpc.handle`；不复刻浏览器 cookie 认证（loopback-only 信任栅栏足够）
 - **缓存 60s**：面板展开不重复打禅道；「刷新」按钮带 `refresh:true` 强刷
 - **卡片统一模型**：`{kind, id, title, status, pri, severity, deadline, assignedTo, openedBy, execution, product, url, descBrief, images}`，Markdown 生成在 client 的 `cardToMarkdown()`
+- **详情只读改版（2026-10-25 用户要求）**：DetailView 移除全部按钮/链接（会话 chip、插入对话、处理、在禅道打开；「返回」仅在窄容器覆盖模式 <720px 保留），动作全部在左侧卡片上；禅道超链接迁到卡片顶行 #id 旁的小图标 `ztp-zlink`（stopPropagation + `draggable:false` 防链接拖拽覆盖卡片 Markdown 拖拽）。详情图片改为**真实截图画廊** `DetailImages`：`zentao.image` RPC 逐张取字节 → `data:<type>;base64` 直接渲染（DSH 会话 UI 渲染附件图片就是 data:/blob:，主窗口无 CSP 拦截；`--dsw-alias-link` token 已在 asar 源码确认存在），逐张独立落位、单张失败虚线占位、点击全屏放大再点关闭；描述文本用 `stripImageMarkers()` 去掉 `[图片：xxx]` 占位。渲染路径曾用一次性冒烟脚本验证（假 React + 可用 hooks，未入仓库），`test/client.mjs` 93 项不受影响
+- **「插入对话」改版（2026-10-25 用户要求，见 §4.5）**：从「插入当前会话输入框」改为弹层式新会话——同「处理」弹层选工作区/模型/思考强度，但建会话后 `uiWorkspace.openSession` **自动跳转**过去、只填草稿+附件**不自动发送**；共用 `createDraftSession` 前段（create 并行图片预取 → retain('zentao-panel') → setDraft），跳转后释放自己的 retain（mainView 接管保活）。失败降级链保留：新会话建不成/接口缺失 → `insertToCurrentChat` 插当前会话输入框（旧版行为）→ 剪贴板
 - **多账号（M5，2026-10-24）**：
   - 配置 schema v2：`config.json` = `{version:2, accounts:[{id, baseUrl, account, password(b64), cookies, savedAt}], activeId}`；
     **旧单账号格式读取时自动迁移**（`store.readConfig()` 里做，不在读取时改写文件），`readConfig()` 同时保留 `baseUrl/account/password/cookies` 兼容字段（取激活账号），smoke/host 测试不用改
@@ -444,7 +458,13 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
 - host 侧如果没激活，看桌面版日志（插件加载警告会打在启动输出里）
 - client 侧如果没出现：先 `node test/client.mjs` 确认注册契约没坏；再看 console 里 `[dsh-zentao-panel]` 前缀的报错；
   右缘悬浮按钮出现说明走的是兜底路径（没拿到 `main`/`sidebar.panellist` slot）
-- M3 插入对话：服务级 setDraft 优先（当前主视图会话），DOM 兜底 `[data-composer-input]`（contenteditable + execCommand insertText），再兜底剪贴板
+- M3 插入对话（2026-10-25 已改弹层式，见 §4.5）：点「插入对话」→ 同款 `DispatchDialog` 弹层
+  （标题「插入到新会话 …」、按钮「新建并跳转」）→ 确认后 `insertToNewSession`：建会话 → setDraft →
+  **`uiWorkspace.openSession` 自动跳转过去** → selectModel 与图片附件后台继续 → **不 submit**。
+  真机重点验证：① 确认后**自动切到新会话**且文本草稿已就位、图片稍后落附件 rail、**不会自动发送**；
+  ② 「处理」行为不变（后台发送、留在面板）；③ 手动发送后卡片亮「处理中」徽标（insert 也存会话关联）。
+  失败降级链保留：新会话建不成/接口缺失 → 插入**当前会话**输入框（服务级 setDraft 优先，DOM 兜底
+  `[data-composer-input]`，再兜底剪贴板）。**仅 client 改动，⌘R 即可生效，无需重装**
 - M3 图片附件（2026-10-23 新增，host 有改动 → **必须重启桌面版**才生效）：列表卡片或详情点「插入对话」→
   输入框上方应出现图片缩略图（附件 rail），发送后消息里是真实图片；「处理」新会话同理。
   若只看到文本 + toast「图片未能附加」，说明 host 还是旧代码（`zentao.image` 404）或禅道图片下载失败，看 console/日志
@@ -475,12 +495,14 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   ⚠️ 若已装 dsh-notify-me，它也会对同一事件发系统通知（两条是不同通道，可自行关掉其一）。
   **仅 client 改动，⌘R 生效**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-24 深夜复跑，93 项）：`test/client.mjs` 93 项（左侧栏注册契约 8 项：main/panellist
+- 测试现状（2026-10-25 复跑，103 项）：`test/client.mjs` 103 项（左侧栏注册契约 8 项：main/panellist
   配对注册、key=id 同值、label/order、不挂悬浮兜底；「处理」弹层上下文收集 + workspaceId 传参
   + selectModel 按会话设置 provider/model/思考强度 + 被拒时不自动发送 + 会话关联存取/三态视图/跳转清理
   + 下发时序优化 5 项 + **「处理」不跳转 4 项**（只 retain 不 openSession / retain 后 setDraft 先于
   drafts / facade 缺失返回 unavailable / 降级释放 retain）；
-  M6 实时状态 22 项，见 §4.4）、
+  **「插入对话」改版 10 项**（传工作区建会话 / 自动跳转 / setDraft 先于 open / 不 submit /
+  跳转后释放 retain / selectModel 照常 / 附件照常 / 草稿就位 / uiWorkspace 缺失不释放 / conversation
+  缺失降级+释放，见 §4.5）；M6 实时状态 22 项，见 §4.4）、
   `test/multi.mjs` 25 项、`test/protocol.mjs` 9 项全绿；`test/host.mjs` 19 项（真机 20 张卡片：task 2 / bug 8 / story 10）、
   `test/smoke.mjs`（含 `extractImageRefs` / `fetchImage` 真图下载）需真实禅道凭据。
   注意：沙箱会话里跑 host.mjs 读不了 `~/.dsh/zentao-panel/config.json`（EPERM），需把凭据文件拷进

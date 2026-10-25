@@ -156,9 +156,10 @@
         '.ztp-back{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;height:24px;padding:0 6px 0 2px;border-radius:var(--dsw-radius-sm);cursor:pointer;display:inline-flex;align-items:center;gap:3px;}',
         '.ztp-back:hover{color:var(--dsw-alias-label-primary);}',
         '.ztp-back svg{width:13px;height:13px;}',
-        '.ztp-link{margin-left:auto;color:var(--dsw-alias-link);text-decoration:none;font-size:12px;display:inline-flex;align-items:center;gap:3px;}',
-        '.ztp-link:hover{text-decoration:underline;}',
-        '.ztp-link svg{width:12px;height:12px;}',
+        // 卡片 #id 旁的禅道外链小图标（详情里不再放链接/按钮，超链接迁到卡片上）
+        '.ztp-zlink{display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;border-radius:var(--dsw-radius-sm);color:var(--dsw-alias-label-tertiary);flex:none;cursor:pointer;}',
+        '.ztp-zlink:hover{color:var(--dsw-alias-link);background:var(--dsw-alias-interactive-bg-hover);}',
+        '.ztp-zlink svg{width:10.5px;height:10.5px;}',
         '.ztp-panel-card{border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-1);padding:14px 16px;}',
         '.ztp-detail-title{margin-top:6px;font-size:14px;line-height:1.5;font-weight:600;color:var(--dsw-alias-label-primary);word-break:break-word;}',
         '.ztp-kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin-top:10px;font-size:12px;color:var(--dsw-alias-label-secondary);}',
@@ -166,7 +167,15 @@
         '.ztp-kv dd{margin:0;word-break:break-word;}',
         '.ztp-desc{margin-top:10px;padding:10px 12px;border-radius:var(--dsw-radius-md);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);font-size:12.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word;}',
         '.ztp-section{font-size:11.5px;color:var(--dsw-alias-label-tertiary);margin:14px 2px 6px;}',
-        '.ztp-hint{margin:8px 0 0;font-size:11.5px;line-height:1.55;color:var(--dsw-alias-label-tertiary);}',
+        // 详情截图画廊：host 归一后的图片引用 → zentao.image RPC 取字节 → data: URL 渲染
+        // （DSH 会话 UI 渲染附件图片就是 data:/blob: 两手，无 CSP 拦截）；点击放大
+        '.ztp-imgs{display:flex;flex-direction:column;gap:8px;}',
+        '.ztp-img-fig{margin:0;}',
+        '.ztp-img-fig img{display:block;max-width:100%;max-height:420px;width:auto;height:auto;border-radius:var(--dsw-radius-md);border:.5px solid var(--dsw-alias-border-l3);cursor:zoom-in;}',
+        '.ztp-img-loading{height:120px;border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-skeleton);border:.5px solid var(--dsw-alias-border-l1);display:flex;align-items:center;justify-content:center;}',
+        '.ztp-img-failed{height:56px;border-radius:var(--dsw-radius-md);border:.5px dashed var(--dsw-alias-border-l3);display:flex;align-items:center;justify-content:center;color:var(--dsw-alias-label-tertiary);font-size:11.5px;}',
+        '.ztp-img-zoom{position:fixed;inset:0;z-index:2147482100;background:color-mix(in srgb,#000 72%,transparent);display:flex;align-items:center;justify-content:center;cursor:zoom-out;}',
+        '.ztp-img-zoom img{max-width:94vw;max-height:94vh;border-radius:var(--dsw-radius-md);box-shadow:var(--dsw-shadow-lv3);}',
 
         // 登录
         '.ztp-fill{flex:1;min-height:0;overflow:auto;display:flex;flex-direction:column;}',
@@ -769,22 +778,17 @@
       }
 
       /**
-       * M3「处理」：新会话自动下发。时序（2026-10-24 优化：消除「切过去空白约 2 秒」）：
-       *   点击发送瞬间：prefetchImageBytes 与 sessions.create 并行（host 拉禅道图最慢，提前开始）
-       *   → create 完成：sessions.retain 后台保活（不切视图）+ 立即 facade.setDraft
-       *   → selectModel 与附件注册并行等待（互不阻塞）
-       *   → 全部就绪才 submit（留 250ms 等 composer 挂载）。
-       * 2026-10-24 用户要求「处理后不要自动跳转新会话」：不再调 uiWorkspace.openSession
-       * （其内部 replaceMain + selectPanel(null) 是跳转来源），改用
-       * sessions.retain(id, { source: 'zentao-panel' })——scope 照常可用（facade 填草稿/
-       * 附件/submit 都是服务级，不需要视图挂载），用户留在禅道面板，靠卡片会话 chip /
-       * 活性徽标（M6）跳回。dispatched 模式 submit 完成后 3s release；draft 模式保留
-       * retain——release 会让 scope retire，未发送的草稿 store 可能随之丢失。
-       * choice 由「处理」弹层给出：{workspaceId?|cwd?, model?: {provider, model, reasoningEffort?}}；
+       * 新会话公共前段（「处理」与「插入对话」共用，2026-10-25 抽出）：
+       *   点击确认瞬间：prefetchImageBytes 与 sessions.create 并行（host 拉禅道图最慢，提前开始）
+       *   → create 完成：sessions.retain 后台保活（不切视图）+ 立即 facade.setDraft。
+       * 成功返回 {ok:true, sessionId, target, retainRef, prefetch}；失败返回
+       * {ok:false, mode:'unavailable'|'failed', message}——facade 不可用时立即释放
+       * retain（新会话是空的，不留悬挂连接），交上层降级插入当前会话 composer；
+       * 再失败 → 剪贴板。selectModel/附件/submit 的时序两种流程不同，不在这一段做。
+       * choice 由弹层给出：{workspaceId?|cwd?, model?: {provider, model, reasoningEffort?}}；
        * 缺省时继承当前会话目录、模型走默认。
-       * 任一环失败 → 降级插入当前会话 composer；再失败 → 剪贴板。
        */
-      function dispatchToNewSession(md, images, choice) {
+      function createDraftSession(md, images, choice) {
         var sessions = lookupService('sessions');
         var conversation = lookupService('conversation');
         if (!sessions || typeof sessions.create !== 'function') {
@@ -813,7 +817,7 @@
             if (!sessionId) throw new Error('session.create 未返回会话 id');
             var retainRef = null;
             try {
-              // 只 retain 不切视图：scope(id) 依赖 retain 才有值；release 见 dispatched/draft 分支
+              // 只 retain 不切视图：scope(id) 依赖 retain 才有值；释放时机由调用方决定
               if (typeof sessions.retain === 'function') retainRef = sessions.retain(sessionId, { source: 'zentao-panel' });
             } catch (e) { retainRef = null; }
             var scope = null;
@@ -824,28 +828,7 @@
               if (facade && typeof facade.setDraft === 'function') {
                 var target = { sessionId: sessionId, scope: scope, facade: facade, conversation: conversation };
                 facade.setDraft(md);
-                // 模型设置与附件注册并行等待（成功才自动发送；模型显式失败则只填草稿，交用户确认）
-                var modelStep = (choice && choice.model)
-                  ? selectModelFor(sessionId, choice.model)
-                  : Promise.resolve({ ok: true });
-                return Promise.all([modelStep, attachImagesToDraft(images, target, prefetch)]).then(function (rs) {
-                  var mres = rs[0], att = rs[1];
-                  if (mres && mres.ok === false) {
-                    // 只填了草稿、没 submit：保留 retain（release 会 retireScope，草稿/附件随之丢）
-                    return { ok: true, mode: 'draft', sessionId: sessionId,
-                      message: '已新建会话并填入草稿（模型设置失败：' + mres.message + '），点卡片标签跳回确认发送' };
-                  }
-                  setTimeout(function () {
-                    try { if (typeof facade.submit === 'function') facade.submit(); } catch (e) { /* 已填草稿，发送交给用户 */ }
-                    // turn 已交给宿主跑，3s 后释放后台 retain（draft 模式不释放，见上）
-                    setTimeout(function () {
-                      try { if (retainRef && typeof retainRef.release === 'function') retainRef.release(); } catch (e) { /* 已被释放 */ }
-                    }, 3000);
-                  }, 250);
-                  var suffix = att && att.ok ? '（含 ' + att.count + ' 张图片）' : '';
-                  return { ok: true, mode: 'dispatched', sessionId: sessionId,
-                    message: '已在后台新会话发送任务背景' + suffix + '，卡片标签可跳回' };
-                });
+                return { ok: true, sessionId: sessionId, target: target, retainRef: retainRef, prefetch: prefetch };
               }
             }
             // facade 不可用（conversation 服务缺失 / retain 没拿到 scope）：新会话里什么都没填，
@@ -860,6 +843,79 @@
           .catch(function (err) {
             return { ok: false, mode: 'failed', message: '新会话创建失败：' + (err && err.message ? err.message : String(err)) };
           });
+      }
+
+      /**
+       * M3「处理」：新会话自动下发（2026-10-24 用户要求**不自动跳转**——不调
+       * uiWorkspace.openSession，其内部 replaceMain + selectPanel(null) 是跳转来源；
+       * 用户留在禅道面板，靠卡片会话 chip / 活性徽标（M6）跳回）。
+       * createDraftSession 之后：selectModel 与附件注册并行等待（互不阻塞）→
+       * 模型设置成功才 submit（留 250ms 等 composer 挂载）→ 3s 释放后台 retain；
+       * 模型显式失败（ok:false）只填草稿不代发、保留 retain——release 会让 scope
+       * retire，未发送的草稿 store 可能随之丢失。
+       */
+      function dispatchToNewSession(md, images, choice) {
+        return createDraftSession(md, images, choice).then(function (p) {
+          if (!p.ok) return p;
+          var facade = p.target.facade;
+          // 模型设置与附件注册并行等待（成功才自动发送；模型显式失败则只填草稿，交用户确认）
+          var modelStep = (choice && choice.model)
+            ? selectModelFor(p.sessionId, choice.model)
+            : Promise.resolve({ ok: true });
+          return Promise.all([modelStep, attachImagesToDraft(images, p.target, p.prefetch)]).then(function (rs) {
+            var mres = rs[0], att = rs[1];
+            if (mres && mres.ok === false) {
+              // 只填了草稿、没 submit：保留 retain（release 会 retireScope，草稿/附件随之丢）
+              return { ok: true, mode: 'draft', sessionId: p.sessionId,
+                message: '已新建会话并填入草稿（模型设置失败：' + mres.message + '），点卡片标签跳回确认发送' };
+            }
+            setTimeout(function () {
+              try { if (typeof facade.submit === 'function') facade.submit(); } catch (e) { /* 已填草稿，发送交给用户 */ }
+              // turn 已交给宿主跑，3s 后释放后台 retain（draft 模式不释放，见上）
+              setTimeout(function () {
+                try { if (p.retainRef && typeof p.retainRef.release === 'function') p.retainRef.release(); } catch (e) { /* 已被释放 */ }
+              }, 3000);
+            }, 250);
+            var suffix = att && att.ok ? '（含 ' + att.count + ' 张图片）' : '';
+            return { ok: true, mode: 'dispatched', sessionId: p.sessionId,
+              message: '已在后台新会话发送任务背景' + suffix + '，卡片标签可跳回' };
+          });
+        });
+      }
+
+      /**
+       * 「插入对话」（2026-10-25 用户要求改版）：与「处理」同款弹层选好工作区/
+       * 模型后走这里——新建会话、**自动跳转过去**（uiWorkspace.openSession），
+       * 但只填草稿+图片附件，**不自动发送**。
+       * 时序：createDraftSession（create 与图片预取并行、setDraft 先行，跳过去
+       * 不空白）→ 发起 selectModel 与附件注册后立即 openSession 跳转（openSession
+       * 内部 retain(mainView) 同步接管保活，随即释放自己的后台 retain）→ 附件在
+       * 新会话里陆续落位。selectModelFor/attachImagesToDraft 均自带兜底不 reject。
+       * 跳转失败（uiWorkspace 缺失/抛错）：草稿已填进新会话，保留 retain 返回
+       * draft 模式（release 会让 scope retire、丢未发送草稿），从会话列表/卡片
+       * chip 找回。前段失败 → ok:false 交上层降级插入当前会话输入框（旧版行为）。
+       */
+      function insertToNewSession(md, images, choice) {
+        return createDraftSession(md, images, choice).then(function (p) {
+          if (!p.ok) return p;
+          // 模型与附件后台进行，不阻塞跳转（不自动发送，模型没生效也无代发风险）
+          if (choice && choice.model) selectModelFor(p.sessionId, choice.model);
+          attachImagesToDraft(images, p.target, p.prefetch);
+          var ws = null;
+          try { ws = lookupService('uiWorkspace'); } catch (e) { ws = null; }
+          var jumped = Boolean(ws && typeof ws.openSession === 'function');
+          if (jumped) {
+            try { ws.openSession(p.sessionId); } catch (e) { jumped = false; }
+          }
+          if (jumped) {
+            // mainView 已接管保活 → 释放自己的后台 retain
+            try { if (p.retainRef && typeof p.retainRef.release === 'function') p.retainRef.release(); } catch (e) { /* 已被释放 */ }
+            return { ok: true, mode: 'jumped', sessionId: p.sessionId,
+              message: '已新建会话并跳转，草稿已填入（不自动发送）' };
+          }
+          return { ok: true, mode: 'draft', sessionId: p.sessionId,
+            message: '已新建会话并填入草稿（未能自动跳转，可从会话列表打开确认发送）' };
+        });
       }
 
       // ───────────────── 会话关联（「处理」后卡片可跳回该会话）─────────────────
@@ -1296,6 +1352,12 @@
             h(KindTag, { kind: c.kind }),
             live ? h(LiveBadge, { state: live }) : null,
             h('span', { className: 'ztp-id' }, '#' + c.id),
+            // 禅道超链接在卡片上（详情里不再放链接/按钮）；draggable 关掉避免链接拖拽覆盖卡片 Markdown 拖拽
+            c.url ? h('a', {
+              className: 'ztp-zlink', href: c.url, target: '_blank', rel: 'noreferrer', draggable: false,
+              title: '在禅道打开' + (KIND_LABEL[c.kind] || c.kind) + ' #' + c.id,
+              onClick: function (e) { e.stopPropagation(); },
+            }, h(LinkIcon)) : null,
             h('span', { className: 'ztp-top-meta' },
               h(StatusChip, { status: c.status }),
               c.pri != null ? h('span', { className: 'ztp-pri p' + c.pri }, 'P' + c.pri) : null,
@@ -1315,6 +1377,7 @@
               props.linkView.state === 'dead' ? '会话已删除' : props.linkView.title)) : null,
             h('button', {
               className: 'ztp-btn', type: 'button',
+              title: '选择工作区与模型，新建会话填入草稿并跳转（不自动发送）',
               onClick: function (e) { e.stopPropagation(); props.onInsert(c, null); },
             }, '插入对话'),
             h('button', {
@@ -1343,12 +1406,13 @@
 
         var d = detail[0] || {};
         var urgent = isUrgent(card.deadline || d.deadline);
-        var desc = d.desc || card.descBrief || '';
+        // 图片以真实截图渲染（DetailImages），文本里的 [图片：xxx] 占位标记随之去掉
+        var desc = stripImageMarkers(d.desc || card.descBrief || '');
+        var imgs = imagesOf(card, detail[0]);
         return h('div', null,
+          // 详情纯只读：链接/按钮都在左侧卡片上；返回按钮仅在窄容器覆盖模式下可见
           h('div', { className: 'ztp-detail-bar' },
-            h('button', { className: 'ztp-back', type: 'button', onClick: props.onBack }, h(BackIcon), '返回'),
-            h('a', { className: 'ztp-link', href: card.url, target: '_blank', rel: 'noreferrer' },
-              '在禅道打开', h(LinkIcon))),
+            h('button', { className: 'ztp-back', type: 'button', onClick: props.onBack }, h(BackIcon), '返回')),
 
           h('div', { className: 'ztp-panel-card ztp-k-' + card.kind
               + (props.live === 'ask' ? ' ztp-live-ask' : props.live === 'done' ? ' ztp-live-done' : '') },
@@ -1369,31 +1433,68 @@
               d.type ? h('dt', null, '类型') : null, d.type ? h('dd', null, String(d.type)) : null,
               d.stage ? h('dt', null, '阶段') : null, d.stage ? h('dd', null, String(d.stage)) : null,
               d.estStarted ? h('dt', null, '预计开始') : null, d.estStarted ? h('dd', null, fmtDate(d.estStarted)) : null,
-              d.resolvedBuild ? h('dt', null, '解决版本') : null, d.resolvedBuild ? h('dd', null, String(d.resolvedBuild)) : null),
-
-            h('div', { className: 'ztp-acts', style: { marginTop: '12px' } },
-              props.linkView ? h('button', {
-                className: 'ztp-slink' + (props.linkView.state === 'dead' ? ' dead' : ''),
-                type: 'button',
-                title: props.linkView.state === 'live'
-                  ? fmtLinkAt(props.linkView.at) + ' 处理 · 点击跳转到该会话'
-                  : (props.linkView.state === 'dead' ? '关联的会话已删除，点击清除标记' : '点击跳转到处理时创建的会话'),
-                onClick: function (e) { e.stopPropagation(); props.onOpenSession(card); },
-              }, h(SlinkDot, { state: props.live }), h(ChatIcon), h('span', { className: 'ztp-slink-t' },
-                props.linkView.state === 'dead' ? '会话已删除' : props.linkView.title)) : null,
-              h('button', { className: 'ztp-btn', type: 'button', onClick: function () { props.onInsert(card, detail[0]); } }, '插入对话'),
-              h('button', { className: 'ztp-btn primary', type: 'button', title: '选择工作区与模型，新建会话发送任务背景', onClick: function () { props.onDispatch(card, detail[0]); } }, '处理'))),
+              d.resolvedBuild ? h('dt', null, '解决版本') : null, d.resolvedBuild ? h('dd', null, String(d.resolvedBuild)) : null)),
 
           err[0] ? h('div', { className: 'ztp-err' }, err[0]) : null,
-
-          (d.images && d.images.length)
-            ? h('div', { className: 'ztp-hint' }, '描述含 ' + d.images.length + ' 张图片，插入对话时会作为真实图片附件一并带上')
-            : null,
 
           h('div', { className: 'ztp-section' }, card.kind === 'bug' ? '重现步骤 / 描述' : '描述'),
           desc
             ? h('div', { className: 'ztp-desc' }, desc)
             : h('div', { className: 'ztp-desc', style: { color: 'var(--dsw-alias-label-tertiary)' } }, detail[0] ? '无描述' : '加载中…'),
+
+          imgs.length ? h('div', { className: 'ztp-section' }, '截图（' + imgs.length + '）') : null,
+          h(DetailImages, { images: imgs }),
+        );
+      }
+
+      /**
+       * 详情截图：desc 里的 <img> 已被 host 归一成可下载地址（images[].url），
+       * 这里逐张走 zentao.image RPC 取字节，用 data: URL 直接渲染（DSH 会话 UI
+       * 渲染附件图片用的就是 data:/blob:，主窗口无 CSP 拦截）。
+       * 逐张独立请求独立落位：单张失败只占位提示不拦其它；点击放大，再点关闭。
+       */
+      function DetailImages(props) {
+        var images = (props.images || []).slice(0, 20);
+        var key = images.map(function (x) { return x.url; }).join('|');
+        var rows = useState([]);
+        var zoom = useState(null);
+        useEffect(function () {
+          var alive = true;
+          var init = key ? key.split('|').map(function (url) { return { url: url, src: null, failed: false }; }) : [];
+          rows[1](init);
+          init.forEach(function (row, i) {
+            var mark = function (patch) {
+              if (!alive) return;
+              rows[1](function (cur) {
+                // key 已切换（url 对不上）或本张已有结果 → 忽略迟到的回调
+                if (!cur[i] || cur[i].url !== row.url || cur[i].src || cur[i].failed) return cur;
+                var next = cur.slice();
+                next[i] = Object.assign({}, cur[i], patch);
+                return next;
+              });
+            };
+            rpcCall('zentao.image', { url: row.url }).then(function (r) {
+              var v = r && r.ok && r.value;
+              mark(v && v.base64 ? { src: 'data:' + (v.mediaType || 'image/png') + ';base64,' + v.base64 } : { failed: true });
+            }, function () { mark({ failed: true }); });
+          });
+          return function () { alive = false; };
+        }, [key]);
+        if (!key) return null;
+        return h('div', { className: 'ztp-imgs' },
+          rows[0].map(function (row, i) {
+            return h('figure', { key: row.url + '#' + i, className: 'ztp-img-fig' },
+              row.src
+                ? h('img', {
+                    src: row.src, alt: (images[i] && images[i].name) || '截图', loading: 'lazy', draggable: false,
+                    onClick: function () { zoom[1](row.src); },
+                  })
+                : (row.failed
+                  ? h('div', { className: 'ztp-img-failed' }, '图片加载失败，可在禅道查看')
+                  : h('div', { className: 'ztp-img-loading' }, h('span', { className: 'ztp-spin' }))));
+          }),
+          zoom[0] ? h('div', { className: 'ztp-img-zoom', onClick: function () { zoom[1](null); } },
+            h('img', { src: zoom[0], alt: '' })) : null,
         );
       }
 
@@ -1460,11 +1561,14 @@
       }
 
       /**
-       * 「处理」确认弹层：先选工作区与模型（provider/模型 + 思考强度），再新建会话自动下发。
-       * 服务不可用/列表为空时对应下拉退化为单项说明，仍可直接发送（走默认）。
+       * 「处理」/「插入对话」确认弹层：先选工作区与模型（provider/模型 + 思考强度）。
+       * intent='dispatch'（默认）：新建会话后台自动发送、不跳转；
+       * intent='insert'：新建会话并跳转过去、只填草稿不自动发送（2026-10-25 改版）。
+       * 服务不可用/列表为空时对应下拉退化为单项说明，仍可直接确认（走默认）。
        */
       function DispatchDialog(props) {
         var card = props.card;
+        var insert = props.intent === 'insert';
         var ctx0 = useState(null);   // collectDispatchContext 结果
         var wsSel = useState(null);  // 选中 workspaceId | '__cwd__' | null
         var modelKey = useState(null); // 选中 'provider\u0000model' | null
@@ -1519,10 +1623,10 @@
             choice.model = { provider: modelKey[0].slice(0, sep), model: modelKey[0].slice(sep + 1) };
             if (effortSel[0]) choice.model.reasoningEffort = effortSel[0];
           }
-          // 数据随调用回传（card/md/images/activeAcct 来自当前 render 的 props），
+          // 数据随调用回传（card/md/images/activeAcct/intent 来自当前 render 的 props），
           // 接收方 useCallback 闭包里读不到最新 state（见 sendDispatch 注释）
           try {
-            props.onSend(choice, { card: card, md: props.md, images: props.images, activeAcct: props.activeAcct });
+            props.onSend(choice, { card: card, md: props.md, images: props.images, activeAcct: props.activeAcct, intent: props.intent || 'dispatch' });
           } catch (e) {
             busy[1](false); // 发起本身失败 → 至少让弹层可以再操作/关闭
             try { console.error('[dsh-zentao-panel] dispatch send failed', e); } catch (e2) { /* 忽略 */ }
@@ -1538,7 +1642,7 @@
         return h('div', { className: 'ztp-disp-layer', onClick: close },
           h('div', { className: 'ztp-disp-pop', onClick: function (e) { e.stopPropagation(); } },
             h('div', { className: 'ztp-disp-title' },
-              '处理 ' + (KIND_LABEL[card.kind] || card.kind) + ' #' + card.id),
+              (insert ? '插入到新会话 ' : '处理 ') + (KIND_LABEL[card.kind] || card.kind) + ' #' + card.id),
             h('div', { className: 'ztp-disp-sub' }, card.title || ''),
 
             h('label', { className: 'ztp-label' }, '工作区'),
@@ -1590,12 +1694,14 @@
               })) : null,
 
             h('div', { className: 'ztp-disp-note' },
-              '将在新会话发送任务背景' + (props.images && props.images.length ? '，含 ' + props.images.length + ' 张图片附件' : '') + '。'),
+              insert
+                ? '将新建会话并跳转过去，任务背景' + (props.images && props.images.length ? '与 ' + props.images.length + ' 张图片' : '') + '填入草稿，不会自动发送。'
+                : '将在新会话发送任务背景' + (props.images && props.images.length ? '，含 ' + props.images.length + ' 张图片附件' : '') + '。'),
 
             h('div', { className: 'ztp-disp-acts' },
               h('button', { className: 'ztp-btn', type: 'button', disabled: busy[0], onClick: close }, '取消'),
               h('button', { className: 'ztp-btn primary', type: 'button', disabled: busy[0], onClick: send },
-                busy[0] ? '创建中…' : '发送'))));
+                busy[0] ? '创建中…' : (insert ? '新建并跳转' : '发送')))));
       }
 
       function LoginView(props) {
@@ -1676,7 +1782,7 @@
         var toast = useState(null);
         var acctOpen = useState(false);  // 账号管理弹出层
         var adding = useState(false);    // 已有账号时再添加一个（LoginView 复用）
-        var dispatch = useState(null);   // 「处理」确认弹层：{card, md, images}
+        var dispatch = useState(null);   // 「处理」/「插入对话」确认弹层：{card, md, images, intent}
         var linkRev = useState(0);       // 会话关联存储版本号（保存/清除后 bump 重读）
         var liveSnap = useState(watchGetSnapshot()); // 关联会话活性（M6 监控快照）
 
@@ -1744,42 +1850,42 @@
           if (status[0] && status[0].configured) loadMine(false);
         }, [status[0] && status[0].configured, status[0] && status[0].activeId]);
 
-        // 插入到输入框：服务级 setDraft（+ 真实图片附件）→ DOM composer → 剪贴板
+        // 「插入对话」（2026-10-25 改版）：与「处理」同款弹层选工作区/模型，确认后
+        // 新建会话、自动跳转过去、只填草稿不发送；失败降级插入当前会话输入框（旧版行为）
         var insertToChat = useCallback(function (card, detail) {
-          var md = cardToMarkdown(card, detail);
-          var images = imagesOf(card, detail);
-          insertToCurrentChat(md, images).then(function (r) {
-            if (r.mode === 'clipboard') {
-              toast[1](r.failed ? '复制失败，请手动复制' : '已复制 Markdown，可粘贴到输入框');
-            } else if (r.attached) {
-              toast[1]('已插入对话输入框（含 ' + r.attached + ' 张图片）');
-            } else if (images.length) {
-              toast[1]('已插入对话输入框（图片未能附加，可在禅道查看）');
-            } else {
-              toast[1]('已插入对话输入框');
-            }
-          });
+          dispatch[1]({ card: card, md: cardToMarkdown(card, detail), images: imagesOf(card, detail), intent: 'insert' });
         }, []);
 
-        // 「处理」：先弹确认层选工作区与模型，确认后新建会话下发（失败降级插入当前会话 → 剪贴板）
+        // 「处理」：弹确认层选工作区与模型，确认后新建会话后台自动发送、不跳转（失败降级 → 剪贴板）
         var dispatchCard = useCallback(function (card, detail) {
-          dispatch[1]({ card: card, md: cardToMarkdown(card, detail), images: imagesOf(card, detail) });
+          dispatch[1]({ card: card, md: cardToMarkdown(card, detail), images: imagesOf(card, detail), intent: 'dispatch' });
         }, []);
 
-        // 弹层「发送」：按所选工作区/模型建会话（choice 见 dispatchToNewSession）。
+        // 弹层确认：intent='dispatch' 走 dispatchToNewSession（后台自动发送、不跳转），
+        // intent='insert' 走 insertToNewSession（新建会话、跳转过去、只填草稿不发送）；
+        // choice 即所选工作区/模型。
         // ⚠️ 数据（card/md/images/activeAcct）由弹层回传：useCallback([]) 的闭包捕获
         // 初次 render 的作用域，在里面读 dispatch[0]/status[0] 拿到的永远是旧值
         // （2026-10-24 真机踩坑：dispatch[0] 恒为 null → sendDispatch 直接 return，
         //  弹层永远卡在「创建中…」）。setState setter 引用稳定，可以直接调。
         var sendDispatch = useCallback(function (choice, d) {
           if (!d || !d.card) return;
+          var insert = d.intent === 'insert';
           dispatch[1](null);
           // 过程提示（sticky）：图片还在预取/注册、模型还在设置，让用户知道在等什么；
-          // 完成后由下方结果 toast（非 sticky，自动消失）替换
-          toast[1]((d.images && d.images.length)
-            ? { text: '正在准备 ' + d.images.length + ' 张图片附件，随后自动发送…', sticky: true }
-            : { text: '正在新建会话…', sticky: true });
-          Promise.resolve(dispatchToNewSession(d.md || '', d.images || [], choice)).then(function (r) {
+          // 完成后由下方结果 toast（非 sticky，自动消失）替换。「插入对话」跳转后
+          // 面板卸载、toast 随之消失，提示只覆盖跳转前的准备期，无害。
+          toast[1](insert
+            ? { text: (d.images && d.images.length
+              ? '正在新建会话（准备 ' + d.images.length + ' 张图片附件）…'
+              : '正在新建会话并跳转…'), sticky: true }
+            : ((d.images && d.images.length)
+              ? { text: '正在准备 ' + d.images.length + ' 张图片附件，随后自动发送…', sticky: true }
+              : { text: '正在新建会话…', sticky: true }));
+          var run = insert
+            ? insertToNewSession(d.md || '', d.images || [], choice)
+            : dispatchToNewSession(d.md || '', d.images || [], choice);
+          Promise.resolve(run).then(function (r) {
             if (r && r.ok) {
               // 新会话建好即记录关联（draft 模式也算：内容已填进那个会话）
               if (r.sessionId) {
@@ -1918,11 +2024,8 @@
           return h(DetailView, {
             key: detailCard[0].kind + '-' + detailCard[0].id,
             rpc: rpc, card: detailCard[0],
-            linkView: linkViewOf(detailCard[0]),
             live: liveOf(detailCard[0]),
-            onOpenSession: function (c) { openLinkedSession(c, activeAcct); },
             onBack: function () { detailCard[1](null); },
-            onInsert: insertToChat, onDispatch: dispatchCard,
           });
         }
 
@@ -2000,6 +2103,7 @@
             card: dispatch[0].card,
             images: dispatch[0].images,
             md: dispatch[0].md,
+            intent: dispatch[0].intent,
             activeAcct: activeAcct,
             onSend: sendDispatch,
             onClose: function () { dispatch[1](null); },
@@ -2142,6 +2246,7 @@
         bytesFromBase64: bytesFromBase64,
         collectDispatchContext: collectDispatchContext,
         dispatchToNewSession: dispatchToNewSession,
+        insertToNewSession: insertToNewSession,
         sessionLinkKey: sessionLinkKey,
         parseLinkKey: parseLinkKey,
         readLinkMap: readLinkMap,

@@ -294,6 +294,76 @@ dr = await mod._test.dispatchToNewSession('## 卡片', []);
 check('dispatchToNewSession 未选择时保持旧行为（继承当前 cwd、不动模型）',
   created && created.cwd === '/tmp/proj' && selectedModel === null && dr.mode === 'dispatched');
 
+// ── 「插入对话」（2026-10-25 改版）：与「处理」同款弹层，但新建会话后自动跳转、只填草稿不发送 ──
+let insSubmitted = 0, insReleased = 0, insOpened = null, insCreated = null, insSelected = null;
+const insLog = [];
+const insFacade = {
+  draft: '',
+  setDraft(t) { insLog.push('setDraft'); this.draft = t; },
+  focus() {}, submit() { insSubmitted++; insLog.push('submit'); },
+  addAttachments() { insLog.push('attach'); return true; },
+};
+const insConversation = {
+  input: { for: () => insFacade },
+  createDrafts(sid, files) { insLog.push('drafts'); return files.map((f, i) => ({ id: 'd' + (i + 1), kind: 'image' })); },
+};
+ctx.get = function (name) {
+  if (name === 'sessions') return {
+    list: { getSnapshot: () => ({ current: 's1', byId: { s1: { cwd: '/tmp/proj' } } }) },
+    scope: () => ({}),
+    create(opts) { insCreated = opts; return 's-ins'; },
+    retain(id, opts) { return { sessionId: id, opts, release() { insReleased++; } }; },
+  };
+  if (name === 'conversation') return insConversation;
+  if (name === 'uiWorkspace') return { openSession(id) { insOpened = id; insLog.push('open'); } };
+  if (name === 'remote.session') return {
+    selectModel: async (req) => { insSelected = req; return { ok: true, value: { selected: {} } }; },
+  };
+  return undefined;
+};
+const ir = await mod._test.insertToNewSession('## 卡片', images, {
+  workspaceId: 'w2', model: { provider: 'custom', model: 'glm-4.6', reasoningEffort: 'mid' },
+});
+check('insertToNewSession 传所选工作区新建会话',
+  insCreated && insCreated.workspaceId === 'w2' && !('cwd' in insCreated) && ir.ok && ir.sessionId === 's-ins');
+check('insertToNewSession 自动跳转新会话（uiWorkspace.openSession）', ir.mode === 'jumped' && insOpened === 's-ins');
+check('跳转前文本草稿已写入（setDraft 先于 open，跳过去不空白）',
+  insLog.indexOf('setDraft') !== -1 && insLog.indexOf('setDraft') < insLog.indexOf('open'));
+check('insertToNewSession 不自动发送（不 submit）', insSubmitted === 0);
+check('跳转成功后释放后台 retain（mainView 接管保活）', insReleased === 1);
+check('selectModel 照常按新会话设置（后台进行）',
+  insSelected && insSelected.sessionId === 's-ins' && insSelected.provider === 'custom'
+  && insSelected.model === 'glm-4.6' && insSelected.reasoningEffort === 'mid');
+await new Promise((r) => setTimeout(r, 10));
+check('图片附件照常注册（跳转不拦附件）', insLog.indexOf('drafts') !== -1 && insLog.indexOf('attach') !== -1);
+check('新会话草稿文本就位', insFacade.draft === '## 卡片');
+
+// uiWorkspace 缺失 → 跳不了：保留 retain（草稿还在后台会话里），draft 模式提示从会话列表打开
+insReleased = 0; insOpened = null;
+const insGetWithWs = ctx.get;
+ctx.get = function (name) { return name === 'uiWorkspace' ? undefined : insGetWithWs(name); };
+const ir2 = await mod._test.insertToNewSession('## 乙', [], {});
+check('uiWorkspace 缺失 → 不跳转、不释放 retain（draft 模式，草稿保留）',
+  ir2.ok && ir2.mode === 'draft' && ir2.sessionId === 's-ins' && insOpened === null
+  && insReleased === 0 && ir2.message.includes('会话列表') && insFacade.draft === '## 乙');
+ctx.get = insGetWithWs;
+
+// conversation 缺失 → ok:false + 释放 retain（上层降级插入当前会话输入框）
+let ins3Released = 0;
+ctx.get = function (name) {
+  if (name === 'sessions') return {
+    list: { getSnapshot: () => ({ current: 's1', byId: { s1: { cwd: '/tmp' } } }) },
+    create() { return 's-ins3'; },
+    retain(id) { return { sessionId: id, release() { ins3Released++; } }; },
+    scope: () => ({}),
+  };
+  if (name === 'uiWorkspace') return { openSession() {} };
+  return undefined; // conversation / remote.session 都没有
+};
+const ir3 = await mod._test.insertToNewSession('## 丙', [], {});
+check('conversation 服务缺失 → 返回 unavailable 供上层降级当前会话，并释放 retain',
+  ir3.ok === false && ir3.mode === 'unavailable' && ir3.sessionId === 's-ins3' && ins3Released === 1);
+
 // ── 会话关联：「处理」成功后卡片上显示关联会话，可一键跳转 ──
 const card123 = { kind: 'bug', id: 123, title: '登录页报错' };
 check('sessionLinkKey 带账号前缀 + kind-id（不同禅道账号互不混卡）',
