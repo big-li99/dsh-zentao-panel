@@ -70,6 +70,15 @@
         '.ztp-search:focus{border-color:var(--dsw-alias-border-l4);box-shadow:0 0 0 1px var(--dsw-alias-border-l4);}',
         '.ztp-sort{flex:none;height:26px;box-sizing:border-box;padding:0 2px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;outline:none;cursor:pointer;}',
         '.ztp-sort:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
+        // 快捷筛选条：head 下方独立一行 chip（等你决策/处理中/逾期/今天到期/已完成）
+        '.ztp-qfbar{flex:none;display:flex;align-items:center;gap:4px;padding:6px 8px 6px 10px;border-bottom:.5px solid var(--dsw-alias-border-l2);overflow-x:auto;scrollbar-width:none;}',
+        '.ztp-qfbar::-webkit-scrollbar{display:none;}',
+        '.ztp-qf{appearance:none;border:.5px solid var(--dsw-alias-border-l3);border-radius:999px;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;line-height:1;height:22px;padding:0 9px;cursor:pointer;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;}',
+        '.ztp-qf:hover{color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l4);background:var(--dsw-alias-interactive-bg-hover);}',
+        '.ztp-qf.zero{opacity:.55;}',
+        '.ztp-qf.on{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);border-color:transparent;}',
+        '.ztp-qf.on:hover{background:var(--dsw-alias-button-primary-hover);color:var(--dsw-alias-label-primary-foreground);}',
+        '.ztp-qf .ztp-num{font-size:10px;opacity:.85;}',
         '@media (max-width:719px){.ztp-search{width:110px;}}',
 
         // 图标按钮
@@ -616,6 +625,47 @@
           if (hay.indexOf(terms[i]) === -1) return false;
         }
         return true;
+      }
+
+      // ───────── 快捷筛选条（2026-10-25 迭代）：一键过滤高频关注维度 ─────────
+      // 跨分类作用于全量卡片（等你决策的活不该按任务/Bug/需求分开找）；ask/running/done
+      // 走活性状态（resolveLiveState 注入），overdue/today 走截止且排除禅道终态。
+      var QUICK_FILTERS = [
+        { id: 'ask', label: '等你决策' },
+        { id: 'running', label: '处理中' },
+        { id: 'overdue', label: '逾期' },
+        { id: 'today', label: '今天到期' },
+        { id: 'done', label: '已完成' },
+      ];
+
+      /** 单卡是否命中快捷筛选；liveOf(card) → 'ask'|'running'|'done'|null（同列表排序注入）。 */
+      function quickFilterHit(card, qf, liveOf, now) {
+        if (qf === 'ask' || qf === 'running' || qf === 'done') {
+          return Boolean(liveOf) && liveOf(card) === qf;
+        }
+        if (!card || isFinalCard(card)) return false;
+        var dl = deadlineInfo(card.deadline, now);
+        if (!dl) return false;
+        if (qf === 'overdue') return dl.overdue;
+        if (qf === 'today') return !dl.overdue && dl.days < 1; // 截止日当天（距 23:59:59 不足一天）
+        return false;
+      }
+      /** 按快捷筛选过滤（qf 空 = 原样返回副本）。 */
+      function quickFilterCards(cards, qf, liveOf, now) {
+        var list = Array.isArray(cards) ? cards : [];
+        if (!qf) return list.slice();
+        return list.filter(function (c) { return quickFilterHit(c, qf, liveOf, now); });
+      }
+      /** 各筛选维度的计数（调用方先过搜索，chip 数字随搜索联动）。 */
+      function quickFilterCounts(cards, liveOf, now) {
+        var m = { ask: 0, running: 0, overdue: 0, today: 0, done: 0 };
+        var list = Array.isArray(cards) ? cards : [];
+        for (var i = 0; i < list.length; i++) {
+          for (var j = 0; j < QUICK_FILTERS.length; j++) {
+            if (quickFilterHit(list[i], QUICK_FILTERS[j].id, liveOf, now)) m[QUICK_FILTERS[j].id]++;
+          }
+        }
+        return m;
       }
 
       // ───────────── 自动轮询 + 新指派检测（Idea 1，2026-10-25）─────────────
@@ -2255,6 +2305,28 @@
           h('button', { className: 'ztp-err-retry', type: 'button', onClick: props && props.onRetry }, '重试'));
       }
 
+      /**
+       * 快捷筛选条（2026-10-25 迭代）：等你决策/处理中/逾期/今天到期/已完成的
+       * 一键过滤 chip（跨任务/Bug/需求）。单选：再点同一个清除；counts 由调用方
+       * 在「搜索过滤后的全量卡片」上统计（数字随搜索联动）。
+       */
+      function QfBar(props) {
+        var counts = (props && props.counts) || {};
+        var active = (props && props.active) || null;
+        return h('div', { className: 'ztp-qfbar', role: 'toolbar', 'aria-label': '快捷筛选' },
+          QUICK_FILTERS.map(function (f) {
+            var n = counts[f.id] || 0;
+            return h('button', {
+              key: f.id, type: 'button',
+              className: 'ztp-qf' + (active === f.id ? ' on' : '') + (n ? '' : ' zero'),
+              title: active === f.id
+                ? '清除筛选「' + f.label + '」，回到分类视图'
+                : '只看' + f.label + '的（跨任务/Bug/需求，叠加搜索词）',
+              onClick: function () { props.onPick(active === f.id ? null : f.id); },
+            }, f.label, n ? h('span', { className: 'ztp-num' }, n) : null);
+          }));
+      }
+
       function KindTag(props) {
         return h('span', { className: 'ztp-tag ' + props.kind }, KIND_LABEL[props.kind] || props.kind);
       }
@@ -3162,6 +3234,7 @@
         var liveSnap = useState(watchGetSnapshot()); // 关联会话活性（M6 监控快照）
         var search = useState('');       // 列表搜索（标题/#id/状态/人员，纯前端过滤）
         var sortMode = useState('smart');// 列表排序（smart/deadline/pri/origin）
+        var qf = useState(null);         // 快捷筛选（ask/running/overdue/today/done；激活时跨分类，null = 分类视图）
         var replyRev = useState(0);      // 结果摘要存储版本号（回读保存后 bump 重读）
         var replyBusy = useState(null);  // 正在回读的 linkKey（详情页 spinner 用）
         var offline = useState(null);    // 连接状态（Idea 1）：null 未知 / true 离线 / false 在线
@@ -3455,11 +3528,16 @@
           return info ? info.since : null;
         }
         var filtered = useMemo(function () {
-          var list = cards.filter(function (c) {
-            return c.kind === tab[0] && matchSearch(c, search[0]);
-          });
-          return sortCards(list, sortMode[0], undefined, liveOf);
-        }, [cards, tab[0], search[0], sortMode[0], linkRev[0], liveSnap[0]]);
+          // 快捷筛选激活 → 跨分类（全量卡片过搜索 + 过筛选）；否则当前分类过搜索
+          var pool = qf[0]
+            ? cards.filter(function (c) { return matchSearch(c, search[0]); })
+            : cards.filter(function (c) { return c.kind === tab[0] && matchSearch(c, search[0]); });
+          return sortCards(quickFilterCards(pool, qf[0], liveOf), sortMode[0], undefined, liveOf);
+        }, [cards, tab[0], search[0], sortMode[0], qf[0], linkRev[0], liveSnap[0]]);
+        // 快捷筛选计数：在「搜索过滤后的全量卡片」上统计（chip 数字随搜索联动）
+        var qfCounts = useMemo(function () {
+          return quickFilterCounts(cards.filter(function (c) { return matchSearch(c, search[0]); }), liveOf);
+        }, [cards, search[0], linkRev[0], liveSnap[0]]);
         var counts = useMemo(function () {
           var m = { task: 0, bug: 0, story: 0 };
           for (var i = 0; i < cards.length; i++) m[cards[i].kind] = (m[cards[i].kind] || 0) + 1;
@@ -3538,6 +3616,20 @@
           }
           if (!filtered.length) {
             var q = String(search[0] || '').trim();
+            if (qf[0]) {
+              var qfLabel = '';
+              for (var qi = 0; qi < QUICK_FILTERS.length; qi++) {
+                if (QUICK_FILTERS[qi].id === qf[0]) qfLabel = QUICK_FILTERS[qi].label;
+              }
+              return h('div', { className: 'ztp-empty' },
+                '没有' + (qfLabel || '符合条件') + '的' + (q ? '匹配「' + q + '」的' : '') + '事项',
+                h('br'),
+                h('button', {
+                  className: 'ztp-err-retry', type: 'button',
+                  style: { marginTop: '8px' },
+                  onClick: function () { qf[1](null); },
+                }, '清除筛选'));
+            }
             if (q) {
               return h('div', { className: 'ztp-empty' },
                 '没有匹配「' + q + '」的' + (KIND_LABEL[tab[0]] || '内容'),
@@ -3656,7 +3748,7 @@
                 key: k, type: 'button', role: 'tab',
                 'aria-selected': tab[0] === k ? 'true' : 'false',
                 className: 'ztp-seg-btn',
-                onClick: function () { tab[1](k); detailCard[1](null); },
+                onClick: function () { tab[1](k); qf[1](null); detailCard[1](null); }, // 点分类 = 明确选范围，退出快捷筛选
               }, KIND_LABEL[k], counts[k] ? h('span', { className: 'ztp-num' }, counts[k]) : null);
             })),
             h('div', { className: 'ztp-grow' }),
@@ -3682,6 +3774,13 @@
               h('option', { value: 'deadline' }, '按截止'),
               h('option', { value: 'pri' }, '按优先级'),
               h('option', { value: 'origin' }, '默认顺序'))) : null,
+
+          // 快捷筛选条（2026-10-25 迭代）：一键只看 等你决策/处理中/逾期/今天到期/已完成（跨分类）
+          configured && cards.length ? h(QfBar, {
+            counts: qfCounts,
+            active: qf[0],
+            onPick: function (id) { qf[1](id); detailCard[1](null); },
+          }) : null,
 
           middle,
 
@@ -3713,9 +3812,11 @@
             }, h(CloseIcon))) : null,
 
           configured && mine[0] ? h('div', { className: 'ztp-foot' },
-            h('span', null, '共 ' + (String(search[0] || '').trim()
-              ? filtered.length + '/' + (counts[tab[0]] || 0)
-              : cards.length) + ' 条'),
+            h('span', null, '共 ' + (qf[0]
+              ? filtered.length + '/' + cards.length
+              : (String(search[0] || '').trim()
+                ? filtered.length + '/' + (counts[tab[0]] || 0)
+                : cards.length)) + ' 条'),
             h('span', { className: 'ztp-foot-dim' }, '·'),
             h('span', { className: 'ztp-foot-dim' },
               mine[0].cached ? new Date(mine[0].at).toLocaleTimeString() + ' 缓存' : '刚刚拉取'),
@@ -3938,6 +4039,11 @@
         isFinalCard: isFinalCard,
         sortCards: sortCards,
         matchSearch: matchSearch,
+        quickFilterHit: quickFilterHit,
+        quickFilterCards: quickFilterCards,
+        quickFilterCounts: quickFilterCounts,
+        QUICK_FILTERS: QUICK_FILTERS,
+        QfBar: QfBar,
         searchHaystack: searchHaystack,
         // 列表快照持久化（mine.v1）
         readMineSnapshot: readMineSnapshot,

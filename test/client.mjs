@@ -1432,6 +1432,52 @@ check('DispatchDialog：模板 chip 行渲染（填入按钮带全文 title + �
 tpChip.children[1].props.onClick();
 check('DispatchDialog：点 × 删除模板（localStorage 同步清空）', TT.readInstrPresets().length === 0);
 
+// ── 快捷筛选条（2026-10-25 迭代）：一键过滤 等你决策/处理中/逾期/今天到期/已完成 ──
+const nowTs = new Date('2026-10-25T10:00:00').getTime();
+const qfToday = { kind: 'bug', id: 11, title: '今天到期', status: 'active', deadline: '2026-10-25' };
+const qfOverdue = { kind: 'task', id: 12, title: '已逾期', status: 'active', deadline: '2026-10-20' };
+const qfTomorrow = { kind: 'bug', id: 13, title: '明天到期', status: 'active', deadline: '2026-10-26' };
+const qfFinal = { kind: 'task', id: 14, title: '已关闭', status: 'done', deadline: '2026-10-20' };
+const qfLive = { kind: 'story', id: 15, title: '处理中', status: 'active' };
+const liveStub = (c) => (c.id === 15 ? 'running' : c.id === 11 ? 'ask' : c.id === 12 ? 'done' : null);
+check('quickFilterHit：活性维度（ask/running/done）走 liveOf；liveOf 缺失/不命中 → false',
+  TT.quickFilterHit(qfLive, 'running', liveStub, nowTs) === true
+  && TT.quickFilterHit(qfToday, 'ask', liveStub, nowTs) === true
+  && TT.quickFilterHit(qfOverdue, 'done', liveStub, nowTs) === true
+  && TT.quickFilterHit(qfLive, 'running', null, nowTs) === false
+  && TT.quickFilterHit(qfLive, 'ask', liveStub, nowTs) === false);
+check('quickFilterHit：截止维度（overdue/today）排除终态/无截止/未到期的',
+  TT.quickFilterHit(qfOverdue, 'overdue', null, nowTs) === true
+  && TT.quickFilterHit(qfFinal, 'overdue', null, nowTs) === false
+  && TT.quickFilterHit(qfLive, 'overdue', null, nowTs) === false
+  && TT.quickFilterHit(qfToday, 'today', null, nowTs) === true
+  && TT.quickFilterHit(qfTomorrow, 'today', null, nowTs) === false
+  && TT.quickFilterHit(qfTomorrow, 'overdue', null, nowTs) === false);
+check('quickFilterCards：空筛选返回副本；按维度过滤',
+  TT.quickFilterCards([qfToday, qfOverdue, qfTomorrow], null, null, nowTs).length === 3
+  && TT.quickFilterCards([qfToday, qfOverdue, qfTomorrow], 'overdue', null, nowTs).map((c) => c.id).join() === '12');
+check('quickFilterCounts：全量集合按五维计数',
+  JSON.stringify(TT.quickFilterCounts([qfToday, qfOverdue, qfTomorrow, qfLive], liveStub, nowTs))
+    === '{"ask":1,"running":1,"overdue":1,"today":1,"done":1}');
+const qfPicks = [];
+const qfBarNode = TT.QfBar({
+  counts: { ask: 2, running: 0, overdue: 1, today: 0, done: 0 },
+  active: 'ask',
+  onPick: (id) => { qfPicks.push(id); },
+});
+const qfChips = qfBarNode.children.flat(2); // map 出的 chips 是嵌套数组（§4.8 同坑）
+check('QfBar：5 个 chip 带文案/计数/激活态/零值淡化',
+  qfChips.length === 5
+  && qfChips[0].props.className === 'ztp-qf on'
+  && qfChips[0].children[0] === '等你决策'
+  && qfChips[0].children[1].children[0] === 2
+  && qfChips[1].props.className.split(' ').includes('zero')
+  && qfChips[2].children[1].children[0] === 1);
+qfChips[0].props.onClick();
+qfChips[2].props.onClick();
+check('QfBar：点激活项 = 清除（pick null）；点其他项 = 切换',
+  qfPicks[0] === null && qfPicks[1] === 'overdue');
+
 // ── 完成闭环（2026-10-25 迭代）：finishUrl 深链 + 详情 done 态按钮 ──
 check('finishUrl：三类卡片替换为操作页（同 base 同 id）',
   TT.finishUrl({ kind: 'bug', id: 123, url: 'http://z:8090/bug-view-123.html' }) === 'http://z:8090/bug-resolve-123.html'

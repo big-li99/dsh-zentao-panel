@@ -484,6 +484,19 @@ placeholder「拼到任务背景末尾，如：只分析定位原因，先不要
 仅当该卡 `resolveLiveState` 为 done 时显示——agent 处理完才有闭环动作；点开禅道完成操作页后事项
 离开指派列表，由 cleanupStaleLinks 72h 宽限清理）。
 
+### 4.12 快捷筛选条（2026-10-25，用户批准的提案）
+
+列表 head 下方一行 chip：**等你决策 / 处理中 / 逾期 / 今天到期 / 已完成**（`QfBar` 组件，`.ztp-qf*`）。
+单选开关：点激活项清除、点其他切换；**激活时跨分类**——过滤池从「当前 tab」变「全量卡片过搜索」
+（等你决策的活不该按任务/Bug/需求分开找），卡片自带 KindTag 所以混合列表可读。**点 tab = 明确选
+范围，同时退出快捷筛选**（tab onClick 里 `qf[1](null)`）。chip 计数在「搜索过滤后的全量卡片」上统计
+（`quickFilterCounts`，数字随搜索词联动）；零值 chip 淡化不隐藏（防行跳动）。计数/命中注入同一个
+`liveOf`（resolveLiveState，实时+持久化兜底）——活性维度（ask/running/done）与排序 smart 同源；
+截止维度（overdue/today）排除禅道终态（isFinalCard）与无截止卡，today = 距 23:59:59 不足一天且未逾期。
+空态在快捷筛选激活时显示「清除筛选」按钮；页脚分母变 `filtered.length/cards.length`（全量）。
+纯函数 `quickFilterHit/quickFilterCards/quickFilterCounts` + `QUICK_FILTERS` + `QfBar` 进 _test。
+批量模式「全选当前列表」作用的就是 filtered——快捷筛选天然约束批量范围。
+
 ### 5. DSH 插件体系（本机实测）
 
 - DSH Desktop **0.2.1-rc.2**，desktop profile，macOS
@@ -615,13 +628,14 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   ④ 重启后正在跑的 turn 若已死，**不**显示「处理中」（瞬态兜底只在监控未就绪的过渡期生效）。
   **仅 client 改动，⌘R 生效**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **259 项**（注册契约 8 项 +「处理」弹层/下发/时序/
+- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **265 项**（注册契约 8 项 +「处理」弹层/下发/时序/
   不跳转 +「插入对话」10 项（§4.5）+ M6 22 项（§4.4）+ 进度持久化 29 项（§4.6）+ **列表三件套 56 项**
   （§4.7：搜索排序 25 项含 smart 融合实时状态、mine.v1 7 项、replies/fetchLastReply 24 项含 Markdown 渲染 10 项）
   + **会话头部反向跳转 13 项（§4.3 末）** + **账号别名 5 项（§6 多账号节：acctDisplayName 纯函数 +
   AccountSwitcher 展示/编辑态结构——fake useState 恒 null 只能测展示路径，行内编辑交互靠真机）**
-  + **附加指令 7 项 + 指令模板预设 8 项 + 完成闭环 4 项（§4.11，DetailView 首次进 _test；
-  指令模板弹层断言要 children.flat(2)——chips 是 map 出的嵌套数组，§4.8 同坑）**）、
+  + **附加指令 7 项 + 指令模板预设 8 项 + 完成闭环 4 项（§4.11）+ 快捷筛选 6 项（§4.12）**）
+  ——DetailView 首次进 _test；chips 类组件断言要 children.flat(2)（map 出的是嵌套数组，§4.8 同坑，
+  指令模板与 QfBar 各踩一次）、
   `multi` 42 项（别名 11 项 + **fetchImage 缓存 6 项（§4.10）**）、`protocol` 15 项（+actions/stories 拼写 5 项，§4.8）；`host.mjs` 21+6 项
   （真机 20 张卡片；actions 透传 + story detail 2 项为 §4.8 新增；**别名 6 项 + fetchImage 缓存已 2026-10-25
   用真实凭据复跑全绿**；host.mjs 凭据解析已改为「环境变量 → $DSH_HOME 配置激活账号 → 只读兜底真实
