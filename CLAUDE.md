@@ -497,6 +497,26 @@ placeholder「拼到任务背景末尾，如：只分析定位原因，先不要
 纯函数 `quickFilterHit/quickFilterCards/quickFilterCounts` + `QUICK_FILTERS` + `QfBar` 进 _test。
 批量模式「全选当前列表」作用的就是 filtered——快捷筛选天然约束批量范围。
 
+### 4.13 一键复制 + 旗标与隐藏 + 极速重发（2026-10-25，用户批准的三提案）
+
+**①一键复制**：`copyToClipboard(text)`（clipboard API → textarea+execCommand 兜底，promise 化）。
+卡片动作行复制图标 = `#id 标题`（贴 IM）；DetailView 返回栏右侧 `.ztp-detail-copy`「复制 Markdown」=
+`cardToMarkdown(card, detail)`（详情已加载含完整描述；**按钮类不能用 `.ztp-back`——它在宽屏
+`display:none`**，只有返回键吃那条规则）。
+
+**②旗标与隐藏（marks.v1）**：key 与 links 同构，值 `{flag?, hide?, at, lastSeen?}`；`toggleCardMark`
+切换（空条目自动删，**组件内有同名局部函数，模块级叫 toggleCardMark**）。旗标 → 卡片顶行 `.ztp-flagdot`
++ 快捷筛选新增「已标记」维度（`quickFilterHit/Counts` 第 5 参 `flaggedOf` 注入，缺省恒 false 向后兼容，
+QUICK_FILTERS 现在 6 项）；隐藏 → `visCards` 把隐藏卡从列表/计数/筛选/页脚全部滤掉，页脚
+`.ztp-foot-hide`「显示已隐藏 N」临时切换 `showHidden`（淡化 `.ztp-card.hiddenmark` 显示，点 ⊘ 取消）。
+`cleanupStaleLinks` 顺带清 marks（在线刷 lastSeen 1h 限频 / 离线 72h 宽限删 / 只动当前账号）。
+
+**③极速重发（lastdispatch.v1）**：`{workspaceId?, cwd?, model?, instr, at}`——sendDispatch **成功即保存**
+（含批量）。卡片动作行 ⚡（`quickTitle` 非空才渲染，title=`lastDispatchSummary` 摘要：工作区/继承目录/
+模型/指令截断）→ `quickRedispatch(card)`（render 作用域函数，lastDispatch 每次现读防闭包坑；详情开着
+带完整描述）直接 `sendDispatch(choice, {..., intent:'dispatch', instr})`，跳过弹层。弹层正常路径不受影响；
+无记录时按钮不渲染。
+
 ### 5. DSH 插件体系（本机实测）
 
 - DSH Desktop **0.2.1-rc.2**，desktop profile，macOS
@@ -628,12 +648,13 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   ④ 重启后正在跑的 turn 若已死，**不**显示「处理中」（瞬态兜底只在监控未就绪的过渡期生效）。
   **仅 client 改动，⌘R 生效**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **265 项**（注册契约 8 项 +「处理」弹层/下发/时序/
+- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **278 项**（注册契约 8 项 +「处理」弹层/下发/时序/
   不跳转 +「插入对话」10 项（§4.5）+ M6 22 项（§4.4）+ 进度持久化 29 项（§4.6）+ **列表三件套 56 项**
   （§4.7：搜索排序 25 项含 smart 融合实时状态、mine.v1 7 项、replies/fetchLastReply 24 项含 Markdown 渲染 10 项）
   + **会话头部反向跳转 13 项（§4.3 末）** + **账号别名 5 项（§6 多账号节：acctDisplayName 纯函数 +
   AccountSwitcher 展示/编辑态结构——fake useState 恒 null 只能测展示路径，行内编辑交互靠真机）**
-  + **附加指令 7 项 + 指令模板预设 8 项 + 完成闭环 4 项（§4.11）+ 快捷筛选 6 项（§4.12）**）
+  + **附加指令 7 项 + 指令模板预设 8 项 + 完成闭环 4 项（§4.11）+ 快捷筛选 6 项（§4.12）
+  + 一键复制 4 项 + 旗标隐藏 6 项（含 cleanup marks）+ 极速重发 3 项（§4.13）**）
   ——DetailView 首次进 _test；chips 类组件断言要 children.flat(2)（map 出的是嵌套数组，§4.8 同坑，
   指令模板与 QfBar 各踩一次）、
   `multi` 42 项（别名 11 项 + **fetchImage 缓存 6 项（§4.10）**）、`protocol` 15 项（+actions/stories 拼写 5 项，§4.8）；`host.mjs` 21+6 项

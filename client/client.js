@@ -482,6 +482,12 @@
           h('path', { d: 'M4 13.5V3.2c2-.9 3.9-.9 6 .2 1.6.8 3 .9 4 .4V9c-1 .5-2.4.4-4-.4-2.1-1.1-4-1.1-6-.2', stroke: 'currentColor', strokeWidth: 1.1, strokeLinejoin: 'round', strokeLinecap: 'round' }),
         );
       }
+      /** 极速重发（卡片动作行）：闪电。 */
+      function BoltIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('path', { d: 'M9.2 1.8 3.9 8.9h3.1l-.9 5.3 5.3-7.1H8.3z', stroke: 'currentColor', strokeWidth: 1.1, strokeLinejoin: 'round', strokeLinecap: 'round' }),
+        );
+      }
       /** 隐藏（卡片动作行）：圈斜杠。 */
       function HideIcon() {
         return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
@@ -949,6 +955,42 @@
           if (pk && pk.activeId === acct && map[key] && map[key].hide) n++;
         }
         return n;
+      }
+
+      // ───────── 极速重发（2026-10-25 迭代）：记住上次下发的完整配置 ─────────
+      // lastdispatch.v1 = {workspaceId?, cwd?, model?, instr, at}；「处理/插入/批量」任一
+      // 成功（ok && sessionId）即保存。卡片上的 ⚡ 用它跳过弹层直接重发同类任务。
+      var LASTDISPATCH_KEY = 'dsh-zentao-panel.lastdispatch.v1';
+      var lastDispatchFallback = null;
+
+      function readLastDispatch() {
+        try {
+          var s = root.localStorage;
+          var raw = s && s.getItem(LASTDISPATCH_KEY);
+          if (raw) {
+            var v = JSON.parse(raw);
+            if (v && typeof v === 'object' && (v.workspaceId || v.cwd || v.model || v.instr)) return v;
+          }
+        } catch (e) { /* 坏数据当空 */ }
+        return lastDispatchFallback || null;
+      }
+      function saveLastDispatch(entry) {
+        lastDispatchFallback = entry || null;
+        try {
+          var s = root.localStorage;
+          if (s) s.setItem(LASTDISPATCH_KEY, JSON.stringify(entry));
+        } catch (e) { /* 内存兜底已写 */ }
+      }
+      /** ⚡ 按钮 title 摘要：工作区/模型/指令三段拼一句（缺哪段跳哪段）。 */
+      function lastDispatchSummary(last) {
+        if (!last) return '';
+        var parts = [];
+        if (last.cwd) parts.push('继承目录');
+        if (last.workspaceId) parts.push('工作区');
+        if (last.model && last.model.model) parts.push('模型 ' + last.model.model);
+        var t = parts.join(' · ');
+        if (last.instr && String(last.instr).trim()) t += (t ? ' · ' : '') + '指令「' + instrChipLabel(last.instr) + '」';
+        return t;
       }
 
       // ───────── 完成闭环（2026-10-25 迭代）：已完成卡片深链到禅道操作页 ─────────
@@ -2567,6 +2609,12 @@
               onClick: function (e) { e.stopPropagation(); props.onOpenSession(c); },
             }, h(SlinkDot, { state: live }), h(ChatIcon), h('span', { className: 'ztp-slink-t' },
               props.linkView.state === 'dead' ? '会话已删除' : props.linkView.title)) : null,
+            // 极速重发：有上次配置才显示——跳过弹层直接按上次的工作区/模型/指令下发
+            props.quickTitle ? h('button', {
+              className: 'ztp-btn icon', type: 'button',
+              title: '极速重发（不弹窗）：' + props.quickTitle,
+              onClick: function (e) { e.stopPropagation(); props.onQuick(c); },
+            }, h(BoltIcon)) : null,
             // 旗标/隐藏（本地标记，不回写禅道）：旗标进「已标记」筛选；隐藏从列表滤掉（页脚可临时显示）
             h('button', {
               className: 'ztp-btn icon' + (props.flagged ? ' on' : ''), type: 'button',
@@ -3531,6 +3579,25 @@
           dispatch[1]({ card: card, md: cardToMarkdown(card, detail), images: imagesOf(card, detail), intent: 'dispatch' });
         }, []);
 
+        // 极速重发（2026-10-25 迭代）：render 作用域函数——lastDispatch/activeAcct 每次现读，
+        // 详情开着就带完整描述（与 dispatchCard 同源），无上次配置时按钮本身不渲染
+        var lastDispatch = readLastDispatch();
+        var quickSummary = lastDispatchSummary(lastDispatch);
+        var quickRedispatch = function (card) {
+          var last = readLastDispatch();
+          if (!last) { toast[1]('还没有下发记录，先正常「处理」一次'); return; }
+          var detail = detailCard[0] && detailCard[0].kind === card.kind
+            && Number(detailCard[0].id) === Number(card.id) ? detailCard[0] : null;
+          var choice = {};
+          if (last.workspaceId) choice.workspaceId = last.workspaceId;
+          else if (last.cwd) choice.cwd = last.cwd;
+          if (last.model) choice.model = last.model;
+          sendDispatch(choice, {
+            card: card, md: cardToMarkdown(card, detail), images: imagesOf(card, detail),
+            activeAcct: activeAcct, intent: 'dispatch', instr: last.instr || '',
+          });
+        };
+
         // 弹层确认：intent='dispatch' 走 dispatchToNewSession（后台自动发送、不跳转），
         // intent='insert' 走 insertToNewSession（新建会话、跳转过去、只填草稿不发送）；
         // choice 即所选工作区/模型。批量（Idea 2）时 d.cards 是 N 张卡、md/images 已合并，
@@ -3562,6 +3629,11 @@
             : dispatchToNewSession(md, d.images || [], choice);
           Promise.resolve(run).then(function (r) {
             if (r && r.ok) {
+              // 成功即记住本次完整配置（工作区/模型/指令）——卡片 ⚡「极速重发」用它跳过弹层
+              saveLastDispatch({
+                workspaceId: choice && choice.workspaceId, cwd: choice && choice.cwd,
+                model: choice && choice.model, instr: d.instr || '', at: Date.now(),
+              });
               // 新会话建好即记录关联（draft 模式也算：内容已填进那个会话；批量逐卡指向同一会话）
               if (r.sessionId) {
                 for (var i = 0; i < cards.length; i++) {
@@ -3860,6 +3932,8 @@
               flagged: flaggedOf(c),
               hidden: Boolean(markOf(markMap, activeAcct, c).hide),
               onToggleMark: toggleMark,
+              quickTitle: quickSummary,
+              onQuick: quickRedispatch,
             });
           }));
         }
@@ -4252,6 +4326,9 @@
         QUICK_FILTERS: QUICK_FILTERS,
         QfBar: QfBar,
         copyToClipboard: copyToClipboard,
+        readLastDispatch: readLastDispatch,
+        saveLastDispatch: saveLastDispatch,
+        lastDispatchSummary: lastDispatchSummary,
         toggleCardMark: toggleCardMark,
         markOf: markOf,
         readMarkMap: readMarkMap,

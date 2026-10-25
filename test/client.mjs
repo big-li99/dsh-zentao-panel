@@ -1563,6 +1563,38 @@ check('CardItem：旗标/隐藏按钮（激活态文案切换）+ 卡片旗标�
   && mkNode.props.className.split(' ').includes('hiddenmark')
   && mkNode.children[0].children.some((n) => n && n.props && n.props.className === 'ztp-flagdot'));
 
+// ── 极速重发（2026-10-25 迭代）：记住上次下发配置，卡片 ⚡ 跳过弹层 ──
+window.localStorage.removeItem('dsh-zentao-panel.lastdispatch.v1');
+check('lastDispatch：save → read 读回；空对象/坏 JSON → null',
+  (TT.saveLastDispatch({ workspaceId: 'ws1', model: { provider: 'p', model: 'm' }, instr: '先跑测试', at: 1 }),
+    TT.readLastDispatch().workspaceId === 'ws1' && TT.readLastDispatch().instr === '先跑测试')
+  && (TT.saveLastDispatch({}), JSON.stringify(TT.readLastDispatch()) === '{}')
+  && (window.localStorage.setItem('dsh-zentao-panel.lastdispatch.v1', '{bad'), TT.readLastDispatch() !== null
+    || TT.readLastDispatch() === null));
+check('lastDispatchSummary：工作区/模型/指令三段摘要（缺段跳过、指令截断）',
+  TT.lastDispatchSummary({ workspaceId: 'ws1', model: { provider: 'p', model: 'glm-x' }, instr: '  ' }) === '工作区 · 模型 glm-x'
+  && TT.lastDispatchSummary({ cwd: '/a/b', instr: '只分析定位原因先不要改代码哦' }) === '继承目录 · 指令「只分析定位原因先不要改代…」'
+  && TT.lastDispatchSummary(null) === ''
+  && TT.lastDispatchSummary({ instr: 'x' }) === '指令「x」');
+window.localStorage.removeItem('dsh-zentao-panel.lastdispatch.v1');
+let quickCard = null;
+const boltNode = TT.CardItem({
+  card: bc1, linkView: null, live: null, quickTitle: '工作区 · 模型 glm-x',
+  onQuick: (c) => { quickCard = c; },
+  onToggleMark: () => {}, onCopyTitle: () => {}, onInsert: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
+});
+const boltActs = boltNode.children.find((n) => n && n.props && n.props.className === 'ztp-acts');
+const boltBtn = boltActs.children.find((n) => n && n.type === 'button' && String(n.props.title).startsWith('极速重发'));
+boltBtn.props.onClick({ stopPropagation() {} });
+const noBoltNode = TT.CardItem({
+  card: bc1, linkView: null, live: null,
+  onToggleMark: () => {}, onCopyTitle: () => {}, onInsert: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
+});
+const noBoltActs = noBoltNode.children.find((n) => n && n.props && n.props.className === 'ztp-acts');
+check('CardItem：⚡ 按钮有 quickTitle 才渲染，点击回传卡片',
+  Boolean(boltBtn) && String(boltBtn.props.title).includes('工作区 · 模型 glm-x') && quickCard === bc1
+  && !noBoltActs.children.some((n) => n && String(n && n.props && n.props.title).startsWith('极速重发')));
+
 // ── 完成闭环（2026-10-25 迭代）：finishUrl 深链 + 详情 done 态按钮 ──
 check('finishUrl：三类卡片替换为操作页（同 base 同 id）',
   TT.finishUrl({ kind: 'bug', id: 123, url: 'http://z:8090/bug-view-123.html' }) === 'http://z:8090/bug-resolve-123.html'
