@@ -165,6 +165,25 @@
         '.ztp-foot{flex:none;display:flex;align-items:center;gap:8px;height:30px;padding:0 16px;border-top:.5px solid var(--dsw-alias-border-l1);font-size:11px;color:var(--dsw-alias-label-tertiary);box-sizing:border-box;overflow:hidden;white-space:nowrap;}',
         '.ztp-foot-dim{opacity:.75;}',
 
+        // ───────── Idea 1（2026-10-25）：连接状态点 + 离线提示条 ─────────
+        // mast 右侧小圆点：绿=已连禅道 / 红=不可达（闪烁）/ 灰=未知（刚打开还没拉过）
+        '.ztp-conn{width:7px;height:7px;border-radius:50%;flex:none;background:var(--dsw-alias-label-caption);}',
+        '.ztp-conn.on{background:var(--dsw-alias-state-success-primary);}',
+        '.ztp-conn.off{background:var(--dsw-alias-state-error-primary);animation:ztp-blink 1.6s ease-in-out infinite;}',
+        // 离线常驻横条：轮询/刷新失败且面板仍在展示缓存数据时显示（错误视图只在无数据时抢占）
+        '.ztp-offline{flex:none;display:flex;align-items:center;gap:10px;justify-content:space-between;padding:6px 14px;background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 9%,transparent);color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:1.5;border-bottom:.5px solid color-mix(in srgb,var(--dsw-alias-state-error-primary) 25%,transparent);}',
+
+        // ───────── Idea 2（2026-10-25）：列表多选 + 批量下发 ─────────
+        // 卡片左缘圆形勾选框（多选模式）：选中填主题色 + 白勾
+        '.ztp-check{width:16px;height:16px;flex:none;border-radius:50%;border:1.2px solid var(--dsw-alias-border-l4);display:inline-flex;align-items:center;justify-content:center;color:transparent;transition:border-color .12s ease,background .12s ease;box-sizing:border-box;}',
+        '.ztp-check svg{width:10px;height:10px;}',
+        '.ztp-check.on{background:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary);color:#fff;}',
+        '.ztp-card.sel{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 60%,var(--dsw-alias-border-l3));background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 7%,var(--dsw-alias-bg-layer-1));}',
+        '.ztp-card.sel:before{opacity:1;}',
+        // 底部批量操作条（多选模式常驻）：已选计数 + 全选/批量插入/批量处理/退出
+        '.ztp-batchbar{flex:none;display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:.5px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-layer-2);}',
+        '.ztp-batch-info{font-size:12px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}',
+
         // 详情
         '.ztp-detail-bar{display:flex;align-items:center;gap:8px;margin:0 0 8px;}',
         '.ztp-back{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;height:24px;padding:0 6px 0 2px;border-radius:var(--dsw-radius-sm);cursor:pointer;display:inline-flex;align-items:center;gap:3px;}',
@@ -398,6 +417,19 @@
           h('path', { d: 'M3 4.3c0-.72.58-1.3 1.3-1.3h7.4c.72 0 1.3.58 1.3 1.3v5c0 .72-.58 1.3-1.3 1.3H7.8L5.2 13.2v-2.6h-.9C3.58 10.6 3 10.02 3 9.3z', stroke: 'currentColor', strokeWidth: 1.1, strokeLinejoin: 'round' }),
         );
       }
+      /** 批量选择入口（工具栏）：方框 + 勾。 */
+      function BatchIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('rect', { x: 2.5, y: 2.5, width: 11, height: 11, rx: 2.5, stroke: 'currentColor', strokeWidth: 1.2 }),
+          h('path', { d: 'M5.4 8.3l1.8 1.8 3.4-3.8', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+        );
+      }
+      /** 勾选框内的小对勾（ztp-check.on 时显示）。 */
+      function CheckMarkIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('path', { d: 'M4.2 8.6l2.4 2.4 5.2-5.6', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+        );
+      }
 
       // ───────────────────────── 数据/文案工具 ─────────────────────────
       var KIND_LABEL = { task: '任务', bug: 'Bug', story: '需求' };
@@ -549,6 +581,52 @@
         return true;
       }
 
+      // ───────────── 自动轮询 + 新指派检测（Idea 1，2026-10-25）─────────────
+      // 面板挂载期间每 POLL_INTERVAL_MS 静默拉一次 mine（host 侧 60s 缓存兜底），
+      // 成功 → 连接点转绿 + 与上次键集合比对发现新指派时 toast 提醒；
+      // 失败 → 连接点转红 + 离线横条常驻（数据兜底走 mine.v1 快照/上次列表），
+      // 不弹 toast（离线期间每 5 分钟弹一次会把人吵死）。基线按账号分桶存模块级
+      // 变量：面板卸载重挂不清零（避免重复提醒），首次见到只建基线（同 watchEval 模式）。
+      var POLL_INTERVAL_MS = 5 * 60 * 1000;
+      var lastMineIds = {}; // activeId → { 'kind-id': true }（新指派检测基线）
+
+      /** mine.cards → 键集合（基线/对比用）。 */
+      function cardKeyMap(cards) {
+        var m = {};
+        var list = Array.isArray(cards) ? cards : [];
+        for (var i = 0; i < list.length; i++) {
+          var c = list[i];
+          if (c && c.kind && c.id != null) m[c.kind + '-' + c.id] = true;
+        }
+        return m;
+      }
+      /** 与基线比对的新指派：prev 为 null（首次，只建基线不提醒）；
+       *  返回 {count, byKind}（无新增时 count=0）。 */
+      function diffNewCards(prev, cards) {
+        if (!prev) return { count: 0, byKind: {} };
+        var byKind = {};
+        var list = Array.isArray(cards) ? cards : [];
+        for (var i = 0; i < list.length; i++) {
+          var c = list[i];
+          if (!c || !c.kind || c.id == null) continue;
+          if (prev[c.kind + '-' + c.id]) continue;
+          byKind[c.kind] = (byKind[c.kind] || 0) + 1;
+        }
+        var count = 0;
+        for (var k in byKind) count += byKind[k];
+        return { count: count, byKind: byKind };
+      }
+      /** 新指派 toast 文案：'禅道新指派 2 条（任务×1 · Bug×1）'。 */
+      function newAssignedText(diff) {
+        if (!diff || !diff.count) return '';
+        var parts = [];
+        for (var i = 0; i < KIND_ORDER.length; i++) {
+          var k = KIND_ORDER[i];
+          if (diff.byKind[k]) parts.push((KIND_LABEL[k] || k) + '×' + diff.byKind[k]);
+        }
+        return '禅道新指派 ' + diff.count + ' 条' + (parts.length ? '（' + parts.join(' · ') + '）' : '');
+      }
+
       /**
        * 描述文本里去掉图片占位标记（`[图片：35861.png]` / `[图片]`）。
        * 图片本身会作为真实附件插入，文本里不再保留占位符。
@@ -572,6 +650,41 @@
           lines.push(desc);
         }
         return lines.join('\n');
+      }
+
+      // ───────────── 批量下发（Idea 2，2026-10-25）─────────────
+      /** 批量 Markdown：一句总述 + 每卡一节（节格式与单卡 cardToMarkdown 完全一致，
+       *  用列表级数据不逐个拉详情——单卡「处理」同样只用列表数据，行为对齐）。 */
+      function batchToMarkdown(cards) {
+        var list = (Array.isArray(cards) ? cards : []).filter(Boolean);
+        if (!list.length) return '';
+        var head = '共 ' + list.length + ' 项指派给我的禅道事项，请逐项分析处理：';
+        return head + '\n\n' + list.map(function (c) { return cardToMarkdown(c, null); }).join('\n\n');
+      }
+      /** 批量摘要：{count, label, byKind}，label 形如 '任务×1 · Bug×2'（按 task→bug→story 列非零项）。 */
+      function batchSummary(cards) {
+        var m = { task: 0, bug: 0, story: 0 };
+        var list = Array.isArray(cards) ? cards : [];
+        for (var i = 0; i < list.length; i++) {
+          var c = list[i];
+          if (c && m[c.kind] != null) m[c.kind]++;
+        }
+        var parts = [];
+        for (var j = 0; j < KIND_ORDER.length; j++) {
+          var k = KIND_ORDER[j];
+          if (m[k]) parts.push((KIND_LABEL[k] || k) + '×' + m[k]);
+        }
+        return { count: list.length, label: parts.join(' · '), byKind: m };
+      }
+      /** 批量图片：按卡片顺序合并图片引用，DSH 单消息 ≤20 张，超出截断。 */
+      function mergeCardImages(cards) {
+        var out = [];
+        var list = Array.isArray(cards) ? cards : [];
+        for (var i = 0; i < list.length && out.length < 20; i++) {
+          var imgs = imagesOf(list[i], null);
+          for (var j = 0; j < imgs.length && out.length < 20; j++) out.push(imgs[j]);
+        }
+        return out;
       }
 
       // ───────────────────────── composer 写入（M3）─────────────────────────
@@ -1953,6 +2066,20 @@
       }
 
       // ───────────────────────── 组件 ─────────────────────────
+      /**
+       * 离线提示条（Idea 1）：拉取失败且面板仍有数据可展示时常驻显示（错误视图只在
+       * 无数据时抢占），点击重试强刷。at 传上次数据时间，有则说明正在看的是缓存。
+       */
+      function OfflineBar(props) {
+        var at = Number(props && props.at) || 0;
+        return h('div', { className: 'ztp-offline', role: 'alert' },
+          h('span', { className: 'ztp-offline-t' },
+            '禅道当前不可达' + (at
+              ? '，正在展示 ' + new Date(at).toLocaleTimeString() + ' 的缓存数据'
+              : '，数据可能不是最新')),
+          h('button', { className: 'ztp-err-retry', type: 'button', onClick: props && props.onRetry }, '重试'));
+      }
+
       function KindTag(props) {
         return h('span', { className: 'ztp-tag ' + props.kind }, KIND_LABEL[props.kind] || props.kind);
       }
@@ -1989,8 +2116,13 @@
           statusLabel(props.status));
       }
 
+      /**
+       * 列表卡片。selectable（Idea 2 批量模式）：点击=勾选/取消、左缘圆形勾选框、
+       * 不显示动作行/外链/拖拽（点卡片就是为了选，别的东西都是误触源）。
+       */
       function CardItem(props) {
         var c = props.card;
+        var sel = props.selectable === true;
         var dl = deadlineInfo(c.deadline);
         var dlCls = (!isFinalCard(c) && dl)
           ? (dl.overdue ? ' overdue' : dl.soon ? ' soon' : '') : '';
@@ -1998,23 +2130,29 @@
         return h('div', {
           className: 'ztp-card ztp-k-' + c.kind
             + (props.active ? ' on' : '')
+            + (sel && props.selected ? ' sel' : '')
             + (live === 'ask' ? ' ztp-live-ask' : live === 'done' ? ' ztp-live-done' : ''),
-          draggable: true,
-          title: '点击查看详情，可拖拽到对话输入框',
-          onDragStart: function (e) {
+          draggable: !sel,
+          title: sel ? '点击选中/取消选中' : '点击查看详情，可拖拽到对话输入框',
+          onDragStart: sel ? undefined : function (e) {
             try {
               e.dataTransfer.setData('text/plain', cardToMarkdown(c));
               e.dataTransfer.effectAllowed = 'copy';
             } catch (err) { /* 忽略 */ }
           },
-          onClick: function () { props.onOpen(c); },
+          onClick: function () {
+            if (sel) { if (props.onToggleSel) props.onToggleSel(c); return; }
+            props.onOpen(c);
+          },
         },
           h('div', { className: 'ztp-top' },
+            sel ? h('span', { className: 'ztp-check' + (props.selected ? ' on' : '') },
+              props.selected ? h(CheckMarkIcon) : null) : null,
             h(KindTag, { kind: c.kind }),
             live ? h(LiveBadge, { state: live, since: props.liveSince || null }) : null,
             h('span', { className: 'ztp-id' }, '#' + c.id),
             // 禅道超链接在卡片上（详情里不再放链接/按钮）；draggable 关掉避免链接拖拽覆盖卡片 Markdown 拖拽
-            c.url ? h('a', {
+            (!sel && c.url) ? h('a', {
               className: 'ztp-zlink', href: c.url, target: '_blank', rel: 'noreferrer', draggable: false,
               title: '在禅道打开' + (KIND_LABEL[c.kind] || c.kind) + ' #' + c.id,
               onClick: function (e) { e.stopPropagation(); },
@@ -2029,7 +2167,7 @@
               }, (dlCls.indexOf('overdue') !== -1 ? '逾期 ' : '截止 ') + fmtDate(c.deadline)) : null,
               c.openedBy ? h('span', null, c.openedBy + ' 创建') : null)),
           h('div', { className: 'ztp-card-title' }, c.title || ''),
-          h('div', { className: 'ztp-acts' },
+          sel ? null : h('div', { className: 'ztp-acts' },
             props.linkView ? h('button', {
               className: 'ztp-slink' + (props.linkView.state === 'dead' ? ' dead' : ''),
               type: 'button',
@@ -2505,11 +2643,14 @@
        * 「处理」/「插入对话」确认弹层：先选工作区与模型（provider/模型 + 思考强度）。
        * intent='dispatch'（默认）：新建会话后台自动发送、不跳转；
        * intent='insert'：新建会话并跳转过去、只填草稿不自动发送（2026-10-25 改版）。
+       * props.batch（Idea 2 批量模式）= batchSummary() 结果：标题/副标题换批量文案，
+       * md/images 此时是 N 卡合并后的任务背景；card 仍传首卡作 fallback。
        * 服务不可用/列表为空时对应下拉退化为单项说明，仍可直接确认（走默认）。
        */
       function DispatchDialog(props) {
-        var card = props.card;
+        var card = props.card || { kind: '', id: '', title: '' };
         var insert = props.intent === 'insert';
+        var batch = props.batch || null;
         var ctx0 = useState(null);   // collectDispatchContext 结果
         var wsSel = useState(null);  // 选中 workspaceId | '__cwd__' | null
         var modelKey = useState(null); // 选中 'provider\u0000model' | null
@@ -2564,10 +2705,14 @@
             choice.model = { provider: modelKey[0].slice(0, sep), model: modelKey[0].slice(sep + 1) };
             if (effortSel[0]) choice.model.reasoningEffort = effortSel[0];
           }
-          // 数据随调用回传（card/md/images/activeAcct/intent 来自当前 render 的 props），
+          // 数据随调用回传（card/cards/md/images/activeAcct/intent 来自当前 render 的 props），
           // 接收方 useCallback 闭包里读不到最新 state（见 sendDispatch 注释）
           try {
-            props.onSend(choice, { card: card, md: props.md, images: props.images, activeAcct: props.activeAcct, intent: props.intent || 'dispatch' });
+            props.onSend(choice, {
+              card: card, cards: props.cards || null,
+              md: props.md, images: props.images,
+              activeAcct: props.activeAcct, intent: props.intent || 'dispatch',
+            });
           } catch (e) {
             busy[1](false); // 发起本身失败 → 至少让弹层可以再操作/关闭
             try { console.error('[dsh-zentao-panel] dispatch send failed', e); } catch (e2) { /* 忽略 */ }
@@ -2583,8 +2728,11 @@
         return h('div', { className: 'ztp-disp-layer', onClick: close },
           h('div', { className: 'ztp-disp-pop', onClick: function (e) { e.stopPropagation(); } },
             h('div', { className: 'ztp-disp-title' },
-              (insert ? '插入到新会话 ' : '处理 ') + (KIND_LABEL[card.kind] || card.kind) + ' #' + card.id),
-            h('div', { className: 'ztp-disp-sub' }, card.title || ''),
+              batch
+                ? ((insert ? '插入到新会话：' : '批量处理：') + batch.count + ' 项')
+                : ((insert ? '插入到新会话 ' : '处理 ') + (KIND_LABEL[card.kind] || card.kind) + ' #' + card.id)),
+            h('div', { className: 'ztp-disp-sub' },
+              batch ? ((batch.label || String(batch.count) + ' 项') + '，将合并为一份任务背景') : (card.title || '')),
 
             h('label', { className: 'ztp-label' }, '工作区'),
             h('select', {
@@ -2732,6 +2880,9 @@
         var sortMode = useState('smart');// 列表排序（smart/deadline/pri/origin）
         var replyRev = useState(0);      // 结果摘要存储版本号（回读保存后 bump 重读）
         var replyBusy = useState(null);  // 正在回读的 linkKey（详情页 spinner 用）
+        var offline = useState(null);    // 连接状态（Idea 1）：null 未知 / true 离线 / false 在线
+        var selMode = useState(false);   // 批量多选模式（Idea 2）
+        var selKeys = useState({});      // 已选卡片键集合（'kind-id' → true，跨 tab 保留）
 
         // 订阅常驻监控：会话 running/等你决策/完成未读 的变化即时反映到卡片徽标上
         useEffect(function () {
@@ -2775,26 +2926,38 @@
             .catch(function () { /* host 未就绪 */ });
         }, [rpc]);
 
-        var loadMine = useCallback(function (refresh) {
-          loading[1](true); err[1](null);
+        /** 拉取列表。silent=true（Idea 1 轮询）：失败不弹 toast、不动 loading spinner，
+         *  只把连接状态标离线（离线横条常驻）；成功照常更新并检测新指派。 */
+        var loadMine = useCallback(function (refresh, silent) {
+          if (!silent) { loading[1](true); err[1](null); }
           Promise.resolve(rpc('zentao.mine', refresh ? { refresh: true } : {}))
             .then(function (r) {
-              loading[1](false);
+              if (!silent) loading[1](false);
               if (r && r.ok) {
                 mine[1](r.value);
+                offline[1](false);
                 // 列表快照落盘（按激活账号，paneCache.status 由先前的同步 effect 更新）：
                 // DSH 重启/面板重开时先渲染这份快照，禅道不可达时它就是兜底视图
                 writeMineSnapshot((paneCache.status && paneCache.status.activeId) || null, r.value);
                 status[1](function (s) { return s ? Object.assign({}, s, { cacheAt: r.value.at }) : s; });
+                // 新指派检测（Idea 1）：与模块级基线比对，首次只建基线不提醒；
+                // 基线按账号分桶，切回来若期间有新指派会在下一次拉取时提醒
+                var acct = (paneCache.status && paneCache.status.activeId) || 'anon';
+                var diff = diffNewCards(lastMineIds[acct], r.value.cards);
+                lastMineIds[acct] = cardKeyMap(r.value.cards);
+                if (diff.count) toast[1](newAssignedText(diff));
               } else {
                 var m = (r && r.error && r.error.message) || '数据加载失败';
-                err[1](m); toast[1](m);
+                offline[1](true); err[1](m);
+                if (!silent) toast[1](m);
               }
             })
             .catch(function (e) {
-              loading[1](false);
+              if (!silent) loading[1](false);
+              offline[1](true);
               var m = String((e && e.message) || e);
-              err[1](m); toast[1](m);
+              err[1](m);
+              if (!silent) toast[1](m);
             });
         }, [rpc]);
 
@@ -2809,6 +2972,17 @@
             loadMine(false);
           }
         }, [status[0] && status[0].configured, status[0] && status[0].activeId]);
+
+        // 自动轮询（Idea 1，2026-10-25）：面板挂载期间每 5 分钟静默刷新一次
+        // （host 侧 60s 缓存兜底，不会打爆禅道）；面板卸载即停——数据拉取只在
+        // 面板可见时做，常驻监控（M6 会话活性）不受影响。静默失败只标离线不弹 toast。
+        // ⚠️ deps 不能写 configured（var 在下方才赋值，这里构造 deps 时是 undefined），
+        // 与上面 effect 同款用表达式。
+        useEffect(function () {
+          if (!(status[0] && status[0].configured)) return;
+          var timer = setInterval(function () { loadMine(false, true); }, POLL_INTERVAL_MS);
+          return function () { clearInterval(timer); };
+        }, [status[0] && status[0].configured, loadMine]);
 
         // 会话头部「禅道」按钮跳转进来的定位（Idea 3）：paneCache.focus 带 {kind, id}，
         // 等列表数据就位（快照水合或拉取）后从卡片里找完整对象选中详情；列表已就位
@@ -2835,15 +3009,19 @@
 
         // 弹层确认：intent='dispatch' 走 dispatchToNewSession（后台自动发送、不跳转），
         // intent='insert' 走 insertToNewSession（新建会话、跳转过去、只填草稿不发送）；
-        // choice 即所选工作区/模型。
-        // ⚠️ 数据（card/md/images/activeAcct）由弹层回传：useCallback([]) 的闭包捕获
+        // choice 即所选工作区/模型。批量（Idea 2）时 d.cards 是 N 张卡、md/images 已合并，
+        // 成功后逐卡 saveSessionLink 指向同一会话（M6 徽标/chip 对每张卡照常工作）。
+        // ⚠️ 数据（card/cards/md/images/activeAcct）由弹层回传：useCallback([]) 的闭包捕获
         // 初次 render 的作用域，在里面读 dispatch[0]/status[0] 拿到的永远是旧值
         // （2026-10-24 真机踩坑：dispatch[0] 恒为 null → sendDispatch 直接 return，
         //  弹层永远卡在「创建中…」）。setState setter 引用稳定，可以直接调。
         var sendDispatch = useCallback(function (choice, d) {
-          if (!d || !d.card) return;
+          var cards = (d && d.cards && d.cards.length) ? d.cards
+            : (d && d.card ? [d.card] : null);
+          if (!d || !d.md || !cards || !cards.length) return;
           var insert = d.intent === 'insert';
           dispatch[1](null);
+          if (d.cards) { selMode[1](false); selKeys[1]({}); } // 批量发起即退出多选清空选中
           // 过程提示（sticky）：图片还在预取/注册、模型还在设置，让用户知道在等什么；
           // 完成后由下方结果 toast（非 sticky，自动消失）替换。「插入对话」跳转后
           // 面板卸载、toast 随之消失，提示只覆盖跳转前的准备期，无害。
@@ -2859,9 +3037,11 @@
             : dispatchToNewSession(d.md || '', d.images || [], choice);
           Promise.resolve(run).then(function (r) {
             if (r && r.ok) {
-              // 新会话建好即记录关联（draft 模式也算：内容已填进那个会话）
+              // 新会话建好即记录关联（draft 模式也算：内容已填进那个会话；批量逐卡指向同一会话）
               if (r.sessionId) {
-                saveSessionLink(d.activeAcct || null, d.card, r.sessionId);
+                for (var i = 0; i < cards.length; i++) {
+                  saveSessionLink(d.activeAcct || null, cards[i], r.sessionId);
+                }
                 linkRev[1](function (v) { return v + 1; });
               }
               toast[1](r.message); return;
@@ -2925,6 +3105,7 @@
           Promise.resolve(rpc('zentao.logout')).then(function () {
             removeMineSnapshot(paneCache.status && paneCache.status.activeId); // 凭据没了，快照一并清
             mine[1](null); detailCard[1](null); status[1](null); adding[1](false); acctOpen[1](false);
+            selMode[1](false); selKeys[1]({}); offline[1](null);
             loadStatus();
           });
         }, [rpc, loadStatus]);
@@ -2933,6 +3114,7 @@
         var switchAccount = useCallback(function (id) {
           acctOpen[1](false);
           mine[1](null); detailCard[1](null); err[1](null);
+          selMode[1](false); selKeys[1]({}); offline[1](null);
           Promise.resolve(rpc('zentao.switch', { id: id }))
             .then(function (r) { if (r && r.ok) status[1](r.value); })
             .catch(function () { /* host 未就绪 */ });
@@ -2942,6 +3124,7 @@
         var removeAccount = useCallback(function (a) {
           acctOpen[1](false);
           mine[1](null); detailCard[1](null); err[1](null); adding[1](false);
+          selMode[1](false); selKeys[1]({}); offline[1](null);
           removeMineSnapshot(a && a.id);
           Promise.resolve(rpc('zentao.logout', { id: a.id }))
             .then(function (r) { if (r && r.ok) status[1](r.value); })
@@ -2991,6 +3174,55 @@
           return m;
         }, [cards]);
 
+        // ───── 多选模式（Idea 2）：选中集合跨 tab 保留（切 tab 再选，批量时一起下发）；
+        // 退出多选/切账号/下发发起时清空；面板卸载重挂自然清空（不入 paneCache）。
+        var selCards = useMemo(function () {
+          var list = [];
+          if (!selMode[0]) return list;
+          var keys = selKeys[0];
+          for (var i = 0; i < cards.length; i++) {
+            var c = cards[i];
+            if (c && keys[c.kind + '-' + c.id]) list.push(c);
+          }
+          return list;
+        }, [cards, selKeys[0], selMode[0]]);
+        var selCount = selCards.length;
+        var selSummary = batchSummary(selCards);
+        var toggleSel = useCallback(function (card) {
+          selKeys[1](function (m) {
+            var k = card.kind + '-' + card.id;
+            var next = Object.assign({}, m);
+            if (next[k]) delete next[k]; else next[k] = true;
+            return next;
+          });
+        }, []);
+        var exitSelMode = function () { selMode[1](false); selKeys[1]({}); };
+        // 全选/取消全选作用于当前可见列表（当前 tab + 搜索过滤）
+        var filteredAllSel = filtered.length > 0 && filtered.every(function (c) {
+          return selKeys[0][c.kind + '-' + c.id];
+        });
+        var toggleSelAll = function () {
+          selKeys[1](function (m) {
+            var next = Object.assign({}, m);
+            for (var i = 0; i < filtered.length; i++) {
+              var c = filtered[i];
+              var k = c.kind + '-' + c.id;
+              if (filteredAllSel) delete next[k]; else next[k] = true;
+            }
+            return next;
+          });
+        };
+        // 批量弹层（render 作用域函数：读当次 render 的 selCards，避开 useCallback([]) 闭包坑）
+        var openBatchDialog = function (intent) {
+          if (!selCards.length) return;
+          dispatch[1]({
+            cards: selCards.slice(),
+            md: batchToMarkdown(selCards),
+            images: mergeCardImages(selCards),
+            intent: intent,
+          });
+        };
+
         /** 状态未知时先占位，避免登录表单闪一下。 */
         function renderLoading() {
           return h('div', { className: 'ztp-empty' }, h('span', { className: 'ztp-spin', style: { display: 'inline-block' } }));
@@ -3033,8 +3265,11 @@
             var on = detailCard[0] && detailCard[0].kind === c.kind
               && Number(detailCard[0].id) === Number(c.id);
             return h(CardItem, {
-              key: c.kind + '-' + c.id, card: c, active: on,
-              linkView: linkViewOf(c),
+              key: c.kind + '-' + c.id, card: c, active: on && !selMode[0],
+              selectable: selMode[0],
+              selected: Boolean(selMode[0] && selKeys[0][c.kind + '-' + c.id]),
+              onToggleSel: toggleSel,
+              linkView: selMode[0] ? null : linkViewOf(c),
               live: liveOf(c),
               liveSince: liveSinceOf(c),
               onOpenSession: function (c2) { openLinkedSession(c2, activeAcct); },
@@ -3092,6 +3327,14 @@
             h('span', { className: 'ztp-mast-mark' }, h(ZentaoGlyph, { size: 15 })),
             h('span', { className: 'ztp-mast-title' }, '禅道'),
             configured && st && st.baseUrl ? h('span', { className: 'ztp-mast-sub' }, hostOf(st.baseUrl)) : null,
+            // 连接状态点（Idea 1）：绿=已连禅道 / 红=不可达（闪烁）/ 灰=还没拉过
+            configured ? h('span', {
+              className: 'ztp-conn'
+                + (offline[0] === true ? ' off' : offline[0] === false ? ' on' : ''),
+              title: offline[0] === true
+                ? '禅道不可达（正在展示缓存数据）'
+                : (offline[0] === false ? '已连接禅道，每 5 分钟自动刷新' : '连接状态未知'),
+            }) : null,
             h('div', { className: 'ztp-grow' }),
             configured ? h('button', {
               className: 'ztp-acct', type: 'button',
@@ -3123,6 +3366,13 @@
               }, KIND_LABEL[k], counts[k] ? h('span', { className: 'ztp-num' }, counts[k]) : null);
             })),
             h('div', { className: 'ztp-grow' }),
+            // 批量选择入口（Idea 2）：进入后卡片点击=勾选，底部浮出批量操作条
+            h('button', {
+              className: 'ztp-tool', type: 'button',
+              title: selMode[0] ? '退出批量选择' : '批量选择多项一起处理',
+              style: selMode[0] ? { color: 'var(--dsw-alias-state-business-primary)' } : undefined,
+              onClick: function () { if (selMode[0]) exitSelMode(); else selMode[1](true); },
+            }, h(BatchIcon)),
             h('input', {
               className: 'ztp-search', type: 'text', value: search[0], spellCheck: false,
               placeholder: '搜索' + (KIND_LABEL[tab[0]] ? ' ' + KIND_LABEL[tab[0]] : '') + ' / #ID',
@@ -3140,6 +3390,33 @@
               h('option', { value: 'origin' }, '默认顺序'))) : null,
 
           middle,
+
+          // 离线常驻横条（Idea 1）：拉取失败但仍有数据可展示时提示「正在看缓存」；
+          // 无数据时错误视图（renderList 内）已抢占，不重复显示
+          configured && offline[0] === true
+            ? h(OfflineBar, { at: mine[0] && mine[0].at, onRetry: function () { loadMine(true); } }) : null,
+
+          // 批量操作条（Idea 2）：多选模式常驻底部
+          selMode[0] && configured ? h('div', { className: 'ztp-batchbar' },
+            h('span', { className: 'ztp-batch-info' },
+              '已选 ' + selCount + ' 项' + (selSummary.label ? '（' + selSummary.label + '）' : '')),
+            h('div', { className: 'ztp-grow' }),
+            h('button', {
+              className: 'ztp-btn', type: 'button', disabled: !filtered.length, onClick: toggleSelAll,
+            }, filteredAllSel ? '取消全选' : '全选当前列表'),
+            h('button', {
+              className: 'ztp-btn', type: 'button', disabled: !selCount,
+              title: '所选事项合并为一份任务背景，新建会话并跳转（不自动发送）',
+              onClick: function () { openBatchDialog('insert'); },
+            }, '批量插入'),
+            h('button', {
+              className: 'ztp-btn primary', type: 'button', disabled: !selCount,
+              title: '所选事项合并为一份任务背景，新建会话自动发送（不跳转）',
+              onClick: function () { openBatchDialog('dispatch'); },
+            }, '批量处理'),
+            h('button', {
+              className: 'ztp-tool', type: 'button', title: '退出多选', onClick: exitSelMode,
+            }, h(CloseIcon))) : null,
 
           configured && mine[0] ? h('div', { className: 'ztp-foot' },
             h('span', null, '共 ' + (String(search[0] || '').trim()
@@ -3160,7 +3437,9 @@
           }) : null,
 
           dispatch[0] ? h(DispatchDialog, {
-            card: dispatch[0].card,
+            card: dispatch[0].card || (dispatch[0].cards || [])[0] || null,
+            cards: dispatch[0].cards || null,
+            batch: dispatch[0].cards ? batchSummary(dispatch[0].cards) : null,
             images: dispatch[0].images,
             md: dispatch[0].md,
             intent: dispatch[0].intent,
@@ -3378,6 +3657,18 @@
         fmtActDate: fmtActDate,
         ActionTimeline: ActionTimeline,
         ACTION_FOLD_N: ACTION_FOLD_N,
+        // 自动轮询 + 在线/离线状态 + 新指派检测（Idea 1，2026-10-25）
+        POLL_INTERVAL_MS: POLL_INTERVAL_MS,
+        cardKeyMap: cardKeyMap,
+        diffNewCards: diffNewCards,
+        newAssignedText: newAssignedText,
+        OfflineBar: OfflineBar,
+        // 批量下发（Idea 2，2026-10-25）
+        batchToMarkdown: batchToMarkdown,
+        batchSummary: batchSummary,
+        mergeCardImages: mergeCardImages,
+        CardItem: CardItem,
+        DispatchDialog: DispatchDialog,
       };
       return module.exports;
     },

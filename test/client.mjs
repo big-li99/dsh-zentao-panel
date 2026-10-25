@@ -1249,5 +1249,120 @@ check('ActionTimeline：空数组 / 全空条目 → 整块不渲染',
   TT.ActionTimeline({ actions: [] }) === null
   && TT.ActionTimeline({ actions: [{ desc: '', comment: '', history: [] }, null] }) === null);
 
+// ── 自动轮询 + 在线/离线状态 + 新指派检测（Idea 1，2026-10-25）──
+check('POLL_INTERVAL_MS：3~10 分钟之间（host 60s 缓存之上、离线检测之下）',
+  TT.POLL_INTERVAL_MS >= 3 * 60 * 1000 && TT.POLL_INTERVAL_MS <= 10 * 60 * 1000);
+
+check('cardKeyMap：卡片列表 → kind-id 键集合 / 空输入不抛错',
+  JSON.stringify(TT.cardKeyMap([{ kind: 'bug', id: 1 }, { kind: 'task', id: 2 }])) === '{"bug-1":true,"task-2":true}'
+  && JSON.stringify(TT.cardKeyMap(null)) === '{}');
+
+check('diffNewCards：首次（基线 null）只建基线不报新增',
+  TT.diffNewCards(null, [{ kind: 'bug', id: 1 }]).count === 0);
+check('diffNewCards：与基线比对 → 新增按类型计数；老卡片不算',
+  JSON.stringify(TT.diffNewCards({ 'bug-1': true }, [
+    { kind: 'bug', id: 1 }, { kind: 'bug', id: 2 }, { kind: 'task', id: 3 },
+  ]).byKind) === '{"bug":1,"task":1}'
+  && TT.diffNewCards({}, [{ kind: 'story', id: 9 }]).count === 1
+  && TT.diffNewCards({ 'bug-1': true }, [{ kind: 'bug', id: 1 }]).count === 0);
+
+check('newAssignedText：类型明细按 任务→Bug→需求 排列 / 无新增为空串',
+  TT.newAssignedText({ count: 2, byKind: { bug: 1, task: 1 } }) === '禅道新指派 2 条（任务×1 · Bug×1）'
+  && TT.newAssignedText({ count: 3, byKind: { bug: 2, story: 1 } }) === '禅道新指派 3 条（Bug×2 · 需求×1）'
+  && TT.newAssignedText({ count: 0, byKind: {} }) === '');
+
+let obRetryHit = false;
+const obAt = TT.OfflineBar({ at: 1761000000000, onRetry: () => { obRetryHit = true; } });
+const obNoAt = TT.OfflineBar({ at: 0, onRetry: () => {} });
+check('OfflineBar：不可达文案 + 缓存时间说明 + 重试按钮；无数据时间不提缓存',
+  obAt.props.className === 'ztp-offline' && obAt.props.role === 'alert'
+  && obAt.children[0].children[0].includes('禅道当前不可达')
+  && obAt.children[0].children[0].includes('的缓存数据')
+  && !obNoAt.children[0].children[0].includes('的缓存数据')
+  && obAt.children[1].children[0] === '重试');
+obAt.children[1].props.onClick();
+check('OfflineBar：重试按钮绑定 onRetry', obRetryHit);
+
+// ── 批量下发（Idea 2，2026-10-25）：多选合并为一份任务背景 ──
+const bc1 = { kind: 'bug', id: 1, title: '登录报错', descBrief: '步骤A' };
+const bc2 = { kind: 'bug', id: 2, title: '导出失败', descBrief: '步骤B' };
+const bc3 = { kind: 'task', id: 3, title: '联调支持' };
+const bmd = TT.batchToMarkdown([bc1, bc2, bc3]);
+check('batchToMarkdown：总述句 + 每卡一节（节格式与单卡一致）/ 空列表为空串',
+  bmd.startsWith('共 3 项指派给我的禅道事项，请逐项分析处理：')
+  && bmd.includes('## 禅道Bug #1：登录报错') && bmd.includes('### 重现步骤/描述')
+  && bmd.includes('## 禅道Bug #2：导出失败') && bmd.includes('## 禅道任务 #3：联调支持')
+  && (bmd.match(/^## /gm) || []).length === 3
+  && TT.batchToMarkdown([]) === '' && TT.batchToMarkdown(null) === '');
+
+check('batchSummary：count/label 按任务→Bug→需求顺序列非零项',
+  (() => {
+    const s = TT.batchSummary([bc1, bc2, bc3]);
+    return s.count === 3 && s.label === '任务×1 · Bug×2'
+      && s.byKind.bug === 2 && s.byKind.task === 1 && s.byKind.story === 0;
+  })()
+  && TT.batchSummary([]).label === '');
+
+const imgCard = (id, n) => ({
+  kind: 'bug', id, title: 't' + id,
+  images: Array.from({ length: n }, (_, j) => ({ url: `http://z/${id}-${j}.png`, name: `${id}-${j}.png` })),
+});
+check('mergeCardImages：按卡顺序合并 + DSH 单消息 20 张上限截断',
+  TT.mergeCardImages([imgCard(1, 2), imgCard(2, 2)]).length === 4
+  && TT.mergeCardImages([imgCard(1, 2), imgCard(2, 2)]).every(Boolean)
+  && TT.mergeCardImages(Array.from({ length: 12 }, (_, i) => imgCard(i + 1, 2))).length === 20);
+
+// 卡片多选渲染（fake createElement 不展平 children，直接按槽位断言）
+let toggled = null;
+const selNode = TT.CardItem({
+  card: bc1, selectable: true, selected: true, live: null,
+  onToggleSel: (c) => { toggled = c; }, onOpen: () => { throw new Error('不应打开详情'); },
+});
+const normNode = TT.CardItem({
+  card: bc1, live: null, linkView: null,
+  onOpen: (c) => { toggled = c; },
+});
+const selCheck = selNode.children[0].children[0];
+check('CardItem 多选模式：选中描边 + 圆形勾选框 + 无动作行/不可拖拽 + 点击=勾选',
+  selNode.props.className.split(' ').includes('sel')
+  && selCheck.props.className === 'ztp-check on' && typeof selCheck.children[0] === 'object'
+  && !selNode.children.some((x) => x && x.props && x.props.className === 'ztp-acts')
+  && selNode.props.draggable === false
+  && selNode.props.title === '点击选中/取消选中'
+  && (selNode.props.onClick(), toggled === bc1));
+check('CardItem 普通模式回归：无勾选框 + 动作行仍在 + 可拖拽 + 点击=打开详情',
+  normNode.children[0].children.every((x) => !(x && x.props && String(x.props.className).startsWith('ztp-check')))
+  && normNode.children.some((x) => x && x.props && x.props.className === 'ztp-acts')
+  && normNode.props.draggable === true
+  && (toggled = null, normNode.props.onClick(), toggled === bc1));
+
+// 批量弹层标题（fake useState 恒初值：下拉区显示「正在读取…」属预期，只断言标题/副标题）
+const ddBatch = TT.DispatchDialog({
+  card: bc1, cards: [bc1, bc2, bc3], batch: TT.batchSummary([bc1, bc2, bc3]),
+  images: [], md: bmd, intent: 'dispatch', activeAcct: 'a',
+  onSend: () => {}, onClose: () => {},
+});
+const ddPop = ddBatch.children[0];
+check('DispatchDialog 批量模式：标题「批量处理：N 项」+ 类型摘要副标题',
+  ddPop.children[0].children[0] === '批量处理：3 项'
+  && ddPop.children[1].children[0] === '任务×1 · Bug×2，将合并为一份任务背景');
+const ddSingle = TT.DispatchDialog({
+  card: bc1, images: [], md: 'x', intent: 'dispatch', activeAcct: 'a',
+  onSend: () => {}, onClose: () => {},
+});
+check('DispatchDialog 单卡模式回归：标题仍为「处理 Bug #id」',
+  ddSingle.children[0].children[0].children[0] === '处理 Bug #1');
+
+// 批量会话关联：N 卡指向同一会话，反查（会话头部「禅道」按钮用）能命中
+TT.saveSessionLink('acctB', bc1, 's-batch');
+TT.saveSessionLink('acctB', bc2, 's-batch');
+TT.saveSessionLink('acctB', bc3, 's-batch');
+const lmBatch = TT.readLinkMap();
+check('批量下发后逐卡关联同一会话 + findLinkBySession 反查命中',
+  lmBatch['acctB/bug-1'] && lmBatch['acctB/bug-1'].sessionId === 's-batch'
+  && lmBatch['acctB/bug-2'] && lmBatch['acctB/bug-2'].sessionId === 's-batch'
+  && lmBatch['acctB/task-3'] && lmBatch['acctB/task-3'].sessionId === 's-batch'
+  && TT.findLinkBySession(lmBatch, 's-batch') !== null);
+
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);

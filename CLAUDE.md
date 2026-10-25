@@ -23,7 +23,7 @@
 | M1 host 插件（登录/取数/RPC） | ✅ 代码完成，测试全绿，**已装入 desktop profile 加载树**（重启 DSH Desktop 激活） |
 | M2 client 左侧栏全局面板 | ✅ 2026-10-24 已改为**左侧栏全局面板**入口（对齐 dsh-mnemon「记忆系统」：`sidebar.panellist` 图标行 + `main` keyed 面板，见 §5.1），样式走 DSH token 支持日/夜；注册契约有测试，待真机目视确认 |
 | M3 插入输入框 + 新会话下发 | ✅ 服务级 `setDraft` 真机可用；**描述里的截图改为真实图片附件**（`conversation.createDrafts` + `facade.addAttachments`，见 §4.1）；新会话下发待真机复验 |
-| M4 打磨 | 🔄 进行中（细节见各节）：2026-10-24 修会话超时静默空白 + 拉取失败 toast/错误视图；「处理」改弹层确认式（§4.2）+ 关联会话 chip（§4.3）+ 弹层闭包 bug 修复与下发时序优化 + 入口改左侧栏全局面板（§5.1）+「处理」不自动跳转（§4.2 末）；2026-10-25「插入对话」改弹层式新会话自动跳转不自动发（§4.5）；**同日新增列表三件套：搜索/排序/逾期高亮 + mine.v1 快照秒开 + 处理结果回读（§4.7，待真机目视确认）**；其余未做（自动轮询、禅道不可达文案） |
+| M4 打磨 | 🔄 进行中（细节见各节）：2026-10-24 修会话超时静默空白 + 拉取失败 toast/错误视图；「处理」改弹层确认式（§4.2）+ 关联会话 chip（§4.3）+ 弹层闭包 bug 修复与下发时序优化 + 入口改左侧栏全局面板（§5.1）+「处理」不自动跳转（§4.2 末）；2026-10-25「插入对话」改弹层式新会话自动跳转不自动发（§4.5）；**同日新增列表三件套：搜索/排序/逾期高亮 + mine.v1 快照秒开 + 处理结果回读（§4.7，待真机目视确认）**；**自动轮询/在线离线状态/新指派提醒 + 列表多选批量下发已完成（§4.9，待真机目视确认）**——M4 既有欠账已清零 |
 | M5 多账号 | ✅ 2026-10-24 完成：schema v2（accounts[]+activeId，旧格式自动迁移）、每账号独立 client/cookie/缓存、账号菜单切换/添加/按账号移除；测试全绿（multi 25 项 + host 新增 4 项），待真机目视确认 |
 | M6 实时状态 | ✅ 2026-10-24 完成：**禅道卡片活性徽标（处理中/等你决策/已完成）+ 完成/等决策常驻提醒 toast（「去看看」跳回会话）**，信号来自 DSH 宿主 `uiSession.sessionStatus`（见 §4.4）。当天先做过一版「鲸鱼娘办公室」可视化面板（左侧栏第二面板 + 自绘 SVG 工位场景，角色参考 Neko3000/deepseek-whalechan），**用户看过后明确否决（「太垃圾」）已整体移除**——不要再做办公室/娘化角色类可视化；保留监控内核改为卡片上的活性体现。2026-10-25 补**处理进度持久化（states.v1）+ 不在面板列表事项的定时清理**（见 §4.6，待真机目视确认）。仅 client 改动，⌘R 生效 |
 
@@ -416,6 +416,22 @@ Neko3000/deepseek-whalechan 公开规范——**注意其图片素材不在开�
 - **client**（`client.js`）：DetailView「截图」区下加「最近动态（N）」区 + `ActionTimeline` 组件——时间正序、默认折叠只显示最近 5 条（`ACTION_FOLD_N`，`slice` 尾部）、「展开全部（N 条）/收起」按钮（fold state 在 `useEffect([props.actions])` 里重置，切卡片不残留展开态）；每条 = desc 主行 + `fmtActDate` 紧凑日期（今年 `MM-DD HH:mm`、往年带年份）+ 备注块（`stripImageMarkers`）+ 备注**图片复用 DetailImages 真实渲染** + 变更明细行（`field：old → new`，old 空只显 new）。样式 `.ztp-act*` 走 `--dsw-alias-*` token。
 - **⚠️ story 详情 404 真相（M3 起就坏）**：探测中曾误判为「session 产品上下文污染 + vision=rnd 重试可恢复」，写单测时揭穿——client 把 story 简单加 s 拼成 `/api.php/v1/storys/{id}`（正确复数 `stories`），**story 详情从 M3 起一直 404「不存在」**。修复：`zentao-client.mjs` 的 `V1_KIND_PATHS` 显式映射；vision 重试方案已删（错误归因的产物）。教训：某类对象接口整体 404 先查 URL 拼写。
 - 测试：`protocol` +5（stories 拼写 / 真 404 / toActions 3 项）、`client` +8（fmtActDate / ActionTimeline 折叠·展开·备注图·变更·空态；**fake createElement 不展平数组 children，children.flat(2) 后再断言**）、`host` +2（actions 透传、story detail 真机——实测 story#8 有 4 条动态）。**host 测试的 logout 会清掉借用凭据目录的账号**（/tmp/zt-smoke 的 config 已被消耗，下次跑 host.mjs 需重新提供凭据）。
+
+### 4.9 自动轮询/离线状态 + 批量下发（2026-10-25，用户批准的 Idea 1 + Idea 2）
+
+用户从三个提案里选了两个（Idea 3「日报生成」未做）。**全部仅 client 改动，⌘R 生效**。测试 +14（client 224 项全绿）。
+
+**Idea 1：列表自动轮询 + 在线/离线状态 + 新指派提醒**（补齐 M4 欠的「自动轮询、禅道不可达文案」）：
+- **轮询**：ZentaoPane 挂载且 configured 时 `setInterval` 每 `POLL_INTERVAL_MS = 5min` 调 `loadMine(false, true)`（silent），卸载即停——数据拉取只在面板可见时做（M6 会话活性监控照常常驻）。host 侧 60s 缓存天然防打爆。**⚠️ 轮询 effect 的 deps 不能写 `configured`**——它是函数体后半段才赋值的 var，构造 deps 数组时是 undefined，轮询永远不启动；要用 `[status[0] && status[0].configured, loadMine]` 表达式（与 activeId effect 同款）。
+- **loadMine(refresh, silent)**：silent=true（轮询）时不动 loading spinner、失败不弹 toast（离线期间每 5 分钟弹一次会吵死），只翻转 `offline` state（null 未知/true 离线/false 在线）；手动刷新失败仍弹 toast。成功时做**新指派检测**：与模块级基线 `lastMineIds[activeId]`（kind-id 键集合）比对，`diffNewCards` 首次（基线 null）只建基线不提醒（同 watchEval 模式），之后有新增 → toast `newAssignedText`（「禅道新指派 2 条（任务×1 · Bug×1）」，类型按 KIND_ORDER 排）。基线按账号分桶、面板卸载重挂不清零（防重复提醒）；切回旧账号若期间有新指派会在下次拉取时提醒。
+- **UI**：mast 标题旁连接小点（`.ztp-conn`：绿=已连/红=不可达闪烁/灰=未知）；离线且仍有数据时列表上方常驻 `OfflineBar`（`.ztp-offline`：「禅道当前不可达，正在展示 HH:mm 的缓存数据」+ 重试按钮=强刷）；无数据时错误视图照旧抢占。离线兜底数据源就是 mine.v1 快照/上次列表（§4.7②）。
+- 纯函数 `cardKeyMap/diffNewCards/newAssignedText` + `OfflineBar` 进 `_test`。
+
+**Idea 2：列表多选 + 批量处理/批量插入**（「一批 Bug 一起丢给 agent 排查」场景）：
+- **多选模式**：head 工具行加「批量」入口按钮（`BatchIcon`）→ `selMode=true`：卡片点击=勾选/取消（不打开详情）、左缘圆形勾选框（`.ztp-check`）、隐藏动作行/外链/拖拽（`.ztp-card.sel` 选中描边）、保留活性徽标（帮你判断选哪些）。底部 `batchbar`：已选计数（`batchSummary` label 如「任务×1 · Bug×2」）+「全选当前列表/取消全选」（作用于 filtered=当前 tab+搜索）+「批量插入」「批量处理」+ 退出。**选中集合 `selKeys` 跨 tab 保留**（切 tab 再选，批量时一起下发）；退出多选/切账号/登出/移除账号清空；不入 paneCache（重挂自然清空）。
+- **批量下发链路**：`openBatchDialog(intent)` 组装 `{cards, md: batchToMarkdown(cards), images: mergeCardImages(cards)}` → 复用 `DispatchDialog`（新 props `cards/batch`：标题「批量处理：3 项」、副标题类型摘要；单卡路径零变化，card 传首卡作 fallback）→ `sendDispatch` 支持 `d.cards`：走现有 `dispatchToNewSession`/`insertToNewSession`（md 是一份合并背景，images 合并截 20 张=DSH 单消息上限）→ 成功后**逐卡 `saveSessionLink` 指向同一会话**（M6 徽标/chip/反向跳转对每张卡照常工作；watchEval 同帧同 sessionId 只产生一次边沿 toast，天然去重）→ 发起即退出多选清空选中。失败降级照旧：合并 md 插当前会话/剪贴板。
+- **闭包坑照旧**：`openBatchDialog/toggleSelAll` 是 render 作用域函数（读当次 selCards/filtered，**不能**写进 `useCallback([])`）；`toggleSel` 用函数式 setState（setter 引用稳定）。
+- 纯函数 `batchToMarkdown/batchSummary/mergeCardImages` + `CardItem/DispatchDialog` 进 `_test`。测试注意：fake createElement 下 className 断言要 `.split(' ').includes('sel')`——`ztp-k-bug` 类型类夹在中间，连续子串匹配会误判。
 
 ### 5. DSH 插件体系（本机实测）
 
