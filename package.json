@@ -1,6 +1,6 @@
 {
   "name": "dsh-zentao-panel",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "DeepSeekRuntime（DSH）禅道工作台插件：左侧栏全局面板查看指派给我的任务/Bug/需求，一键转为 DSH 对话上下文。",
   "license": "MIT",
   "repository": {
