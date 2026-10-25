@@ -198,6 +198,8 @@
         '.ztp-kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin-top:10px;font-size:12px;color:var(--dsw-alias-label-secondary);}',
         '.ztp-kv dt{color:var(--dsw-alias-label-tertiary);white-space:nowrap;}',
         '.ztp-kv dd{margin:0;word-break:break-word;}',
+        // 完成闭环按钮行（详情元信息卡下，仅 done 状态渲染）
+        '.ztp-finish-row{margin-top:12px;display:flex;}',
         '.ztp-desc{margin-top:10px;padding:10px 12px;border-radius:var(--dsw-radius-md);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);font-size:12.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word;}',
         '.ztp-section{font-size:11.5px;color:var(--dsw-alias-label-tertiary);margin:14px 2px 6px;}',
         // 处理结果摘要（关联会话最新回复，replies.v1 缓存）：详情页回读 agent 最后说了什么。
@@ -257,6 +259,9 @@
         '.ztp-login-sub{margin:6px 0 16px;font-size:12px;line-height:1.7;color:var(--dsw-alias-label-tertiary);}',
         '.ztp-label{display:block;font-size:12px;color:var(--dsw-alias-label-secondary);margin:12px 0 5px;}',
         '.ztp-input{width:100%;height:32px;box-sizing:border-box;padding:0 10px;border-radius:var(--dsw-radius-md);border:.5px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;outline:none;}',
+        // 附加指令 textarea（弹层）：覆盖 .ztp-input 的高度/内边距，可纵向拉伸
+        '.ztp-instr{height:auto;min-height:52px;padding:7px 10px;resize:vertical;line-height:1.5;}',
+        '.ztp-instr:focus{border-color:var(--dsw-alias-border-l4);}',
         '.ztp-input::placeholder{color:var(--dsw-alias-label-caption);}',
         '.ztp-input:focus{border-color:var(--dsw-alias-border-l4);box-shadow:0 0 0 1px var(--dsw-alias-border-l4);}',
 
@@ -708,6 +713,46 @@
           for (var j = 0; j < imgs.length && out.length < 20; j++) out.push(imgs[j]);
         }
         return out;
+      }
+
+      // ───────── 附加指令（2026-10-25 迭代）：弹层可选输入，拼到任务背景末尾 ─────────
+      var INSTR_KEY = 'dsh-zentao-panel.instr.v1';
+      var instrFallback = null; // localStorage 不可用时的进程内兜底（与 links.v1 同模式）
+
+      function readLastInstruction() {
+        try {
+          var s = root.localStorage;
+          var v = s && s.getItem(INSTR_KEY);
+          return typeof v === 'string' ? v : String(instrFallback || '');
+        } catch (e) { return String(instrFallback || ''); }
+      }
+      function saveLastInstruction(text) {
+        var v = String(text == null ? '' : text);
+        instrFallback = v;
+        try {
+          var s = root.localStorage;
+          if (s) s.setItem(INSTR_KEY, v);
+        } catch (e) { /* 配额满等 → 内存兜底已写 */ }
+      }
+      /** 附加指令拼进任务背景（空白指令原样返回；指令 trim 后整段作为「## 处理要求」）。 */
+      function appendInstruction(md, instr) {
+        var t = String(instr == null ? '' : instr).trim();
+        if (!t) return md;
+        return String(md == null ? '' : md) + '\n\n## 处理要求\n\n' + t;
+      }
+
+      // ───────── 完成闭环（2026-10-25 迭代）：已完成卡片深链到禅道操作页 ─────────
+      // 只读边界的最后一步留给禅道网页表单：task-finish / bug-resolve / story-close
+      // 与查看页同 base（模块-方法-id.html，PATH_INFO 约定），由 card.url 替换得到。
+      var FINISH_VIEWS = { task: 'task-finish', bug: 'bug-resolve', story: 'story-close' };
+
+      /** card.url（*-view-{id}.html）→ 操作页深链；kind 不认识 / url 形态不符 → null。 */
+      function finishUrl(card) {
+        if (!card) return null;
+        var method = FINISH_VIEWS[card.kind];
+        if (!method) return null;
+        var m = /^(.*\/)(?:task|bug|story)-view-(\d+)\.html?$/.exec(String(card.url || ''));
+        return m ? (m[1] + method + '-' + m[2] + '.html') : null;
       }
 
       // ───────────────────────── composer 写入（M3）─────────────────────────
@@ -2512,6 +2557,14 @@
               d.estStarted ? h('dt', null, '预计开始') : null, d.estStarted ? h('dd', null, fmtDate(d.estStarted)) : null,
               d.resolvedBuild ? h('dt', null, '解决版本') : null, d.resolvedBuild ? h('dd', null, String(d.resolvedBuild)) : null)),
 
+          // 完成闭环（2026-10-25）：agent 处理完（done）才显示——深链到禅道的
+          // 完成/解决操作页，由人在禅道里做最终操作（插件保持只读，不 API 回写）
+          (props.live === 'done' && finishUrl(card)) ? h('div', { className: 'ztp-finish-row' },
+            h('a', {
+              className: 'ztp-btn primary', href: finishUrl(card), target: '_blank', rel: 'noreferrer',
+              title: '在禅道打开该事项的完成/解决表单页（由你确认提交）',
+            }, '去禅道标记完成', h(LinkIcon))) : null,
+
           err[0] ? h('div', { className: 'ztp-err' }, err[0]) : null,
 
           // 处理结果摘要（提案 3）：关联会话里最后一条 assistant 回复（replies.v1 缓存，
@@ -2781,6 +2834,7 @@
         var wsSel = useState(null);  // 选中 workspaceId | '__cwd__' | null
         var modelKey = useState(null); // 选中 'provider\u0000model' | null
         var effortSel = useState(null); // 选中思考强度 id | ''（提供商默认）| null
+        var instr = useState(readLastInstruction()); // 附加指令（可选），默认带出上次输入
         var busy = useState(false);
 
         useEffect(function () {
@@ -2834,10 +2888,12 @@
           // 数据随调用回传（card/cards/md/images/activeAcct/intent 来自当前 render 的 props），
           // 接收方 useCallback 闭包里读不到最新 state（见 sendDispatch 注释）
           try {
+            saveLastInstruction(instr[0]); // 记住这次的输入（含清空），下次打开弹层带出
             props.onSend(choice, {
               card: card, cards: props.cards || null,
               md: props.md, images: props.images,
               activeAcct: props.activeAcct, intent: props.intent || 'dispatch',
+              instr: instr[0],
             });
           } catch (e) {
             busy[1](false); // 发起本身失败 → 至少让弹层可以再操作/关闭
@@ -2907,6 +2963,13 @@
               efforts.map(function (e) {
                 return h('option', { key: e.id, value: e.id }, e.name);
               })) : null,
+
+            h('label', { className: 'ztp-label' }, '附加指令（可选）'),
+            h('textarea', {
+              className: 'ztp-input ztp-instr', value: instr[0] || '', disabled: busy[0], rows: 2,
+              placeholder: '拼到任务背景末尾，如：只分析定位原因，先不要改代码',
+              onChange: function (e) { instr[1](e.target.value); },
+            }),
 
             h('div', { className: 'ztp-disp-note' },
               insert
@@ -3156,6 +3219,7 @@
             : (d && d.card ? [d.card] : null);
           if (!d || !d.md || !cards || !cards.length) return;
           var insert = d.intent === 'insert';
+          var md = appendInstruction(d.md, d.instr); // 附加指令拼到任务背景末尾（三条链路统一走这里）
           dispatch[1](null);
           if (d.cards) { selMode[1](false); selKeys[1]({}); } // 批量发起即退出多选清空选中
           // 过程提示（sticky）：图片还在预取/注册、模型还在设置，让用户知道在等什么；
@@ -3169,8 +3233,8 @@
               ? { text: '正在准备 ' + d.images.length + ' 张图片附件，随后自动发送…', sticky: true }
               : { text: '正在新建会话…', sticky: true }));
           var run = insert
-            ? insertToNewSession(d.md || '', d.images || [], choice)
-            : dispatchToNewSession(d.md || '', d.images || [], choice);
+            ? insertToNewSession(md, d.images || [], choice)
+            : dispatchToNewSession(md, d.images || [], choice);
           Promise.resolve(run).then(function (r) {
             if (r && r.ok) {
               // 新会话建好即记录关联（draft 模式也算：内容已填进那个会话；批量逐卡指向同一会话）
@@ -3183,7 +3247,7 @@
               toast[1](r.message); return;
             }
             var msg = r && r.message ? r.message + '，已改为插入当前会话' : '新会话不可用，已改为插入当前会话';
-            insertToCurrentChat(d.md, d.images).then(function (x) {
+            insertToCurrentChat(md, d.images).then(function (x) {
               if (x.mode === 'clipboard') {
                 toast[1](msg + (x.failed ? '（复制失败，请手动复制）' : '（已复制到剪贴板）'));
               } else {
@@ -3822,7 +3886,12 @@
         batchToMarkdown: batchToMarkdown,
         batchSummary: batchSummary,
         mergeCardImages: mergeCardImages,
+        appendInstruction: appendInstruction,
+        readLastInstruction: readLastInstruction,
+        saveLastInstruction: saveLastInstruction,
+        finishUrl: finishUrl,
         CardItem: CardItem,
+        DetailView: DetailView,
         DispatchDialog: DispatchDialog,
         // 账号别名（2026-10-25）
         acctDisplayName: acctDisplayName,

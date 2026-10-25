@@ -1355,6 +1355,71 @@ const ddSingle = TT.DispatchDialog({
 check('DispatchDialog 单卡模式回归：标题仍为「处理 Bug #id」',
   ddSingle.children[0].children[0].children[0] === '处理 Bug #1');
 
+// ── 附加指令（2026-10-25 迭代）：弹层可选输入 + 记忆上次 + 拼到任务背景末尾 ──
+check('appendInstruction：空白指令原样返回',
+  TT.appendInstruction('## md', '') === '## md'
+  && TT.appendInstruction('## md', '   \n  ') === '## md'
+  && TT.appendInstruction('## md', null) === '## md'
+  && TT.appendInstruction('## md', undefined) === '## md');
+check('appendInstruction：拼接格式（## 处理要求 + trim）',
+  TT.appendInstruction('## md', '  只分析不改代码  ') === '## md\n\n## 处理要求\n\n只分析不改代码'
+  && TT.appendInstruction('## a\n\ndesc', '第一行\n第二行') === '## a\n\ndesc\n\n## 处理要求\n\n第一行\n第二行');
+check('appendInstruction：md 空串时仍拼出指令段',
+  TT.appendInstruction('', '指令') === '\n\n## 处理要求\n\n指令');
+check('附加指令记忆：save → read 读回 / 清空生效',
+  (TT.saveLastInstruction('上次说要先跑测试'), TT.readLastInstruction() === '上次说要先跑测试')
+  && (TT.saveLastInstruction(''), TT.readLastInstruction() === ''));
+check('附加指令记忆：localStorage 落盘 instr.v1',
+  (TT.saveLastInstruction('落盘检查'), window.localStorage.getItem('dsh-zentao-panel.instr.v1') === '落盘检查'));
+const ddInstr = TT.DispatchDialog({
+  card: bc1, images: [], md: 'x', intent: 'dispatch', activeAcct: 'a',
+  onSend: () => {}, onClose: () => {},
+});
+const instrArea = ddInstr.children[0].children.find(
+  (n) => n && n.type === 'textarea' && String(n.props.className).includes('ztp-instr'));
+check('DispatchDialog：附加指令 textarea 存在且带出上次输入（label + placeholder）',
+  Boolean(instrArea) && instrArea.props.value === '落盘检查'
+  && String(instrArea.props.placeholder).includes('拼到任务背景末尾')
+  && ddInstr.children[0].children.some(
+    (n) => n && n.type === 'label' && n.children[0] === '附加指令（可选）'));
+let ddSent = null;
+const ddInstr2 = TT.DispatchDialog({
+  card: bc1, images: [], md: 'BASE-MD', intent: 'dispatch', activeAcct: 'a',
+  onSend: (choice, data) => { ddSent = data; }, onClose: () => {},
+});
+const ddActs = ddInstr2.children[0].children.find((n) => n && n.props && n.props.className === 'ztp-disp-acts');
+ddActs.children[1].props.onClick();
+check('DispatchDialog：send 回传 instr 且记忆本次输入',
+  ddSent && ddSent.instr === '落盘检查' && TT.readLastInstruction() === '落盘检查'
+  && ddSent.md === 'BASE-MD');
+TT.saveLastInstruction(''); // 清场，不影响后续用例
+
+// ── 完成闭环（2026-10-25 迭代）：finishUrl 深链 + 详情 done 态按钮 ──
+check('finishUrl：三类卡片替换为操作页（同 base 同 id）',
+  TT.finishUrl({ kind: 'bug', id: 123, url: 'http://z:8090/bug-view-123.html' }) === 'http://z:8090/bug-resolve-123.html'
+  && TT.finishUrl({ kind: 'task', id: 9, url: 'http://z/task-view-9.html' }) === 'http://z/task-finish-9.html'
+  && TT.finishUrl({ kind: 'story', id: 8, url: 'http://z/story-view-8.html' }) === 'http://z/story-close-8.html');
+check('finishUrl：kind 不认识 / url 形态不符 / 无 url / 空卡 → null',
+  TT.finishUrl({ kind: 'case', id: 1, url: 'http://z/case-view-1.html' }) === null
+  && TT.finishUrl({ kind: 'bug', id: 1, url: 'http://z/bug-browse-1.html' }) === null
+  && TT.finishUrl({ kind: 'bug', id: 1 }) === null
+  && TT.finishUrl(null) === null);
+const finCard = { kind: 'bug', id: 16174, title: '财务共享中心系统', status: 'active', url: 'http://z:8090/bug-view-16174.html' };
+const dvDone = TT.DetailView({ card: finCard, rpc: () => {}, live: 'done', onBack: () => {} });
+const dvPop = dvDone.children.find((n) => n && n.props && String(n.props.className).includes('ztp-panel-card'));
+const finRow = dvDone.children.find((n) => n && n.props && n.props.className === 'ztp-finish-row');
+check('DetailView done 态：渲染「去禅道标记完成」外链（href=操作页深链）',
+  Boolean(finRow) && finRow.children[0].type === 'a'
+  && finRow.children[0].props.href === 'http://z:8090/bug-resolve-16174.html'
+  && finRow.children[0].props.target === '_blank'
+  && finRow.children[0].children[0] === '去禅道标记完成');
+const dvRun = TT.DetailView({ card: finCard, rpc: () => {}, live: 'running', onBack: () => {} });
+const dvRunPop = dvRun.children.find((n) => n && n.props && String(n.props.className).includes('ztp-panel-card'));
+check('DetailView 非 done 态 / 无 url：不渲染闭环按钮',
+  !dvRun.children.some((n) => n && n.props && n.props.className === 'ztp-finish-row')
+  && !TT.DetailView({ card: { kind: 'bug', id: 1, title: 'x', status: 'active' }, rpc: () => {}, live: 'done', onBack: () => {} })
+    .children.some((n) => n && n.props && String(n.props.className).includes('ztp-finish-row')));
+
 // 批量会话关联：N 卡指向同一会话，反查（会话头部「禅道」按钮用）能命中
 TT.saveSessionLink('acctB', bc1, 's-batch');
 TT.saveSessionLink('acctB', bc2, 's-batch');

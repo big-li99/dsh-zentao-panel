@@ -458,6 +458,27 @@ Neko3000/deepseek-whalechan 公开规范——**注意其图片素材不在开�
 - 插件是 `link:` 符号链接直连本仓库（`~/.dsh/profiles/desktop/node_modules/dsh-zentao-panel`），host 改动
   **重启桌面版即生效，无需重装**（package.json 没动时）。
 
+### 4.11 下发弹层「附加指令」+ 完成后一键去禅道闭环（2026-10-25，用户批准的两提案）
+
+用户从四个提案里选了这两个（「多账号聚合收件箱」暂不做）。**仅 client 改动，⌘R 生效**。
+
+**①「处理/插入」弹层附加指令**：DispatchDialog 在思考强度下方加可选 textarea（`.ztp-input.ztp-instr`，
+placeholder「拼到任务背景末尾，如：只分析定位原因，先不要改代码」）。纯函数 `appendInstruction(md, instr)`
+——空白指令原样返回，否则追加 `\n\n## 处理要求\n\n<trim 后指令>`；`sendDispatch` 入口统一拼接，
+三条链路（dispatchToNewSession / insertToNewSession / 降级 insertToCurrentChat）都吃拼好的 md；
+批量模式同样适用（拼在合并背景之后）。**记忆上次输入**：localStorage `dsh-zentao-panel.instr.v1`
+（`readLastInstruction/saveLastInstruction`，读坏/不可用退进程内兜底，同 links.v1 模式）——
+弹层初值带出上次输入，send 时保存本次输入（含清空）。注意 `useState(readLastInstruction())` 的
+初值在 fake React（useState 恒返初值）下正好可测「带出上次输入」。
+
+**② 完成后一键去禅道闭环**：`finishUrl(card)` 由 `card.url`（禅道查看页）把 `*-view-{id}.html` 替换为
+操作页：task→`task-finish-{id}.html`、bug→`bug-resolve-{id}.html`、story→`story-close-{id}.html`
+（ZenTao PATH_INFO 模块-方法-id 约定，18.13 实测）。**不违反只读边界**——只是打开禅道网页表单，
+不 API 回写。DetailView 在元信息卡与「处理结果」区之间渲染「去禅道标记完成」外链按钮
+（`.ztp-finish-row` 包 `.ztp-btn.primary` 的 `<a target="_blank">`，
+仅当该卡 `resolveLiveState` 为 done 时显示——agent 处理完才有闭环动作；点开禅道完成操作页后事项
+离开指派列表，由 cleanupStaleLinks 72h 宽限清理）。
+
 ### 5. DSH 插件体系（本机实测）
 
 - DSH Desktop **0.2.1-rc.2**，desktop profile，macOS
@@ -589,18 +610,17 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   ④ 重启后正在跑的 turn 若已死，**不**显示「处理中」（瞬态兜底只在监控未就绪的过渡期生效）。
   **仅 client 改动，⌘R 生效**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **240 项**（注册契约 8 项 +「处理」弹层/下发/时序/
+- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **251 项**（注册契约 8 项 +「处理」弹层/下发/时序/
   不跳转 +「插入对话」10 项（§4.5）+ M6 22 项（§4.4）+ 进度持久化 29 项（§4.6）+ **列表三件套 56 项**
   （§4.7：搜索排序 25 项含 smart 融合实时状态、mine.v1 7 项、replies/fetchLastReply 24 项含 Markdown 渲染 10 项）
   + **会话头部反向跳转 13 项（§4.3 末）** + **账号别名 5 项（§6 多账号节：acctDisplayName 纯函数 +
-  AccountSwitcher 展示/编辑态结构——fake useState 恒 null 只能测展示路径，行内编辑交互靠真机）**）、
+  AccountSwitcher 展示/编辑态结构——fake useState 恒 null 只能测展示路径，行内编辑交互靠真机）**
+  + **附加指令 7 项 + 完成闭环 4 项（§4.11，DetailView 首次进 _test）**）、
   `multi` 42 项（别名 11 项 + **fetchImage 缓存 6 项（§4.10）**）、`protocol` 15 项（+actions/stories 拼写 5 项，§4.8）；`host.mjs` 21+6 项
   （真机 20 张卡片；actions 透传 + story detail 2 项为 §4.8 新增；**别名 6 项 + fetchImage 缓存已 2026-10-25
-  用真实凭据复跑全绿**——沙箱里 dsh CLI 写不了 ~/.dsh 的 lock 文件（EPERM），跑法：从
-  `~/.dsh/zentao-panel/config.json` 读凭据写进临时 env 文件（0600）source 后即删，DSH_HOME 指向 /tmp 目录；
-  **logout 测试会清空该 DSH_HOME 的账号**，别把 DSH_HOME 指向真实 ~/.dsh）、`smoke.mjs` 需真实禅道凭据。
-  沙箱里跑 host.mjs 读不了 `~/.dsh/zentao-panel/config.json`（EPERM），需把凭据拷进
-  `$DSH_HOME/zentao-panel/`，此时「status before config」一项会假失败（假设初始无配置）
+  用真实凭据复跑全绿**；host.mjs 凭据解析已改为「环境变量 → $DSH_HOME 配置激活账号 → 只读兜底真实
+  ~/.dsh 配置的激活账号」，空 scratch 目录一条命令 `DSH_HOME=/tmp/zt-host node test/host.mjs` 即可全绿，
+  登录失败（凭据错/账号锁）会明确报错退出而非崩栈）、`smoke.mjs` 需真实禅道凭据。
 
 ### 2. M4 打磨
 - 自动刷新（面板打开时轮询，间隔可选——计划书里定的 30s/1m/5m/10m/关闭）
