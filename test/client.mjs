@@ -1877,5 +1877,26 @@ check('CardItem：备注行与回复摘要行并存，回复行在备注行之�
   Boolean(rlLine) && rlLine.children[1] === '已定位到根因：并发写冲突'
   && rlNode.children.filter((n) => n && n.props && (n.props.className === 'ztp-note-line' || n.props.className === 'ztp-reply-line')).length === 2);
 
+// ── 决策应答台（2026-10-25 迭代）：ask 态在面板内直接回复 agent ──
+let askSent = [];
+const askDv = TT.DetailView({
+  card: bc1, rpc: () => {}, live: 'ask', onBack: () => {}, onCopyMd: () => {}, note: '', onSaveNote: () => {},
+  onContinue: (c, t) => { askSent.push([c, t]); },
+});
+const askBox = askDv.children.find((n) => n && n.props && n.props.className === 'ztp-ask-box');
+const askActs = askBox.children.find((n) => n && n.props && n.props.className === 'ztp-note-acts');
+const askAgreeBtn = askActs.children.find((n) => n && n.type === 'button' && n.children[0] === '同意，继续执行');
+const askCustomBtn = askActs.children.find((n) => n && n.type === 'button' && n.children[0] === '自定义回复…');
+askAgreeBtn.props.onClick();
+const askDvNo = TT.DetailView({
+  card: bc1, rpc: () => {}, live: 'done', onBack: () => {}, onCopyMd: () => {}, note: '', onSaveNote: () => {},
+  onContinue: () => {},
+});
+check('决策应答台：ask 态渲染（标题/说明/一键同意/自定义入口），一键同意回传固定答复；非 ask 不渲染',
+  Boolean(askBox) && askBox.children[0].children[0] === 'agent 正等你决策'
+  && Boolean(askAgreeBtn) && Boolean(askCustomBtn)
+  && askSent.length === 1 && askSent[0][0] === bc1 && askSent[0][1] === '同意，请继续执行。'
+  && !askDvNo.children.some((n) => n && n.props && n.props.className === 'ztp-ask-box'));
+
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);

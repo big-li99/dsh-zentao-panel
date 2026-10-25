@@ -164,6 +164,9 @@
         '.ztp-note-edit{display:flex;flex-direction:column;gap:6px;margin-top:12px;}',
         '.ztp-note-acts{display:flex;gap:6px;}',
         '.ztp-cont-box{display:flex;flex-direction:column;gap:6px;margin-top:8px;}',
+        '.ztp-ask-box{display:flex;flex-direction:column;gap:6px;margin-top:12px;padding:10px 12px;border:.5px solid var(--dsw-alias-state-warn-border,var(--dsw-alias-border-l3));border-radius:var(--dsw-alias-radius-md,var(--dsw-radius-md));background:var(--dsw-alias-state-warn-bg,transparent);}',
+        '.ztp-ask-t{font-size:12.5px;font-weight:600;color:var(--dsw-alias-state-warn-label,var(--dsw-alias-label-primary));}',
+        '.ztp-ask-d{font-size:11px;color:var(--dsw-alias-label-tertiary);}',
         '.ztp-flagdot{display:inline-flex;color:var(--dsw-alias-state-business-primary);}',
         '.ztp-flagdot svg{width:11px;height:11px;}',
 
@@ -2978,9 +2981,11 @@
         var detail = useState(null), err = useState(null);
         var noteText = useState(props.note || ''); // 本地备注编辑值；切卡重置（effect）
         var contOpen = useState(false), contText = useState(''); // 继续处理：展开态 + 追问文本
+        var askOpen = useState(false), askText = useState('');   // 决策应答台：自定义回复展开态 + 文本
         useEffect(function () {
           noteText[1](String(props.note || ''));
           contOpen[1](false); contText[1](''); // 切卡收起续发框、清空输入
+          askOpen[1](false); askText[1]('');
         }, [card.kind, card.id, props.note]);
         useEffect(function () {
           var alive = true;
@@ -3068,6 +3073,33 @@
 
           // 处理结果摘要（提案 3）：关联会话里最后一条 assistant 回复（replies.v1 缓存，
           // 详情打开且「已完成」时自动回读，TTL 内不重复拉；可手动刷新）
+          // 决策应答台（2026-10-25 迭代）：等你决策时在面板里直接回复 agent，不跳会话。
+          // 一键「同意继续」或自定义答复，走的都是 continueInSession（带卡片前缀）。
+          (props.live === 'ask' && props.onContinue) ? h('div', { className: 'ztp-ask-box' },
+            h('div', { className: 'ztp-ask-t' }, 'agent 正等你决策'),
+            h('div', { className: 'ztp-ask-d' }, 'agent 的提问在下方「处理结果」区，在这里直接回复即可：'),
+            h('div', { className: 'ztp-note-acts' },
+              h('button', {
+                className: 'ztp-btn primary', type: 'button',
+                title: '向该会话发送「同意，请继续执行。」',
+                onClick: function () { props.onContinue(card, '同意，请继续执行。'); },
+              }, '同意，继续执行'),
+              h('button', {
+                className: 'ztp-btn', type: 'button',
+                onClick: function () { askOpen[1](!askOpen[0]); },
+              }, askOpen[0] ? '收起' : '自定义回复…')),
+            askOpen[0] ? h('div', { className: 'ztp-cont-box' },
+              h('textarea', {
+                className: 'ztp-input ztp-instr', value: askText[0], rows: 2,
+                placeholder: '输入给 agent 的决策/答复，如：方案 B 可以，但先补上单元测试',
+                onChange: function (e) { askText[1](e.target.value); },
+              }),
+              h('div', { className: 'ztp-note-acts' },
+                h('button', {
+                  className: 'ztp-btn primary', type: 'button', disabled: !askText[0].trim(),
+                  onClick: function () { props.onContinue(card, askText[0]); askOpen[1](false); askText[1](''); },
+                }, '回复并继续'))) : null) : null,
+
           props.replyLink ? h('div', { className: 'ztp-reply-wrap' },
             h('div', { className: 'ztp-section' }, '处理结果（关联会话最新回复）'),
             props.reply
@@ -3878,7 +3910,7 @@
           var link = linkMap[key];
           if (!link || replyBusy[0]) return;
           var st = resolveLiveState(link, liveSnap[0], stateMap[key] || null);
-          if (!st || st.state !== 'done') return;
+          if (!st || (st.state !== 'done' && st.state !== 'ask')) return; // ask 也要看到 agent 在问什么
           var cached = getReply(activeAcct, card);
           // 只有「完整文本 + 未过期」才算新鲜；旧版截 500 字的缓存（无 full 字段）重拉一次
           if (cached && cached.sessionId === link.sessionId && cached.full

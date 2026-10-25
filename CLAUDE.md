@@ -533,6 +533,20 @@ DetailView 元信息卡下编辑区（textarea + 保存/清除，`noteText` 在�
 unsupported；retain 后 scope/facade 拿不到 → **立即释放 retain** 返回 unavailable（不留悬挂连接）。
 handler `continueLinked` 的 link 由当前 render 传参（闭包老坑）；前缀带卡片标识便于模型接上下文。
 
+### 4.15 卡片回复摘要行 + 决策应答台（2026-10-25，用户批准的两提案）
+
+**①回复摘要行**：卡片标题下（备注行之后）`.ztp-reply-line`——agent 最后回复的一行预览
+（`replyLine` 压空白 60 字截断，title 全文）。数据源 replies.v1，**与当前关联会话一致才显示**
+（`replySummaryOf` 同会话守卫，再处理换会话后旧回复不带）；ChatIcon 前缀、secondary 色。
+
+**②决策应答台**：卡片 ask 态（等你决策）时 DetailView 顶部（处理结果区之上）`.ztp-ask-box`
+（warn 色 token：state-warn-bg/border/label，均带回退）——「agent 正等你决策」+ 一键
+**「同意，继续执行」**（固定文案 `同意，请继续执行。`）+ 「自定义回复…」展开 textarea
+（askOpen/askText，切卡 effect 里与 cont/note 一起重置）。发送都走 `props.onContinue` =
+continueLinked（continueInSession 链路，带【继续处理 禅道X #id】前缀）——ask 态在面板里
+直接拍板，不跳会话。**自动回读条件从仅 done 扩为 done || ask**（ask 时也要看到 agent
+在问什么；TTL/失败冷却不变）。
+
 ### 5. DSH 插件体系（本机实测）
 
 - DSH Desktop **0.2.1-rc.2**，desktop profile，macOS
@@ -664,14 +678,13 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   ④ 重启后正在跑的 turn 若已死，**不**显示「处理中」（瞬态兜底只在监控未就绪的过渡期生效）。
   **仅 client 改动，⌘R 生效**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **289 项**（注册契约 8 项 +「处理」弹层/下发/时序/
+- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **292 项**（注册契约 8 项 +「处理」弹层/下发/时序/
   不跳转 +「插入对话」10 项（§4.5）+ M6 22 项（§4.4）+ 进度持久化 29 项（§4.6）+ **列表三件套 56 项**
   （§4.7：搜索排序 25 项含 smart 融合实时状态、mine.v1 7 项、replies/fetchLastReply 24 项含 Markdown 渲染 10 项）
   + **会话头部反向跳转 13 项（§4.3 末）** + **账号别名 5 项（§6 多账号节：acctDisplayName 纯函数 +
   AccountSwitcher 展示/编辑态结构——fake useState 恒 null 只能测展示路径，行内编辑交互靠真机）**
   + **附加指令 7 项 + 指令模板预设 8 项 + 完成闭环 4 项（§4.11）+ 快捷筛选 6 项（§4.12）
-  + 一键复制 4 项 + 旗标隐藏 6 项（含 cleanup marks）+ 极速重发 3 项（§4.13）+ 本地备注 5 项 +
-  继续处理 6 项（§4.14）**）
+  + 一键复制 4 项 + 旗标隐藏 6 项（含 cleanup marks）+ 极速重发 3 项（§4.13）+ 本地备注 5 项 + 继续处理 6 项（§4.14）+ 回复摘要行 2 项 + 决策应答台 1 项（§4.15）**）
   ——DetailView 首次进 _test；chips 类组件断言要 children.flat(2)（map 出的是嵌套数组，§4.8 同坑，
   指令模板与 QfBar 各踩一次）、
   `multi` 42 项（别名 11 项 + **fetchImage 缓存 6 项（§4.10）**）、`protocol` 15 项（+actions/stories 拼写 5 项，§4.8）；`host.mjs` 21+6 项
