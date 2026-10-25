@@ -2,16 +2,32 @@
 // 用 mock cordis ctx（真实 http server 充当 webServer.register），按 dsh-pocket
 // 复刻的 /api 传输语义发 client-request 信封，验证 login/status/mine/detail/logout。
 // 凭据来源（按优先级）：环境变量 ZENTAO_BASE/ZENTAO_ACCOUNT/ZENTAO_PASSWORD
-//   → 运行时配置 ~/.dsh/zentao-panel/config.json。凭据永不进 git。
+//   → $DSH_HOME 配置的激活账号（schema v2）→ 真实 ~/.dsh 配置的激活账号（只读兜底；
+//   logout 等写操作只落 $DSH_HOME，永不触碰真实目录——所以 DSH_HOME 必须指向 scratch 目录）。
+//   凭据永不进 git。
 // 用法：DSH_HOME=/tmp/zt-host node test/host.mjs
 import http from 'node:http';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { readConfig } from '../lib/store.mjs';
 import { apply } from '../lib/index.js';
 
-const fallback = readConfig();
-const BASE = process.env.ZENTAO_BASE || fallback.baseUrl || '';
-const ACCOUNT = process.env.ZENTAO_ACCOUNT || fallback.account || '';
-const PASSWORD = process.env.ZENTAO_PASSWORD || fallback.password || '';
+function decodeAcct(a) {
+  return a ? { ...a, password: Buffer.from(a.password ?? '', 'base64').toString('utf8') } : null;
+}
+const scratch = readConfig();
+let credAcct = scratch.accounts.find((a) => a.id === scratch.activeId) ?? scratch.accounts[0] ?? null;
+if (!credAcct && !process.env.ZENTAO_BASE) {
+  try {
+    const raw = JSON.parse(readFileSync(join(homedir(), '.dsh', 'zentao-panel', 'config.json'), 'utf8'));
+    const accts = Array.isArray(raw.accounts) ? raw.accounts.filter((a) => a && typeof a.baseUrl === 'string' && a.baseUrl) : [];
+    credAcct = decodeAcct(accts.find((a) => a.id === raw.activeId) ?? accts[0] ?? null);
+  } catch { /* 真实配置不存在/不可读 → 走缺凭据退出 */ }
+}
+const BASE = process.env.ZENTAO_BASE || credAcct?.baseUrl || '';
+const ACCOUNT = process.env.ZENTAO_ACCOUNT || credAcct?.account || '';
+const PASSWORD = process.env.ZENTAO_PASSWORD || credAcct?.password || '';
 if (!BASE || !ACCOUNT || !PASSWORD) {
   console.error('缺少禅道凭据：请设置 ZENTAO_BASE/ZENTAO_ACCOUNT/ZENTAO_PASSWORD 环境变量，');
   console.error('或先在面板里登录一次（~/.dsh/zentao-panel/config.json 会落盘凭据）。');
@@ -82,6 +98,11 @@ check('status before config', s0.ok === true && s0.value.configured === false);
 // login
 const s1 = await rpc('zentao.login', { baseUrl: BASE, account: ACCOUNT, password: PASSWORD });
 check('login via rpc', s1.ok === true && s1.value.loggedIn === true, `account=${s1.value?.account}`);
+if (!s1.ok) {
+  console.error(`\n登录失败（${s1.error?.message ?? '未知原因'}），后续用例无法进行，中止。`);
+  console.error('若提示尝试次数太多：禅道账号被临时锁定，等 10 分钟再跑。');
+  process.exit(1);
+}
 
 // 多账号：status 带账号列表；同账号重复登录 = upsert；switch 未知 id 拒绝
 check('status 带账号列表', s1.ok === true && Array.isArray(s1.value.accounts) && s1.value.accounts.length === 1
