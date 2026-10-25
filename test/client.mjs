@@ -1595,6 +1595,47 @@ check('CardItem：⚡ 按钮有 quickTitle 才渲染，点击回传卡片',
   Boolean(boltBtn) && String(boltBtn.props.title).includes('工作区 · 模型 glm-x') && quickCard === bc1
   && !noBoltActs.children.some((n) => n && String(n && n.props && n.props.title).startsWith('极速重发')));
 
+// ── 本地备注（2026-10-25 迭代）：notes.v1 卡片自己的备忘 ──
+window.localStorage.removeItem('dsh-zentao-panel.notes.v1');
+check('notes：saveNote 保存/读取/空串清除/trim',
+  (TT.saveNote('acctM', bc1, '  等张三回复后再动  '), TT.getNote(TT.readNoteMap(), 'acctM', bc1) === '等张三回复后再动')
+  && (TT.saveNote('acctM', bc1, '   '), TT.getNote(TT.readNoteMap(), 'acctM', bc1) === '')
+  && TT.readNoteMap()['acctM/bug-1'] === undefined);
+check('notes：noteLine 压空白 + 50 字截断（程序生成避免手数）',
+  TT.noteLine('a  b\n c') === 'a b c'
+  && TT.noteLine('备'.repeat(55)) === '备'.repeat(50) + '…'
+  && TT.noteLine('短备注') === '短备注'
+  && TT.noteLine(null) === '');
+check('notes：账号隔离', TT.saveNote('acctN', bc1, '另一个账号的备注') && TT.getNote(TT.readNoteMap(), 'acctM', bc1) === '');
+lsBacking.delete('dsh-zentao-panel.notes.v1');
+TT.saveNote('acct1', { kind: 'bug', id: 1 }, '在线卡备注', NOW);
+TT.saveNote('acct1', { kind: 'task', id: 77 }, '孤儿备注', NOW);
+TT.saveNote('acct2', { kind: 'bug', id: 1 }, '他账号备注', NOW - 100 * 3600 * 1000);
+check('cleanupStaleLinks 顺带清 notes：在线保留 / 孤儿超宽限删 / 他账号不动',
+  TT.cleanupStaleLinks('acct1', mineCards, NOW + 80 * 3600 * 1000) === true
+  && TT.getNote(TT.readNoteMap(), 'acct1', { kind: 'bug', id: 1 }) === '在线卡备注'
+  && TT.readNoteMap()['acct1/task-77'] === undefined
+  && TT.readNoteMap()['acct2/bug-1'] !== undefined);
+window.localStorage.removeItem('dsh-zentao-panel.notes.v1');
+const noteNode = TT.CardItem({
+  card: bc1, linkView: null, live: null, note: '备注摘要测试',
+  onToggleMark: () => {}, onCopyTitle: () => {}, onInsert: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
+});
+const noteLineNode = noteNode.children.find((n) => n && n.props && n.props.className === 'ztp-note-line');
+let noteSaved = null;
+const noteDv = TT.DetailView({
+  card: bc1, rpc: () => {}, live: null, onBack: () => {},
+  onCopyMd: () => {}, note: '旧备注', onSaveNote: (c, t) => { noteSaved = [c, t]; },
+});
+const noteEditor = noteDv.children.find((n) => n && n.props && n.props.className === 'ztp-note-edit');
+const noteArea = noteEditor.children.find((n) => n && n.type === 'textarea');
+const noteSaveBtn = noteEditor.children[2].children.find((n) => n && n.type === 'button');
+noteSaveBtn.props.onClick();
+check('CardItem 备注摘要行 + DetailView 编辑区（textarea 初值/保存回传）',
+  Boolean(noteLineNode) && noteLineNode.children[1] === '备注摘要测试'
+  && Boolean(noteArea) && noteArea.props.value === '旧备注'
+  && noteSaved && noteSaved[0] === bc1);
+
 // ── 完成闭环（2026-10-25 迭代）：finishUrl 深链 + 详情 done 态按钮 ──
 check('finishUrl：三类卡片替换为操作页（同 base 同 id）',
   TT.finishUrl({ kind: 'bug', id: 123, url: 'http://z:8090/bug-view-123.html' }) === 'http://z:8090/bug-resolve-123.html'

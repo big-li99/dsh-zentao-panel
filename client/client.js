@@ -157,6 +157,10 @@
         '.ztp-btn.icon:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover);}',
         '.ztp-btn.icon.on{color:var(--dsw-alias-state-business-primary);}',
         '.ztp-card.hiddenmark{opacity:.55;}',
+        '.ztp-note-line{margin-top:3px;display:flex;align-items:flex-start;gap:4px;font-size:11.5px;line-height:1.4;color:var(--dsw-alias-label-caption);word-break:break-word;}',
+        '.ztp-note-line svg{width:10px;height:10px;flex:none;margin-top:2px;}',
+        '.ztp-note-edit{display:flex;flex-direction:column;gap:6px;margin-top:12px;}',
+        '.ztp-note-acts{display:flex;gap:6px;}',
         '.ztp-flagdot{display:inline-flex;color:var(--dsw-alias-state-business-primary);}',
         '.ztp-flagdot svg{width:11px;height:11px;}',
 
@@ -480,6 +484,12 @@
       function FlagIcon() {
         return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
           h('path', { d: 'M4 13.5V3.2c2-.9 3.9-.9 6 .2 1.6.8 3 .9 4 .4V9c-1 .5-2.4.4-4-.4-2.1-1.1-4-1.1-6-.2', stroke: 'currentColor', strokeWidth: 1.1, strokeLinejoin: 'round', strokeLinecap: 'round' }),
+        );
+      }
+      /** 本地备注（卡片摘要行）：铅笔。 */
+      function NoteIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('path', { d: 'm3 13 .9-3.2 6.4-6.4c.5-.5 1.3-.5 1.8 0l.5.5c.5.5.5 1.3 0 1.8l-6.4 6.4z', stroke: 'currentColor', strokeWidth: 1.1, strokeLinejoin: 'round', strokeLinecap: 'round' }),
         );
       }
       /** 极速重发（卡片动作行）：闪电。 */
@@ -991,6 +1001,50 @@
         var t = parts.join(' · ');
         if (last.instr && String(last.instr).trim()) t += (t ? ' · ' : '') + '指令「' + instrChipLabel(last.instr) + '」';
         return t;
+      }
+
+      // ───────── 本地备注（2026-10-25 迭代）：卡片自己的可见笔记，不回写禅道 ─────────
+      // notes.v1 与 links 同构 key，值 {text, at}；卡片上一行摘要、详情里编辑；
+      // 保存空串 = 清除；cleanupStaleLinks 按宽限期顺带清。
+      var NOTES_KEY = 'dsh-zentao-panel.notes.v1';
+      var notesFallback = null;
+
+      function readNoteMap() {
+        try {
+          var s = root.localStorage;
+          var raw = s && s.getItem(NOTES_KEY);
+          if (raw) {
+            var v = JSON.parse(raw);
+            if (v && typeof v === 'object') return v;
+          }
+        } catch (e) { /* 坏数据当空 */ }
+        return notesFallback || (notesFallback = {});
+      }
+      function writeNoteMap(map) {
+        notesFallback = map;
+        try {
+          var s = root.localStorage;
+          if (s) s.setItem(NOTES_KEY, JSON.stringify(map));
+        } catch (e) { /* 内存兜底已写 */ }
+      }
+      /** 保存/清除（空串清除）备注。返回新 map。 */
+      function saveNote(activeId, card, text, now) {
+        var map = readNoteMap();
+        var key = sessionLinkKey(activeId, card);
+        var t = String(text == null ? '' : text).trim();
+        if (!t) delete map[key];
+        else map[key] = { text: t, at: (typeof now === 'number' && now) || Date.now() };
+        writeNoteMap(map);
+        return map;
+      }
+      function getNote(map, activeId, card) {
+        var v = map && map[sessionLinkKey(activeId, card)];
+        return (v && typeof v.text === 'string' && v.text.trim()) ? v.text : '';
+      }
+      /** 卡片一行摘要：压空白取前 50 字，超长加省略号。 */
+      function noteLine(text) {
+        var t = String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+        return t.length > 50 ? t.slice(0, 50) + '…' : t;
       }
 
       // ───────── 完成闭环（2026-10-25 迭代）：已完成卡片深链到禅道操作页 ─────────
@@ -1841,11 +1895,28 @@
           if (t - mref > LINK_GRACE_MS) { delete marks[mk]; dirtyMarks = true; }
         }
         if (dirtyMarks) writeMarkMap(marks);
+        // 本地备注同规则：在线卡随 1h 限频刷新 seenAt 计时，离线超宽限删（备注已无意义）
+        var notes = readNoteMap();
+        var dirtyNotes = false;
+        for (var nk in notes) {
+          if (!Object.prototype.hasOwnProperty.call(notes, nk) || nk === '__proto__') continue;
+          var npk = parseLinkKey(nk);
+          if (!npk || npk.activeId !== acct) continue;
+          if (seen[npk.kind + '-' + npk.id]) {
+            if (t - (Number(notes[nk] && notes[nk].seenAt) || 0) > 3600 * 1000) {
+              notes[nk].seenAt = t; dirtyNotes = true;
+            }
+            continue;
+          }
+          var nref = Number(notes[nk] && (notes[nk].seenAt || notes[nk].at)) || 0;
+          if (t - nref > LINK_GRACE_MS) { delete notes[nk]; dirtyNotes = true; }
+        }
+        if (dirtyNotes) writeNoteMap(notes);
         if (dirtyLinks) writeLinkMap(links);
         if (dirtyStates) writeStateMap(states);
         if (dirtyReplies) writeReplyMap(replies);
         if (dirtyLinks || dirtyStates || dirtyReplies) watchPoke();
-        return dirtyLinks || dirtyStates || dirtyReplies || dirtyMarks;
+        return dirtyLinks || dirtyStates || dirtyReplies || dirtyMarks || dirtyNotes;
       }
 
       // ───────────── 列表快照持久化（mine.v1）：重启/重挂秒开 + 离线兜底 ─────────────
@@ -2599,6 +2670,8 @@
               }, (dlCls.indexOf('overdue') !== -1 ? '逾期 ' : '截止 ') + fmtDate(c.deadline)) : null,
               c.openedBy ? h('span', null, c.openedBy + ' 创建') : null)),
           h('div', { className: 'ztp-card-title' }, c.title || ''),
+          props.note ? h('div', { className: 'ztp-note-line', title: '本地备注：' + props.note },
+            h(NoteIcon), noteLine(props.note)) : null,
           sel ? null : h('div', { className: 'ztp-acts' },
             props.linkView ? h('button', {
               className: 'ztp-slink' + (props.linkView.state === 'dead' ? ' dead' : ''),
@@ -2852,6 +2925,10 @@
       function DetailView(props) {
         var card = props.card;
         var detail = useState(null), err = useState(null);
+        var noteText = useState(props.note || ''); // 本地备注编辑值；切卡重置（effect）
+        useEffect(function () {
+          noteText[1](String(props.note || ''));
+        }, [card.kind, card.id, props.note]);
         useEffect(function () {
           var alive = true;
           detail[1](null); err[1](null);
@@ -2917,6 +2994,24 @@
             }, '去禅道标记完成', h(LinkIcon))) : null,
 
           err[0] ? h('div', { className: 'ztp-err' }, err[0]) : null,
+
+          // 本地备注（2026-10-25 迭代）：自己的待办备忘，只存本机不回写禅道；卡片上一行摘要
+          h('div', { className: 'ztp-note-edit' },
+            h('div', { className: 'ztp-section' }, '本地备注（仅本机可见）'),
+            h('textarea', {
+              className: 'ztp-input ztp-instr', value: noteText[0], rows: 2,
+              placeholder: '如：等张三回复后再动；先看 #1234 的关联改动',
+              onChange: function (e) { noteText[1](e.target.value); },
+            }),
+            h('div', { className: 'ztp-note-acts' },
+              h('button', {
+                className: 'ztp-btn', type: 'button',
+                onClick: function () { props.onSaveNote(card, noteText[0]); },
+              }, '保存备注'),
+              noteText[0] ? h('button', {
+                className: 'ztp-btn', type: 'button',
+                onClick: function () { noteText[1](''); props.onSaveNote(card, ''); },
+              }, '清除') : null)),
 
           // 处理结果摘要（提案 3）：关联会话里最后一条 assistant 回复（replies.v1 缓存，
           // 详情打开且「已完成」时自动回读，TTL 内不重复拉；可手动刷新）
@@ -3449,6 +3544,7 @@
         var sortMode = useState('smart');// 列表排序（smart/deadline/pri/origin）
         var qf = useState(null);         // 快捷筛选（ask/running/overdue/today/done；激活时跨分类，null = 分类视图）
         var markRev = useState(0);       // 本地标记（旗标/隐藏）版本号，toggle 后 bump 重读 marks.v1
+        var noteRev = useState(0);       // 本地备注版本号，保存后 bump 重读 notes.v1
         var showHidden = useState(false);// 临时显示已隐藏卡片（页脚开关，不入 paneCache）
         var replyRev = useState(0);      // 结果摘要存储版本号（回读保存后 bump 重读）
         var replyBusy = useState(null);  // 正在回读的 linkKey（详情页 spinner 用）
@@ -3796,6 +3892,13 @@
           toggleCardMark(activeAcct, card, field);
           markRev[1](function (v) { return v + 1; });
         }, [activeAcct]);
+        // 本地备注：保存（空串=清除）后 bump；卡片摘要行与详情编辑区共用这份 map
+        var noteMap = useMemo(readNoteMap, [noteRev[0]]);
+        var saveNoteHere = useCallback(function (card, text) {
+          saveNote(activeAcct, card, text);
+          noteRev[1](function (v) { return v + 1; });
+          toast[1](String(text || '').trim() ? '本地备注已保存（仅本机可见）' : '本地备注已清除');
+        }, [activeAcct]);
         var filtered = useMemo(function () {
           // 快捷筛选激活 → 跨分类（全量卡片过搜索 + 过筛选）；否则当前分类过搜索
           var pool = qf[0]
@@ -3934,6 +4037,7 @@
               onToggleMark: toggleMark,
               quickTitle: quickSummary,
               onQuick: quickRedispatch,
+              note: getNote(noteMap, activeAcct, c),
             });
           }));
         }
@@ -3963,6 +4067,8 @@
             onRefreshReply: dLink ? function () { fetchReplyNow(activeAcct, dCard, dLink); } : null,
             onBack: function () { detailCard[1](null); },
             onCopyMd: copyCardMd,
+            note: getNote(noteMap, activeAcct, dCard),
+            onSaveNote: saveNoteHere,
           });
         }
 
@@ -4327,6 +4433,10 @@
         QfBar: QfBar,
         copyToClipboard: copyToClipboard,
         readLastDispatch: readLastDispatch,
+        readNoteMap: readNoteMap,
+        saveNote: saveNote,
+        getNote: getNote,
+        noteLine: noteLine,
         saveLastDispatch: saveLastDispatch,
         lastDispatchSummary: lastDispatchSummary,
         toggleCardMark: toggleCardMark,
