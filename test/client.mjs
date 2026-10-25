@@ -1919,24 +1919,31 @@ const bdNode = TT.BoardView({
   cards: bdCards, liveOf: bdLive, flaggedOf: (c) => c.id === 11,
   onPick: (c) => { bdPicked = c; },
 });
-const bdColNodes = bdNode.children; // BOARD_COLS.map 直接是四列（无嵌套——map 是唯一 child？需 flat 防坑）
+// 列 = BOARD_COLS.map（唯一 child 的 map 数组）；列体 = KIND_ORDER.map（组 null/[组头,卡数组]）
 const bdFlat = bdNode.children.length === 4 ? bdNode.children : bdNode.children.flat(2);
-check('BoardView：四列带标题与计数（含旗标点与逾期类）',
+check('BoardView：四列带标题与计数',
   bdFlat.length === 4
   && bdFlat[0].children[0].children[1] === '待处理' && bdFlat[0].children[0].children[2].children[0] === 1
   && bdFlat[1].children[0].children[1] === '处理中' && bdFlat[1].children[0].children[2].children[0] === 2
   && bdFlat[3].children[0].children[1] === '已完成待闭环');
-const bdRunningCards = bdFlat[1].children[1].children.flat(2); // map 嵌套（§4.8 同坑第 4 踩）
-const bdFirstCard = bdRunningCards[0];
-bdFirstCard.props.onClick();
-const bdTodoCards = bdFlat[0].children[1].children.flat(2);
-const bdAskCards = bdFlat[2].children[1].children.flat(2);
-check('BoardView：点缩略卡回传 onPick；running 列首卡是今天到期的 bug（sn 类）、逾期卡在 ask 列带 od 类',
-  bdPicked && bdPicked.id === 11
-  && bdFirstCard.props.className.split(' ').includes('ztp-k-bug')
-  && bdFirstCard.props.className.split(' ').includes('sn')
-  && bdAskCards.some((n) => n && n.props && n.props.className.split(' ').includes('od'))
-  && bdTodoCards.length === 1);
+const bdColCards = (col) => col.children[1].children.flat(3).filter(Boolean); // 列体 children：组 null/[组头,卡数组] 嵌套
+const bdRunBody = bdColCards(bdFlat[1]);
+const bdRunGrps = bdRunBody.filter((n) => n && n.props && n.props.className === 'ztp-bgrp');
+const bdRunCards = bdRunBody.filter((n) => n && n.props && String(n.props.className).startsWith('ztp-bcard'));
+check('BoardView：列内按类型分组（running 列 = Bug 组 + 需求 组，组头带类型色点与计数）',
+  bdRunGrps.length === 2
+  && bdRunGrps[0].children[1] === 'Bug' && bdRunGrps[0].children[2].children[0] === 1
+  && bdRunGrps[0].children[0].props.className === 'ztp-bgrp-dot ztp-k-bug'
+  && bdRunGrps[1].children[1] === '需求' && bdRunGrps[1].children[2].children[0] === 1
+  && bdRunCards.length === 2
+  && bdRunCards.every((n) => /ztp-k-(bug|story)/.test(n.props.className)));
+bdRunCards[0].props.onClick();
+const bdAskCards = bdColCards(bdFlat[2]).filter((n) => n && n.props && String(n.props.className).startsWith('ztp-bcard'));
+const bdAskDeep = bdAskCards.flatMap((n) => n.children).filter(Boolean);
+check('BoardView：点缩略卡回传 onPick；逾期卡在 ask 列、截止 chip 带 overdue 类',
+  bdPicked && bdPicked.kind === 'bug' && bdPicked.id === 11
+  && bdAskDeep.some((row) => row && row.children && row.children.some(
+    (m) => m && m.props && String(m.props.className).split(' ').includes('overdue'))));
 
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);

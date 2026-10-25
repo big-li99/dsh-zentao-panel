@@ -95,10 +95,11 @@
         '.ztp-bcol-h .ztp-num{font-weight:400;opacity:.75;}',
         '.ztp-bcol-b{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px;}',
         '.ztp-bcol-empty{color:var(--dsw-alias-label-caption);text-align:center;padding:14px 0;font-size:12px;}',
-        '.ztp-bcard{border:.5px solid var(--dsw-alias-border-l3);border-left-width:3px;border-radius:var(--dsw-alias-radius-sm,var(--dsw-radius-sm));background:var(--dsw-alias-bg-layer-2);padding:7px 9px;cursor:pointer;}',
+        '.ztp-bgrp{display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--dsw-alias-label-secondary);padding:2px 2px 0;}',
+        '.ztp-bgrp-dot{width:6px;height:6px;border-radius:50%;background:var(--ztp-c,var(--dsw-alias-label-tertiary));}',
+        '.ztp-bgrp .ztp-num{font-weight:400;opacity:.7;}',
+        '.ztp-bcard{border:.5px solid var(--dsw-alias-border-l3);border-left:3px solid var(--ztp-c,var(--dsw-alias-border-l3));border-radius:var(--dsw-alias-radius-sm,var(--dsw-radius-sm));background:var(--dsw-alias-bg-layer-2);padding:7px 9px;cursor:pointer;}',
         '.ztp-bcard:hover{border-color:var(--dsw-alias-border-l4);background:var(--dsw-alias-interactive-bg-hover);}',
-        '.ztp-bcard.od{border-left-color:var(--dsw-alias-state-error-primary);}',
-        '.ztp-bcard.sn{border-left-color:var(--dsw-alias-state-warn-primary);}',
         '.ztp-bcard-t{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--dsw-alias-label-secondary);flex-wrap:wrap;}',
         '.ztp-bcard-title{margin-top:3px;font-size:12px;line-height:1.4;color:var(--dsw-alias-label-primary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;}',
         '@media (max-width:719px){.ztp-search{width:110px;}}',
@@ -2675,24 +2676,35 @@
                 h('span', { className: 'ztp-num' }, list.length)),
               h('div', { className: 'ztp-bcol-b' },
                 list.length
-                  ? list.map(function (c) {
-                    var dl = deadlineInfo(c.deadline);
-                    return h('div', {
-                      key: c.kind + '-' + c.id,
-                      className: 'ztp-bcard ztp-k-' + c.kind
-                        + (dl && dl.overdue ? ' od' : dl && dl.soon ? ' sn' : ''),
-                      title: (KIND_LABEL[c.kind] || c.kind) + ' #' + c.id + ' · 点击回列表打开详情',
-                      onClick: function () { props.onPick(c); },
-                    },
-                      h('div', { className: 'ztp-bcard-t' },
-                        h(KindTag, { kind: c.kind }),
-                        props.flaggedOf && props.flaggedOf(c)
-                          ? h('span', { className: 'ztp-flagdot' }, h(FlagIcon)) : null,
-                        h('span', { className: 'ztp-id' }, '#' + c.id),
-                        dl ? h('span', {
-                          className: 'ztp-dl' + (dl.overdue ? ' overdue' : dl.soon ? ' soon' : ''),
-                        }, (dl.overdue ? '逾期 ' : '') + fmtDate(c.deadline)) : null),
-                      h('div', { className: 'ztp-bcard-title' }, c.title || ''));
+                  ? KIND_ORDER.map(function (k) {
+      // 列内按 任务/Bug/需求 分组（2026-10-25 用户反馈）：组头带计数与类型色点，
+      // 组内保持截止↑排序；缩略卡左彩条用类型色（--ztp-c），紧迫性由截止 chip 表达
+                    var group = list.filter(function (c) { return c.kind === k; });
+                    if (!group.length) return null;
+                    return [
+                      h('div', { key: 'g-' + k, className: 'ztp-bgrp' },
+                        h('i', { className: 'ztp-bgrp-dot ztp-k-' + k }),
+                        KIND_LABEL[k] || k,
+                        h('span', { className: 'ztp-num' }, group.length)),
+                      group.map(function (c) {
+                        var dl = deadlineInfo(c.deadline);
+                        return h('div', {
+                          key: c.kind + '-' + c.id,
+                          className: 'ztp-bcard ztp-k-' + c.kind,
+                          title: (KIND_LABEL[c.kind] || c.kind) + ' #' + c.id + ' · 点击回列表打开详情',
+                          onClick: function () { props.onPick(c); },
+                        },
+                          h('div', { className: 'ztp-bcard-t' },
+                            h(KindTag, { kind: c.kind }),
+                            props.flaggedOf && props.flaggedOf(c)
+                              ? h('span', { className: 'ztp-flagdot' }, h(FlagIcon)) : null,
+                            h('span', { className: 'ztp-id' }, '#' + c.id),
+                            dl ? h('span', {
+                              className: 'ztp-dl' + (dl.overdue ? ' overdue' : dl.soon ? ' soon' : ''),
+                            }, (dl.overdue ? '逾期 ' : '') + fmtDate(c.deadline)) : null),
+                          h('div', { className: 'ztp-bcard-title' }, c.title || ''));
+                      }),
+                    ];
                   })
                   : h('div', { className: 'ztp-bcol-empty' }, '—')));
           }));

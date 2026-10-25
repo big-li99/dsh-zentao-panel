@@ -559,8 +559,10 @@ board 模式占满主体渲染 `BoardView`，**tab 段/快捷筛选条/排序/�
 - **分列**：`boardColumns(cards, liveOf, now)` → `{todo, running, ask, done}`——liveOf 为 null
   （从未下发/进度已清）归「待处理」；**禅道终态卡（isFinalCard）不入板**；段内 `sortCards
   ('deadline')`（截止↑优先级↑）。列色点：todo=tertiary / running=business / ask=warn / done=success。
-- **缩略卡** `.ztp-bcard`：KindTag + 旗标点 + #id + 截止 chip（overdue→左彩条红/soon→橙）+
-  两行截断标题；title 提示点击行为。
+- **缩略卡** `.ztp-bcard`：KindTag + 旗标点 + #id + 截止 chip（overdue 红/soon 橙文字）+
+  两行截断标题；title 提示点击行为。**列内按 任务/Bug/需求 分组**（2026-10-25 用户反馈加）：
+  每组 `.ztp-bgrp` 组头（类型色点 + 名称 + 计数，空组不渲染，组内保持截止序）；缩略卡左彩条
+  改用类型色 `--ztp-c`（紧迫性由截止 chip 表达，不再用左彩条）。
 - 数据零新增 RPC：cards=visCards 过 matchSearch；活性随 liveSnap/linkRev 渲染周期自动刷新。
 - 测试：client +4（296 项）。⚠️ 又踩 map 嵌套（第 4 次）：BoardView 列体 children 要 flat(2)。
 
@@ -695,13 +697,13 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   ④ 重启后正在跑的 turn 若已死，**不**显示「处理中」（瞬态兜底只在监控未就绪的过渡期生效）。
   **仅 client 改动，⌘R 生效**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **296 项**（注册契约 8 项 +「处理」弹层/下发/时序/
+- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **297 项**（注册契约 8 项 +「处理」弹层/下发/时序/
   不跳转 +「插入对话」10 项（§4.5）+ M6 22 项（§4.4）+ 进度持久化 29 项（§4.6）+ **列表三件套 56 项**
   （§4.7：搜索排序 25 项含 smart 融合实时状态、mine.v1 7 项、replies/fetchLastReply 24 项含 Markdown 渲染 10 项）
   + **会话头部反向跳转 13 项（§4.3 末）** + **账号别名 5 项（§6 多账号节：acctDisplayName 纯函数 +
   AccountSwitcher 展示/编辑态结构——fake useState 恒 null 只能测展示路径，行内编辑交互靠真机）**
   + **附加指令 7 项 + 指令模板预设 8 项 + 完成闭环 4 项（§4.11）+ 快捷筛选 6 项（§4.12）
-  + 一键复制 4 项 + 旗标隐藏 6 项（含 cleanup marks）+ 极速重发 3 项（§4.13）+ 本地备注 5 项 + 继续处理 6 项（§4.14）+ 回复摘要行 2 项 + 决策应答台 1 项（§4.15）+ 流程看板 4 项（§4.16）**）
+  + 一键复制 4 项 + 旗标隐藏 6 项（含 cleanup marks）+ 极速重发 3 项（§4.13）+ 本地备注 5 项 + 继续处理 6 项（§4.14）+ 回复摘要行 2 项 + 决策应答台 1 项（§4.15）+ 流程看板 5 项（§4.16，列内类型分组）**）
   ——DetailView 首次进 _test；chips 类组件断言要 children.flat(2)（map 出的是嵌套数组，§4.8 同坑，
   指令模板与 QfBar 各踩一次）、
   `multi` 42 项（别名 11 项 + **fetchImage 缓存 6 项（§4.10）**）、`protocol` 15 项（+actions/stories 拼写 5 项，§4.8）；`host.mjs` 21+6 项
