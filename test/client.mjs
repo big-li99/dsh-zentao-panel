@@ -1364,5 +1364,46 @@ check('批量下发后逐卡关联同一会话 + findLinkBySession 反查命中'
   && lmBatch['acctB/task-3'] && lmBatch['acctB/task-3'].sessionId === 's-batch'
   && TT.findLinkBySession(lmBatch, 's-batch') !== null);
 
+// ── 账号别名（2026-10-25）──────────────────────────────────────
+check('acctDisplayName：别名优先，无别名退回账号，空安全',
+  TT.acctDisplayName({ account: 'zhangsan', alias: '公司禅道 · 张三' }) === '公司禅道 · 张三'
+  && TT.acctDisplayName({ account: 'zhangsan', alias: '' }) === 'zhangsan'
+  && TT.acctDisplayName({ account: 'zhangsan' }) === 'zhangsan'
+  && TT.acctDisplayName({ account: 'lisi', alias: '   ' }) === 'lisi'
+  && TT.acctDisplayName({ alias: '纯别名' }) === '纯别名'
+  && TT.acctDisplayName(null) === '');
+
+// AccountSwitcher 展示路径（fake useState 恒 null → 只渲染非编辑分支；
+// 行内编辑/确认交互由真实 React 承担，RPC 链路在 multi/host 测试覆盖）
+let pickedAcct = null;
+const swNode = TT.AccountSwitcher({
+  accounts: [
+    { id: 'a1', account: 'zhangsan', alias: '公司 · 张三', baseUrl: 'http://z1.example.com:8090/', loggedIn: true },
+    { id: 'a2', account: 'lisi', baseUrl: 'http://z2.example.com:8090/', loggedIn: false },
+  ],
+  activeId: 'a1',
+  onPick: (a) => { pickedAcct = a; }, onRename: () => {}, onRemove: () => {}, onAdd: () => {}, onClose: () => {},
+});
+// fake createElement 不展平 children：pop.children = [[row1,row2], addButton]
+const swRows = swNode.children[0].children[0];
+const rowMain = (row) => row.children[0][0]; // [main, edit, dot, del] 打包成单个数组 child
+check('账号菜单：主名显示别名、原账号+主机名下沉副行',
+  rowMain(swRows[0]).children[0].children[0] === '公司 · 张三'
+  && rowMain(swRows[0]).children[1].children[0] === 'zhangsan · z1.example.com:8090');
+check('账号菜单：无别名行主名=账号、副行=主机名',
+  rowMain(swRows[1]).children[0].children[0] === 'lisi'
+  && rowMain(swRows[1]).children[1].children[0] === 'z2.example.com:8090');
+check('账号菜单：激活行高亮 + 铅笔改名按钮 + 登录点/移除按钮齐备',
+  swRows[0].props.className.split(' ').includes('on') && !swRows[1].props.className.includes('on')
+  && swRows[0].children[0][1].props.className === 'ztp-acct-edit-btn'
+  && swRows[0].children[0][2].props.title === '已登录'
+  && swRows[0].children[0][3].props.className === 'ztp-acct-del');
+let editStopProp = false;
+swRows[0].children[0][1].props.onClick({ stopPropagation: () => { editStopProp = true; } });
+(swRows[0].props.onClick(), undefined);
+check('账号菜单：点行切换账号、点改名不冒泡（stopPropagation）',
+  ((() => { swRows[1].props.onClick(); return pickedAcct && pickedAcct.id === 'a2'; })())
+  && editStopProp === true);
+
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);

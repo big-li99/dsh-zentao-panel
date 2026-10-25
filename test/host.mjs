@@ -92,6 +92,21 @@ const swBad = await rpc('zentao.switch', { id: 'no-such-id' });
 check('switch 未知账号被拒绝', swBad.ok === false);
 check('switch 缺参被拒绝', (await rpc('zentao.switch', {})).ok === false);
 
+// 别名：login 可带（空 = 保留旧值）、rename 设置/清除、未知 id 与缺参拒绝
+const s1a = await rpc('zentao.login', { baseUrl: BASE, account: ACCOUNT, password: PASSWORD, alias: '  真机 · 别名 ' });
+check('login 带别名（trim 后应用）', s1a.ok === true && s1a.value.alias === '真机 · 别名'
+  && s1a.value.accounts[0].alias === '真机 · 别名');
+const s1b2 = await rpc('zentao.login', { baseUrl: BASE, account: ACCOUNT, password: PASSWORD, alias: '   ' });
+check('login 空白别名 = 保留旧值（不误清）', s1b2.ok === true && s1b2.value.alias === '真机 · 别名');
+const rn = await rpc('zentao.rename', { id: s1a.value.activeId, alias: '  改个名  ' });
+check('rename via rpc', rn.ok === true && rn.value.alias === '改个名' && rn.value.accounts[0].alias === '改个名');
+check('rename 未知账号被拒绝', (await rpc('zentao.rename', { id: 'no-such-id', alias: 'x' })).ok === false);
+check('rename 缺参被拒绝', (await rpc('zentao.rename', {})).ok === false
+  && (await rpc('zentao.rename', { id: s1a.value.activeId })).ok === false);
+const rnClear = await rpc('zentao.rename', { id: s1a.value.activeId, alias: '' });
+check('rename 空串清除别名', rnClear.ok === true && rnClear.value.alias === ''
+  && rnClear.value.accounts[0].alias === '');
+
 // mine
 const m = await rpc('zentao.mine', {});
 check('mine via rpc', m.ok === true && Array.isArray(m.value.cards) && m.value.cards.length >= 3, `${m.value?.cards?.length} 张卡片`);

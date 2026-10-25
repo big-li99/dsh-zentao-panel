@@ -279,6 +279,17 @@
         '.ztp-acct-del{width:22px;height:22px;flex:none;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;}',
         '.ztp-acct-del:hover{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 12%,transparent);color:var(--dsw-alias-state-error-primary);}',
         '.ztp-acct-del svg{width:12px;height:12px;}',
+        '.ztp-acct-edit-btn{width:22px;height:22px;flex:none;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;}',
+        '.ztp-acct-edit-btn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
+        '.ztp-acct-edit-btn svg{width:12px;height:12px;}',
+        '.ztp-acct-edit{flex:1;min-width:0;height:24px;box-sizing:border-box;padding:0 7px;border-radius:var(--dsw-radius-sm);border:.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:12.5px;}',
+        '.ztp-acct-edit:focus{outline:none;border-color:var(--dsw-alias-state-business-primary);}',
+        '.ztp-acct-ok{width:22px;height:22px;flex:none;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-state-success-primary);cursor:pointer;}',
+        '.ztp-acct-ok:hover{background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 12%,transparent);}',
+        '.ztp-acct-ok svg{width:13px;height:13px;}',
+        '.ztp-acct-no{width:22px;height:22px;flex:none;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;}',
+        '.ztp-acct-no:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
+        '.ztp-acct-no svg{width:12px;height:12px;}',
         '.ztp-acct-add{display:flex;align-items:center;gap:6px;width:100%;box-sizing:border-box;margin-top:3px;padding:7px 8px;border-radius:var(--dsw-radius-md);border:0;border-top:.5px solid var(--dsw-alias-border-l1);background:transparent;font:inherit;font-size:12.5px;color:var(--dsw-alias-label-secondary);cursor:pointer;}',
         '.ztp-acct-add:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
         '.ztp-acct-add svg{width:13px;height:13px;}',
@@ -412,6 +423,12 @@
           h('path', { d: 'M3 4.6h10M6.4 4.6V3.4h3.2v1.2M4.4 4.6l.5 8c.03.5.45.8.95.8h4.3c.5 0 .92-.3.95-.8l.5-8', stroke: 'currentColor', strokeWidth: 1.1, strokeLinecap: 'round', strokeLinejoin: 'round' }),
         );
       }
+      /** 账号别名编辑（账号菜单行内）。 */
+      function PencilIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('path', { d: 'M11.3 2.9l1.8 1.8L6 11.8l-2.4.6.6-2.4z', stroke: 'currentColor', strokeWidth: 1.1, strokeLinejoin: 'round' }),
+        );
+      }
       function ChatIcon() {
         return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
           h('path', { d: 'M3 4.3c0-.72.58-1.3 1.3-1.3h7.4c.72 0 1.3.58 1.3 1.3v5c0 .72-.58 1.3-1.3 1.3H7.8L5.2 13.2v-2.6h-.9C3.58 10.6 3 10.02 3 9.3z', stroke: 'currentColor', strokeWidth: 1.1, strokeLinejoin: 'round' }),
@@ -461,6 +478,12 @@
         try { return new URL(baseUrl).host; } catch (e) {
           return String(baseUrl || '').replace(/^https?:\/\//, '').split('/')[0];
         }
+      }
+      /** 账号显示名：有别名用别名，否则禅道登录账号（host 侧已 trim/截断，这里再做防御）。 */
+      function acctDisplayName(a) {
+        var alias = a && typeof a.alias === 'string' ? a.alias.trim() : '';
+        if (alias) return alias;
+        return String((a && a.account) || '');
       }
       // ───────────── 列表搜索 / 排序 / 截止强调（纯函数，进 _test）─────────────
       /** 终态（已完成/已关闭/已取消）：不再参与逾期/临期强调，排序沉底。 */
@@ -2577,31 +2600,74 @@
           }, fold[0] ? ('展开全部（' + acts.length + ' 条）') : '收起') : null);
       }
 
-      /** 多账号：账号管理弹出层（切换 / 添加 / 按账号移除）。 */
+      /**
+       * 多账号：账号管理弹出层（切换 / 添加 / 改别名 / 按账号移除）。
+       * 别名是行内编辑态（editing = {id, value}）：主名显示别名、原账号下沉到副行；
+       * 空 = 清除别名。回调都是 render 作用域函数读当次 state，不用 useCallback（闭包坑）。
+       */
       function AccountSwitcher(props) {
         var accounts = props.accounts || [];
+        var editing = useState(null);
+        var startEdit = function (a) {
+          editing[1]({ id: a.id, value: (a && typeof a.alias === 'string' ? a.alias : '') });
+        };
+        var applyEdit = function (a) {
+          var ed = editing[0];
+          editing[1](null);
+          if (ed) props.onRename(a, ed.value);
+        };
         return h('div', { className: 'ztp-acct-layer', onClick: props.onClose },
           h('div', { className: 'ztp-acct-pop', onClick: function (e) { e.stopPropagation(); } },
             accounts.map(function (a) {
+              var ed = editing[0] && editing[0].id === a.id ? editing[0] : null;
               return h('div', {
                 key: a.id,
                 className: 'ztp-acct-row' + (a.id === props.activeId ? ' on' : ''),
                 role: 'button', tabIndex: 0,
-                onClick: function () { props.onPick(a); },
-                onKeyDown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); props.onPick(a); } },
+                onClick: ed ? undefined : function () { props.onPick(a); },
+                onKeyDown: ed ? undefined : function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); props.onPick(a); } },
               },
-                h('span', { className: 'ztp-acct-main' },
-                  h('span', { className: 'ztp-acct-name' }, a.account || '（未命名）'),
-                  h('span', { className: 'ztp-acct-host' }, hostOf(a.baseUrl))),
-                h('i', {
-                  className: 'ztp-dot',
-                  title: a.loggedIn ? '已登录' : '未登录',
-                  style: { color: a.loggedIn ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-label-caption)', flex: 'none' },
-                }),
-                h('button', {
-                  className: 'ztp-acct-del', type: 'button', title: '移除此账号（清除本机凭据）',
-                  onClick: function (e) { e.stopPropagation(); props.onRemove(a); },
-                }, h(TrashIcon)));
+                ed ? [
+                  h('input', {
+                    key: 'input', className: 'ztp-acct-edit', value: ed.value, spellCheck: false,
+                    autoFocus: true, maxLength: 30, placeholder: '账号别名（留空 = 清除）',
+                    title: '别名只保存在本机，用来区分多个账号（最多 30 字）',
+                    onClick: function (e) { e.stopPropagation(); },
+                    onChange: function (e) { editing[1]({ id: a.id, value: e.target.value }); },
+                    onKeyDown: function (e) {
+                      if (e.key === 'Enter') { e.preventDefault(); applyEdit(a); }
+                      else if (e.key === 'Escape') { e.preventDefault(); editing[1](null); }
+                    },
+                  }),
+                  h('button', {
+                    key: 'ok', className: 'ztp-acct-ok', type: 'button', title: '保存别名',
+                    onClick: function (e) { e.stopPropagation(); applyEdit(a); },
+                  }, h(CheckMarkIcon)),
+                  h('button', {
+                    key: 'no', className: 'ztp-acct-no', type: 'button', title: '取消',
+                    onClick: function (e) { e.stopPropagation(); editing[1](null); },
+                  }, h(CloseIcon)),
+                ] : [
+                  h('span', { key: 'main', className: 'ztp-acct-main' },
+                    h('span', { className: 'ztp-acct-name' }, acctDisplayName(a) || '（未命名）'),
+                    h('span', { className: 'ztp-acct-host' },
+                      (a.alias && String(a.alias).trim()) ? ((a.account || '') + ' · ' + hostOf(a.baseUrl)) : hostOf(a.baseUrl))),
+                  h('button', {
+                    key: 'edit', className: 'ztp-acct-edit-btn', type: 'button',
+                    title: a.alias ? '修改别名（当前：' + a.alias + '）' : '设置别名（方便区分多个账号）',
+                    onClick: function (e) { e.stopPropagation(); startEdit(a); },
+                  }, h(PencilIcon)),
+                  h('i', {
+                    key: 'dot',
+                    className: 'ztp-dot',
+                    title: a.loggedIn ? '已登录' : '未登录',
+                    style: { color: a.loggedIn ? 'var(--dsw-alias-state-success-primary)' : 'var(--dsw-alias-label-caption)', flex: 'none' },
+                  }),
+                  h('button', {
+                    key: 'del', className: 'ztp-acct-del', type: 'button', title: '移除此账号（清除本机凭据）',
+                    onClick: function (e) { e.stopPropagation(); props.onRemove(a); },
+                  }, h(TrashIcon)),
+                ]);
             }),
             h('button', { className: 'ztp-acct-add', type: 'button', onClick: props.onAdd },
               h(PlusIcon), '添加账号…')));
@@ -2798,21 +2864,24 @@
         var baseUrl = useState(props.init.baseUrl && /^https?:\/\//.test(props.init.baseUrl) ? props.init.baseUrl : 'http://');
         var account = useState(props.init.account || '');
         var password = useState('');
+        var alias = useState(''); // 可选别名：多账号时用来区分（也可之后在账号菜单里改）
         var busy = useState(false), err = useState(null);
 
         var submit = useCallback(function () {
           if (busy[0]) return;
           busy[1](true); err[1](null);
-          Promise.resolve(props.rpc('zentao.login', {
+          var payload = {
             baseUrl: baseUrl[0].trim(), account: account[0].trim(), password: password[0],
-          }))
+          };
+          if (alias[0].trim()) payload.alias = alias[0].trim();
+          Promise.resolve(props.rpc('zentao.login', payload))
             .then(function (r) {
               busy[1](false);
               if (r && r.ok) props.onDone(r.value);
               else err[1]((r && r.error && r.error.message) || '登录失败');
             })
             .catch(function (e) { busy[1](false); err[1](String((e && e.message) || e)); });
-        }, [baseUrl[0], account[0], password[0], busy[0]]);
+        }, [baseUrl[0], account[0], password[0], alias[0], busy[0]]);
 
         return h('div', { className: 'ztp-login' },
           h('div', { className: 'ztp-login-mark' }, h(ZentaoGlyph, { size: 24 })),
@@ -2838,6 +2907,13 @@
           h('input', {
             className: 'ztp-input', type: 'password', value: password[0],
             onChange: function (e) { password[1](e.target.value); },
+            onKeyDown: function (e) { if (e.key === 'Enter') submit(); },
+          }),
+          h('label', { className: 'ztp-label' }, '别名（可选）'),
+          h('input', {
+            className: 'ztp-input', value: alias[0], spellCheck: false, maxLength: 30,
+            placeholder: '例如：公司禅道 · 张三（用来区分多个账号）',
+            onChange: function (e) { alias[1](e.target.value); },
             onKeyDown: function (e) { if (e.key === 'Enter') submit(); },
           }),
           h('button', {
@@ -3131,6 +3207,13 @@
             .catch(function () { loadStatus(); });
         }, [rpc, loadStatus]);
 
+        // 设置/清除账号别名（alias 空串 = 清除）；成功后 status 自带新别名，UI 随之刷新
+        var renameAccount = useCallback(function (a, alias) {
+          Promise.resolve(rpc('zentao.rename', { id: a && a.id, alias: String(alias ?? '') }))
+            .then(function (r) { if (r && r.ok) status[1](r.value); })
+            .catch(function () { /* host 未就绪：保持现状 */ });
+        }, [rpc]);
+
         var st = status[0];
         var configured = Boolean(st && st.configured);
         var cards = mine[0] ? mine[0].cards : [];
@@ -3338,9 +3421,11 @@
             h('div', { className: 'ztp-grow' }),
             configured ? h('button', {
               className: 'ztp-acct', type: 'button',
-              title: '当前账号：' + (st.account || '') + ' @ ' + hostOf(st.baseUrl) + '（点击切换/管理账号）',
+              title: '当前账号：' + (acctDisplayName(st) || '未命名')
+                + (st.alias ? '（' + (st.account || '') + ' @ ' + hostOf(st.baseUrl) + '）' : ' @ ' + hostOf(st.baseUrl))
+                + '（点击切换/管理账号）',
               onClick: function () { acctOpen[1](!acctOpen[0]); },
-            }, h('span', { className: 'ztp-acct-label' }, st.account || '未命名'), h(ChevronDownIcon)) : null,
+            }, h('span', { className: 'ztp-acct-label' }, acctDisplayName(st) || '未命名'), h(ChevronDownIcon)) : null,
             loading[0]
               ? h('span', { className: 'ztp-tool', 'aria-hidden': 'true' }, h('span', { className: 'ztp-spin' }))
               : (configured ? h('button', {
@@ -3426,13 +3511,14 @@
             h('span', { className: 'ztp-foot-dim' },
               mine[0].cached ? new Date(mine[0].at).toLocaleTimeString() + ' 缓存' : '刚刚拉取'),
             st && st.account ? h('span', { className: 'ztp-foot-dim', style: { marginLeft: 'auto' } },
-              (st.accounts || []).length > 1 ? st.account + ' @ ' + hostOf(st.baseUrl) : st.account) : null) : null,
+              (st.accounts || []).length > 1 ? acctDisplayName(st) + ' @ ' + hostOf(st.baseUrl) : acctDisplayName(st)) : null) : null,
 
           acctOpen[0] && st && (st.accounts || []).length ? h(AccountSwitcher, {
             accounts: st.accounts,
             activeId: st.activeId,
             onPick: function (a) { if (a.id !== st.activeId) switchAccount(a.id); else acctOpen[1](false); },
             onRemove: removeAccount,
+            onRename: renameAccount,
             onAdd: function () { acctOpen[1](false); adding[1](true); },
           }) : null,
 
@@ -3669,6 +3755,9 @@
         mergeCardImages: mergeCardImages,
         CardItem: CardItem,
         DispatchDialog: DispatchDialog,
+        // 账号别名（2026-10-25）
+        acctDisplayName: acctDisplayName,
+        AccountSwitcher: AccountSwitcher,
       };
       return module.exports;
     },

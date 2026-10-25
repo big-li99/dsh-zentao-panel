@@ -24,7 +24,7 @@
 | M2 client 左侧栏全局面板 | ✅ 2026-10-24 已改为**左侧栏全局面板**入口（对齐 dsh-mnemon「记忆系统」：`sidebar.panellist` 图标行 + `main` keyed 面板，见 §5.1），样式走 DSH token 支持日/夜；注册契约有测试，待真机目视确认 |
 | M3 插入输入框 + 新会话下发 | ✅ 服务级 `setDraft` 真机可用；**描述里的截图改为真实图片附件**（`conversation.createDrafts` + `facade.addAttachments`，见 §4.1）；新会话下发待真机复验 |
 | M4 打磨 | 🔄 进行中（细节见各节）：2026-10-24 修会话超时静默空白 + 拉取失败 toast/错误视图；「处理」改弹层确认式（§4.2）+ 关联会话 chip（§4.3）+ 弹层闭包 bug 修复与下发时序优化 + 入口改左侧栏全局面板（§5.1）+「处理」不自动跳转（§4.2 末）；2026-10-25「插入对话」改弹层式新会话自动跳转不自动发（§4.5）；**同日新增列表三件套：搜索/排序/逾期高亮 + mine.v1 快照秒开 + 处理结果回读（§4.7，待真机目视确认）**；**自动轮询/在线离线状态/新指派提醒 + 列表多选批量下发已完成（§4.9，待真机目视确认）**——M4 既有欠账已清零 |
-| M5 多账号 | ✅ 2026-10-24 完成：schema v2（accounts[]+activeId，旧格式自动迁移）、每账号独立 client/cookie/缓存、账号菜单切换/添加/按账号移除；测试全绿（multi 25 项 + host 新增 4 项），待真机目视确认 |
+| M5 多账号 | ✅ 2026-10-24 完成：schema v2（accounts[]+activeId，旧格式自动迁移）、每账号独立 client/cookie/缓存、账号菜单切换/添加/按账号移除；**2026-10-25 补账号别名**（菜单内 ✎ 行内编辑 + 添加账号时可填 + chip/页脚优先显示别名，新 RPC `zentao.rename`，详见 §6 多账号节；host 改动需重装+重启）；测试全绿（multi 36 项 + client +5），待真机目视确认 |
 | M6 实时状态 | ✅ 2026-10-24 完成：**禅道卡片活性徽标（处理中/等你决策/已完成）+ 完成/等决策常驻提醒 toast（「去看看」跳回会话）**，信号来自 DSH 宿主 `uiSession.sessionStatus`（见 §4.4）。当天先做过一版「鲸鱼娘办公室」可视化面板（左侧栏第二面板 + 自绘 SVG 工位场景，角色参考 Neko3000/deepseek-whalechan），**用户看过后明确否决（「太垃圾」）已整体移除**——不要再做办公室/娘化角色类可视化；保留监控内核改为卡片上的活性体现。2026-10-25 补**处理进度持久化（states.v1）+ 不在面板列表事项的定时清理**（见 §4.6，待真机目视确认）。仅 client 改动，⌘R 生效 |
 
 测试命令：
@@ -505,12 +505,13 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
 - **详情只读改版（2026-10-25 用户要求）**：DetailView 移除全部按钮/链接（会话 chip、插入对话、处理、在禅道打开；「返回」仅在窄容器覆盖模式 <720px 保留），动作全部在左侧卡片上；禅道超链接迁到卡片顶行 #id 旁的小图标 `ztp-zlink`（stopPropagation + `draggable:false` 防链接拖拽覆盖卡片 Markdown 拖拽）。详情图片改为**真实截图画廊** `DetailImages`：`zentao.image` RPC 逐张取字节 → `data:<type>;base64` 直接渲染（DSH 会话 UI 渲染附件图片就是 data:/blob:，主窗口无 CSP 拦截；`--dsw-alias-link` token 已在 asar 源码确认存在），逐张独立落位、单张失败虚线占位、点击全屏放大再点关闭；描述文本用 `stripImageMarkers()` 去掉 `[图片：xxx]` 占位。渲染路径曾用一次性冒烟脚本验证（假 React + 可用 hooks，未入仓库），`test/client.mjs` 93 项不受影响
 - **「插入对话」改版（2026-10-25 用户要求，见 §4.5）**：从「插入当前会话输入框」改为弹层式新会话——同「处理」弹层选工作区/模型/思考强度，但建会话后 `uiWorkspace.openSession` **自动跳转**过去、只填草稿+附件**不自动发送**；共用 `createDraftSession` 前段（create 并行图片预取 → retain('zentao-panel') → setDraft），跳转后释放自己的 retain（mainView 接管保活）。失败降级链保留：新会话建不成/接口缺失 → `insertToCurrentChat` 插当前会话输入框（旧版行为）→ 剪贴板
 - **多账号（M5，2026-10-24）**：
-  - 配置 schema v2：`config.json` = `{version:2, accounts:[{id, baseUrl, account, password(b64), cookies, savedAt}], activeId}`；
-    **旧单账号格式读取时自动迁移**（`store.readConfig()` 里做，不在读取时改写文件），`readConfig()` 同时保留 `baseUrl/account/password/cookies` 兼容字段（取激活账号），smoke/host 测试不用改
+  - 配置 schema v2：`config.json` = `{version:2, accounts:[{id, baseUrl, account, alias?, password(b64), cookies, savedAt}], activeId}`；
+    **旧单账号格式读取时自动迁移**（`store.readConfig()` 里做，不在读取时改写文件），`readConfig()` 同时保留 `baseUrl/account/alias/password/cookies` 兼容字段（取激活账号），smoke/host 测试不用改
   - 账号 id = `sha1(baseUrl + '\n' + account)` 前 12 位 → 同地址同账号重复登录 = upsert（更新凭据重置登录态），不是新增
+  - **账号别名（2026-10-25 新增）**：`store.normAlias()`（trim + 30 字截断，空 = 清除）；账号会话持 `alias`（getter/setAlias，snapshot 透出）；`configure` 不传 alias 时**沿用旧值**（重新登录不抹别名），login RPC 只在 trim 后非空才带该字段（防 upsert 误清）；新 RPC `zentao.rename {id, alias}`（alias 必须是 string，空串 = 清除；未知 id → bad-request）；`zentao.status` 顶层与 `accounts[]` 每项带 `alias`。client：`acctDisplayName(a)`（别名优先，进 `_test`）用于头部 chip/页脚/菜单主名；`AccountSwitcher` 行内编辑（`editing={id,value}` state，回车/✓ 保存、Esc 取消、✎ 按钮 stopPropagation）——**fake useState 恒 null，测试只能覆盖展示路径**，编辑交互靠真机；`LoginView` 加可选「别名（可选）」输入框
   - `service.mjs`：`createAccountSession()` 每账号独立 client/cookie jar/缓存/登录去重/探活节流；service 层持有 `Map<id, session>` + `activeId`，所有取数只作用于激活账号；登录成功经 `onLoginSaved` 回调整体落盘
-  - RPC：新增 `zentao.switch {id}`；`zentao.logout {id?}`（不传 = 移除激活账号）；`zentao.status` 返回值多 `activeId` + `accounts[]`
-  - client：头部账号 chip（`.ztp-acct`）点开 `AccountSwitcher` 弹层（切换/添加/按账号移除）；切换用持久化 cookie 即时生效；`LoginView` 复用（`mode:'add'` 带取消按钮）；切换/移除后 `mine`/`detail` 先清空再由 effect（依赖 `activeId`）重拉
+  - RPC：新增 `zentao.switch {id}`；`zentao.logout {id?}`（不传 = 移除激活账号）；`zentao.rename {id, alias}`；`zentao.status` 返回值多 `activeId` + `accounts[]`（含 alias）
+  - client：头部账号 chip（`.ztp-acct`）点开 `AccountSwitcher` 弹层（切换/添加/改别名/按账号移除）；切换用持久化 cookie 即时生效；`LoginView` 复用（`mode:'add'` 带取消按钮）；切换/移除后 `mine`/`detail` 先清空再由 effect（依赖 `activeId`）重拉
   - 移除激活账号 → 自动切到剩余第一个；最后一个移除 → `clearConfig()`
 
 ## 剩余任务（按优先级）
@@ -563,12 +564,15 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   ④ 重启后正在跑的 turn 若已死，**不**显示「处理中」（瞬态兜底只在监控未就绪的过渡期生效）。
   **仅 client 改动，⌘R 生效**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **209 项**（注册契约 8 项 +「处理」弹层/下发/时序/
+- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **229 项**（注册契约 8 项 +「处理」弹层/下发/时序/
   不跳转 +「插入对话」10 项（§4.5）+ M6 22 项（§4.4）+ 进度持久化 29 项（§4.6）+ **列表三件套 56 项**
   （§4.7：搜索排序 25 项含 smart 融合实时状态、mine.v1 7 项、replies/fetchLastReply 24 项含 Markdown 渲染 10 项）
-  + **会话头部反向跳转 13 项（§4.3 末）**）、
-  `multi` 25 项、`protocol` 14 项（+actions/stories 拼写 5 项，§4.8）；`host.mjs` 21 项（真机 20 张卡片；
-  actions 透传 + story detail 2 项为 §4.8 新增；**logout 测试会清空借用凭据目录的账号**——/tmp/zt-smoke
+  + **会话头部反向跳转 13 项（§4.3 末）** + **账号别名 5 项（§6 多账号节：acctDisplayName 纯函数 +
+  AccountSwitcher 展示/编辑态结构——fake useState 恒 null 只能测展示路径，行内编辑交互靠真机）**）、
+  `multi` 36 项（+别名 11 项）、`protocol` 15 项（+actions/stories 拼写 5 项，§4.8）；`host.mjs` 21+6 项
+  （真机 20 张卡片；actions 透传 + story detail 2 项为 §4.8 新增；**别名 6 项（login 带别名/空白保留/
+  rename 设置/未知 id/缺参/空串清除）为 2026-10-25 新增，本地无凭据未跑，下次真机复验**；
+  **logout 测试会清空借用凭据目录的账号**——/tmp/zt-smoke
   的 config 已被消耗，下次跑需重新提供凭据）、`smoke.mjs` 需真实禅道凭据。
   沙箱里跑 host.mjs 读不了 `~/.dsh/zentao-panel/config.json`（EPERM），需把凭据拷进
   `$DSH_HOME/zentao-panel/`，此时「status before config」一项会假失败（假设初始无配置）

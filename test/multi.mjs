@@ -64,6 +64,7 @@ const cfg1 = store.readConfig();
 check('旧格式读取 → 1 个账号', cfg1.accounts.length === 1 && cfg1.accounts[0].account === 'alice');
 check('旧格式兼容字段（baseUrl/account/password）', cfg1.baseUrl === 'http://a.zentao:8090' && cfg1.account === 'alice' && cfg1.password === 'pw-a');
 check('迁移后 activeId 指向该账号', cfg1.activeId === cfg1.accounts[0].id && Boolean(cfg1.activeId));
+check('旧格式账号别名默认空', cfg1.accounts[0].alias === '' && cfg1.alias === '');
 
 const s1 = svc();
 const boot1 = s1.init();
@@ -105,6 +106,26 @@ s1.configure({ baseUrl: 'http://b.zentao:8090', account: 'bob', password: 'pw-b2
 await s1.ensureLogin();
 check('重复登录仍 2 个账号', s1.status().accounts.length === 2 && s1.status().account === 'bob');
 
+// ── 3.5 别名：设置 / 清除 / upsert 保留 / 未知 id ──────────
+console.log('== 别名 ==');
+check('normAlias：trim + 30 字截断 + 空安全',
+  store.normAlias('  ' + '甲'.repeat(40) + ' ') === '甲'.repeat(30)
+  && store.normAlias('  生产 · bob ') === '生产 · bob'
+  && store.normAlias(null) === '' && store.normAlias(undefined) === '');
+s1.rename(bobId, '  测试环境 · bob  ');
+check('rename 设置别名（trim 后）', s1.status().accounts.find((a) => a.id === bobId).alias === '测试环境 · bob');
+check('status 顶层 alias 取激活账号', s1.status().alias === '测试环境 · bob');
+s1.configure({ baseUrl: 'http://b.zentao:8090', account: 'bob', password: 'pw-b2' }); // 重新登录不带 alias
+await s1.ensureLogin();
+check('重新登录（不带 alias）保留别名', s1.status().accounts.find((a) => a.id === bobId).alias === '测试环境 · bob');
+s1.rename(bobId, '   ');
+check('rename 空白串清除别名', s1.status().accounts.find((a) => a.id === bobId).alias === '');
+s1.rename(bobId, 'bob 备注');
+let noSuchRename = null;
+try { s1.rename('deadbeef', 'x'); } catch (e) { noSuchRename = e; }
+check('rename 未知 id 抛 NO_SUCH_ACCOUNT', noSuchRename && noSuchRename.code === 'NO_SUCH_ACCOUNT');
+check('改名不影响激活账号与登录态', s1.status().account === 'bob' && s1.status().loggedIn === true);
+
 // ── 4. 切换/移除的边界 ─────────────────────────────────────
 console.log('== 移除 ==');
 let noSuch = null;
@@ -124,13 +145,15 @@ check('全部移除后配置清空', Array.isArray(cfgEnd.accounts) && cfgEnd.ac
 console.log('== 落盘 ==');
 const s2 = svc();
 s2.configure({ baseUrl: 'http://a.zentao:8090', account: 'alice', password: 'pw-a2' });
-s2.configure({ baseUrl: 'http://b.zentao:8090', account: 'bob', password: 'pw-b' });
+// 登录时带别名（rpc 层语义：trim 后非空才传给 configure）
+s2.configure({ baseUrl: 'http://b.zentao:8090', account: 'bob', password: 'pw-b', alias: '  生产 · bob ' });
 await s2.ensureLogin();
 s2.switch((await (async () => s2.status())()).accounts.find((a) => a.account === 'alice').id);
 const cfgRt = store.readConfig();
 check('落盘往返 2 个账号', cfgRt.accounts.length === 2);
 check('密码 base64 往返还原', cfgRt.accounts.every((a) => /^pw-/.test(a.password)));
 check('bob 登录 cookie 已落盘', cfgRt.accounts.find((a) => a.account === 'bob').cookies.za === 'bob');
+check('别名落盘往返（trim）', cfgRt.accounts.find((a) => a.account === 'bob').alias === '生产 · bob');
 check('activeId 落盘且有效', cfgRt.activeId === cfgRt.accounts.find((a) => a.account === 'alice').id);
 
 // 重启模拟：新 service init 后仍 2 个账号、激活 alice、bob 免登
@@ -139,6 +162,7 @@ const boot3 = s3.init();
 const st5 = s3.status();
 check('重启恢复 2 个账号 + 激活状态', boot3.configured === true && boot3.count === 2 && st5.account === 'alice');
 check('重启后 bob 仍登录态', st5.accounts.find((a) => a.account === 'bob').loggedIn === true);
+check('重启恢复别名', st5.accounts.find((a) => a.account === 'bob').alias === '生产 · bob');
 
 console.log(failures === 0 ? '\n全部通过 ✅' : `\n${failures} 项失败 ❌`);
 process.exit(failures === 0 ? 0 : 1);
