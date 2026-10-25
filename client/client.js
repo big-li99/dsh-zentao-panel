@@ -130,8 +130,11 @@
         '.ztp-card{position:relative;display:block;width:100%;box-sizing:border-box;text-align:left;font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);padding:11px 14px 11px 16px;margin:0 0 10px;cursor:pointer;transition:background .12s ease,border-color .12s ease;}',
         '.ztp-card:hover{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l4);}',
         '.ztp-card:active{background:var(--dsw-alias-interactive-bg-active);}',
-        '.ztp-card.on{background:var(--dsw-alias-interactive-bg-hover);border-color:color-mix(in srgb,var(--ztp-c,var(--dsw-alias-state-business-primary)) 55%,var(--dsw-alias-border-l3));}',
-        '.ztp-card.on:before{opacity:1;}',
+        // 选中态加强（2026-10-25 用户反馈「不够明显」）：类型色淡染背景 + inset 全彩描边
+        // （不改盒模型）+ 左彩条加宽——与 hover（灰底浅边）拉开差距。边框色若与活性描边
+        // （.ztp-live-ask/done，源码顺序在后）冲突时让位给活性色：选中由底色+内描边+宽彩条表达。
+        '.ztp-card.on{background:color-mix(in srgb,var(--ztp-c,var(--dsw-alias-state-business-primary)) 10%,var(--dsw-alias-bg-layer-2));border-color:var(--ztp-c,var(--dsw-alias-state-business-primary));box-shadow:inset 0 0 0 1px var(--ztp-c,var(--dsw-alias-state-business-primary)));}',
+        '.ztp-card.on:before{opacity:1;width:3px;top:10px;bottom:10px;}',
         '.ztp-card:before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:2px;border-radius:0 2px 2px 0;background:var(--ztp-c,transparent);opacity:.7;}',
         '.ztp-k-task{--ztp-c:var(--dsw-alias-state-business-primary);}',
         '.ztp-k-bug{--ztp-c:var(--dsw-alias-state-error-primary);}',
