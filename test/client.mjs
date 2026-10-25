@@ -950,6 +950,34 @@ resetPane('acct1');
 const rNo = await TT.jumpToZentaoCard('sess-none', jumpDeps);
 check('jump：无关联会话 → reason=nolink', rNo.ok === false && rNo.reason === 'nolink');
 
+// 默认分支（不注入 deps → lookupService('layout')）：selectPanel 是依赖 this 的实例方法，
+// 必须以方法形式调用——抽成裸函数 this=undefined 直接 throw（dsh-pocket #117 同款坑，真机踩过）
+resetPane('acct1'); pc.tab = 'bug';
+window.localStorage.setItem('dsh-zentao-panel.links.v1', JSON.stringify({ 'acct1/task-9': hdrLinks['acct1/task-9'] }));
+const layoutSvc = {
+  bound: false,
+  // 模拟真实 layout.selectPanel：内部依赖实例状态（this.panels），this 丢失即 throw
+  selectPanel(id) {
+    if (this !== layoutSvc || !Object.prototype.hasOwnProperty.call(layoutSvc, 'bound')) throw new Error('this lost');
+    this.bound = true; this._id = id;
+  },
+};
+const origGet = ctx.get;
+ctx.get = (name) => (name === 'layout' ? layoutSvc : undefined);
+const rDefault = await TT.jumpToZentaoCard('sess-b', {});
+ctx.get = origGet;
+check('jump：默认分支走 lookupService → layout.selectPanel 以方法形式调用（this 正确绑定）',
+  rDefault.ok === true && layoutSvc.bound === true && layoutSvc._id === 'zentao'
+  && pc.tab === 'task' && pc.focus && pc.focus.kind === 'task');
+layoutSvc.bound = false;
+pc.focus = null; pc.tab = 'bug'; // 重置：回滚断言期望恢复到点击前的空 focus
+ctx.get = (name) => (name === 'layout' ? { selectPanel: layoutSvc.selectPanel } : undefined); // 换宿主对象调用 → this 丢失
+const rDetach = await TT.jumpToZentaoCard('sess-b', {});
+ctx.get = origGet;
+check('jump：this 丢失的调用形态被兜住 → reason=panel 且回滚，不静默炸',
+  rDetach.ok === false && rDetach.reason === 'panel' && rDetach.message.includes('this lost')
+  && pc.focus === null && pc.tab === 'bug' && layoutSvc.bound === false);
+
 // header 按钮组件渲染（leftWired 已在 apply 注册左侧栏时置 true；links.v1 当前指 sess-b）
 const btnNode = TT.ZentaoHeaderAction({ zentaoSessionId: 'sess-b' });
 check('ZentaoHeaderAction：有关联 → 渲染 ztp-hbtn 按钮（图标 + 「禅道」）',

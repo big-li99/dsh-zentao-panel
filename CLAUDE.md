@@ -314,9 +314,13 @@ getSessionLink/saveSessionLink/removeSessionLink/sessionLinkView/openSessionLink
 点击走 `jumpToZentaoCard`：`findLinkBySession` 反查（多条同 sessionId 取 at 最新）→ 卡片属其他账号先
 `zentao.switch`（成功后 `paneCache.status` 换新 + **mine/detailCard 清空**防闪旧账号列表）→ 写
 `paneCache.tab=kind` + `paneCache.focus={kind,id}` → `layout.selectPanel('zentao')`（服务名 'layout'，
-未注册 throw → 回滚 tab/focus 返回 reason:'panel'）。面板挂载后 ZentaoPane 的 focus effect（依赖
+未注册 throw → 回滚 tab/focus 返回 reason:'panel'）。**⚠️ 真机踩坑（2026-10-25 首版点击无反应）：
+`layout.selectPanel` 是 class 方法（内部 `this.hasMainPanel/this.panels`），从服务实例抽成裸函数调用
+this=undefined 直接 throw 被 catch 静默——必须 `svc.selectPanel(id)` 方法形式调用（dsh-pocket #117 同款）；
+onClick 失败已加 console.warn(`[dsh-zentao-panel] header jump failed: …`) 不再静默。** 面板挂载后 ZentaoPane 的 focus effect（依赖
 `mine[0]`）用 `findFocusCard` 从列表找完整卡片选中详情（id 统一 String 比较）；列表就位却无此卡
-（已完结/转派）→ 清 focus 留在目标 tab。测试 +13（slot 注册契约/inject 传参/反查/定位/五分支 jump/渲染显隐）。
+（已完结/转派）→ 清 focus 留在目标 tab。测试 +15（slot 注册契约/inject 传参/反查/定位/五分支 jump/
+渲染显隐 + 方法形式调用防回归 2 项）。
 
 ### 4.4 实时状态：卡片活性徽标 + 完成/等决策常驻提醒（M6，2026-10-24，DSH 0.2.1-rc.2 源码确认）
 

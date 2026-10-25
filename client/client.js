@@ -1601,12 +1601,12 @@
           paneCache.tab = target.kind;
           paneCache.focus = { kind: target.kind, id: target.id };
           try {
-            var layout = deps.selectPanel || (function () {
-              var svc = lookupService('layout');
-              if (!svc || typeof svc.selectPanel !== 'function') throw new Error('layout unavailable');
-              return svc.selectPanel;
-            })();
-            layout(PANEL_ID);
+            // ⚠️ selectPanel 是 class 方法（内部 this.hasMainPanel/this.panels）——必须以
+            // 方法形式调用，抽成裸函数会 this=undefined 直接 throw（dsh-pocket #117 同款坑，
+            // 2026-10-25 真机踩过：按钮点了没反应、异常被 catch 静默）
+            var layout = deps.selectPanel ? { selectPanel: deps.selectPanel } : lookupService('layout');
+            if (!layout || typeof layout.selectPanel !== 'function') throw new Error('layout unavailable');
+            layout.selectPanel(PANEL_ID);
           } catch (e) {
             paneCache.focus = prevFocus; // 面板没注册（selectPanel throw）→ 回滚定位意图
             paneCache.tab = prevTab;
@@ -1652,7 +1652,14 @@
           type: 'button',
           className: 'ztp-hbtn',
           title: '回到禅道面板：' + label,
-          onClick: function () { jumpToZentaoCard(sessionId, {}); },
+          onClick: function () {
+            jumpToZentaoCard(sessionId, {}).then(function (r) {
+              // 跳转失败不静默：console 留因（reason/message），下次真机排查直接可见
+              if (!r || !r.ok) {
+                try { console.warn('[dsh-zentao-panel] header jump failed:', r && r.reason, (r && r.message) || ''); } catch (e2) { /* 忽略 */ }
+              }
+            });
+          },
         }, h(ZentaoGlyph, { size: 12 }), h('span', { className: 'ztp-hbtn-t' }, '禅道'));
       }
 
