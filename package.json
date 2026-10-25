@@ -1,7 +1,7 @@
 {
   "name": "dsh-zentao-panel",
-  "version": "0.1.0",
-  "description": "DeepSeek Harness 禅道工作台：右侧栏查看指派给我的任务/Bug/需求，一键转为 DSH 对话上下文。",
+  "version": "0.2.0",
+  "description": "DeepSeekRuntime（DSH）禅道工作台插件：左侧栏全局面板查看指派给我的任务/Bug/需求，一键转为 DSH 对话上下文。",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -45,7 +45,8 @@
     "lib",
     "client",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "keywords": [
     "deepseek-harness",

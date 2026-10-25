@@ -54,6 +54,15 @@ DSH_HOME=/tmp/zt-host  node test/host.mjs     # apply() + RPC wire 协议端到�
 
 ## 安装
 
+从 npm 安装（推荐）：
+
+```bash
+DSH="/Applications/DeepSeekRuntime.app/Contents/Resources/runtime/cli/bin/dsh"
+"$DSH" plugin --profile desktop add dsh-zentao-panel
+```
+
+或从源码安装：
+
 ```bash
 git clone https://github.com/big-li99/dsh-zentao-panel.git
 DSH="/Applications/DeepSeekRuntime.app/Contents/Resources/runtime/cli/bin/dsh"
