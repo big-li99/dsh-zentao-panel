@@ -857,6 +857,108 @@ check('sortCards origin：保持禅道返回顺序',
   TT.sortCards(sc, 'origin', NOWD).map((c) => c.id).join(',') === '5,1,2,3,4');
 check('sortCards 未知 mode → 回落 smart', JSON.stringify(TT.sortCards(sc, 'garbage', NOWD)) === JSON.stringify(TT.sortCards(sc, 'smart', NOWD)));
 
+// ── smart 排序融合实时状态：ask > running > 普通 > done > 终态（2026-10-25 提案 2）──
+check('sortCards smart + liveOf：等你决策置顶（无截止的 ask 卡压过逾期卡）',
+  TT.sortCards(sc, 'smart', NOWD, (c) => (c.id === 5 ? 'ask' : null)).map((c) => c.id).join(',') === '5,2,3,4,1');
+check('sortCards smart + liveOf：ask > running > 普通 > done，终态沉底',
+  TT.sortCards(sc, 'smart', NOWD, (c) => ({ 2: 'ask', 3: 'running', 4: 'done' }[c.id] || null))
+    .map((c) => c.id).join(',') === '2,3,5,4,1');
+check('sortCards smart + liveOf：终态仍最先沉底（live 也压不过终态）',
+  TT.sortCards([{ kind: 'bug', id: 9, status: 'closed' }, { kind: 'bug', id: 8, status: 'doing' }], 'smart', NOWD,
+    (c) => (c.id === 9 ? 'ask' : null)).map((c) => c.id).join(',') === '8,9');
+check('sortCards smart + liveOf：done 沉到普通之后（已处理完但禅道未终态）',
+  TT.sortCards([
+    { kind: 'bug', id: 7, status: 'doing', deadline: '2026-11-26' }, // 远期 done
+    { kind: 'bug', id: 6, status: 'doing', deadline: '2026-10-26' }, // 临期普通
+  ], 'smart', NOWD, (c) => (c.id === 7 ? 'done' : null)).map((c) => c.id).join(',') === '6,7');
+check('sortCards smart + liveOf：桶内仍按 截止↑ → 优先级↑ 排',
+  TT.sortCards(sc2, 'smart', NOWD, () => 'running').map((c) => c.id).join(',') === '12,9,11,10');
+check('sortCards smart + liveOf 传非函数 → 行为与原来一致',
+  TT.sortCards(sc, 'smart', NOWD, undefined).map((c) => c.id).join(',') === '2,3,4,5,1');
+check('sortCards deadline/pri 模式不受 liveOf 影响（用户显式选了维度）',
+  JSON.stringify(TT.sortCards(sc, 'deadline', NOWD, (c) => (c.id === 2 ? 'ask' : null))) === JSON.stringify(TT.sortCards(sc, 'deadline', NOWD))
+  && JSON.stringify(TT.sortCards(sc, 'pri', NOWD, (c) => (c.id === 2 ? 'ask' : null))) === JSON.stringify(TT.sortCards(sc, 'pri', NOWD)));
+
+// ── 会话头部反向跳转（Idea 3，2026-10-25）：slot 注册 + links 反查 + 跳转编排 ──
+const headerReg = slotRegs.find((r) => r.opts.name === 'conversation.session.header.actions');
+check('slot: conversation.session.header.actions 已注册（id=zentao-card）',
+  Boolean(headerReg) && headerReg.opts.id === 'zentao-card' && typeof headerReg.comp === 'function');
+check('header inject(sessionId) → zentaoSessionId prop（scope:session 的 runInject 传参）',
+  JSON.stringify(headerReg.opts.inject('sess-1')) === JSON.stringify({ zentaoSessionId: 'sess-1' }));
+
+const hdrLinks = {
+  'acct1/bug-101': { sessionId: 'sess-a', at: 1000, kind: 'bug', id: 101, title: '旧关联' },
+  'acct1/task-9': { sessionId: 'sess-b', at: NOW, kind: 'task', id: 9, title: '修复登录' },
+  'acct2/bug-101': { sessionId: 'sess-c', at: NOW + 1, kind: 'bug', id: 101, title: '另一个账号' },
+};
+check('findLinkBySession：命中返回 parsed（含账号/类型/id）',
+  (() => { const f = TT.findLinkBySession(hdrLinks, 'sess-b'); return f && f.parsed.activeId === 'acct1' && f.parsed.kind === 'task' && String(f.parsed.id) === '9'; })());
+check('findLinkBySession：同一 sessionId 多条 → at 最新',
+  TT.findLinkBySession({ 'a/bug-1': { sessionId: 's', at: 1 }, 'a/bug-2': { sessionId: 's', at: 5 } }, 's').key === 'a/bug-2');
+check('findLinkBySession：无关联 / 空 / __proto__ → null',
+  TT.findLinkBySession(hdrLinks, 'sess-x') === null && TT.findLinkBySession(null, 's') === null
+  && TT.findLinkBySession({ __proto__: { 'x/bug-1': { sessionId: 's', at: 1 } } }, 's') === null);
+check('findFocusCard：kind+id 匹配（列表 id 数字 / focus id 字符串）',
+  TT.findFocusCard([{ kind: 'bug', id: 101 }, { kind: 'task', id: 9 }], { kind: 'bug', id: '101' }).kind === 'bug'
+  && TT.findFocusCard([{ kind: 'bug', id: 101 }], { kind: 'bug', id: '102' }) === null
+  && TT.findFocusCard([{ kind: 'bug', id: 1 }], null) === null);
+
+// 跳转编排（注入 rpc/selectPanel，重置 paneCache 单例字段）
+const pc = TT.paneCache;
+const resetPane = (activeId) => {
+  pc.status = activeId ? { activeId, configured: true } : null;
+  pc.tab = 'task'; pc.mine = { cards: [] }; pc.detailCard = { kind: 'bug', id: 1 }; pc.focus = null;
+};
+resetPane('acct1');
+let selected = null; let switchCalls = [];
+const jumpDeps = {
+  selectPanel: (id) => { selected = id; },
+  rpc: (ep, payload) => { switchCalls.push({ ep, payload }); return Promise.resolve({ ok: true, value: { activeId: payload.id, configured: true } }); },
+};
+// links.v1 写入 sess-b（acct1/task-9，与 paneCache.status.activeId 同账号）
+window.localStorage.setItem('dsh-zentao-panel.links.v1', JSON.stringify({ 'acct1/task-9': hdrLinks['acct1/task-9'] }));
+pc.tab = 'bug'; // 先偏离目标值，验证 jump 确实写了 tab
+const rSame = await TT.jumpToZentaoCard('sess-b', jumpDeps);
+check('jump：同账号 → 直接跳（不切账号），写 tab+focus，selectPanel 收到 zentao',
+  rSame.ok === true && switchCalls.length === 0 && selected === 'zentao'
+  && pc.tab === 'task' && pc.focus && pc.focus.kind === 'task' && String(pc.focus.id) === '9');
+// 异账号：sess-c 属 acct2
+resetPane('acct1'); selected = null; switchCalls = [];
+window.localStorage.setItem('dsh-zentao-panel.links.v1', JSON.stringify({ 'acct2/bug-101': hdrLinks['acct2/bug-101'] }));
+const rSwitch = await TT.jumpToZentaoCard('sess-c', jumpDeps);
+check('jump：卡片属其他账号 → 先 zentao.switch 再跳，status 换新、旧 mine/detail 清空',
+  rSwitch.ok === true && switchCalls.length === 1 && switchCalls[0].ep === 'zentao.switch'
+  && switchCalls[0].payload.id === 'acct2' && pc.status.activeId === 'acct2'
+  && pc.mine === null && pc.detailCard === null && selected === 'zentao'
+  && pc.tab === 'bug' && pc.focus && pc.focus.kind === 'bug' && String(pc.focus.id) === '101');
+// switch 被拒 → 不跳
+resetPane('acct1'); selected = null;
+const rSwFail = await TT.jumpToZentaoCard('sess-c', {
+  selectPanel: jumpDeps.selectPanel,
+  rpc: () => Promise.resolve({ ok: false, error: { message: 'no such account' } }),
+});
+check('jump：switch 被拒 → reason=switch，不调 selectPanel、不写 focus',
+  rSwFail.ok === false && rSwFail.reason === 'switch' && selected === null && pc.focus === null);
+// selectPanel 抛错 → 回滚（links.v1 当前是 acct2/bug-101=sess-c，重置回同账号）
+resetPane('acct1'); pc.tab = 'bug';
+window.localStorage.setItem('dsh-zentao-panel.links.v1', JSON.stringify({ 'acct1/task-9': hdrLinks['acct1/task-9'] }));
+const rPanel = await TT.jumpToZentaoCard('sess-b', { selectPanel: () => { throw new Error('not registered'); } });
+check('jump：selectPanel 抛错 → reason=panel，tab/focus 回滚',
+  rPanel.ok === false && rPanel.reason === 'panel' && pc.focus === null && pc.tab === 'bug');
+// 无关联
+resetPane('acct1');
+const rNo = await TT.jumpToZentaoCard('sess-none', jumpDeps);
+check('jump：无关联会话 → reason=nolink', rNo.ok === false && rNo.reason === 'nolink');
+
+// header 按钮组件渲染（leftWired 已在 apply 注册左侧栏时置 true；links.v1 当前指 sess-b）
+const btnNode = TT.ZentaoHeaderAction({ zentaoSessionId: 'sess-b' });
+check('ZentaoHeaderAction：有关联 → 渲染 ztp-hbtn 按钮（图标 + 「禅道」）',
+  btnNode && btnNode.type === 'button' && btnNode.props.className === 'ztp-hbtn'
+  && btnNode.props.title.includes('回到禅道面板') && Array.isArray(btnNode.children) && btnNode.children.length === 2);
+check('ZentaoHeaderAction：无关联 / 无 sessionId → 不渲染',
+  TT.ZentaoHeaderAction({ zentaoSessionId: 'sess-x' }) === null && TT.ZentaoHeaderAction({}) === null);
+window.localStorage.removeItem('dsh-zentao-panel.links.v1');
+
 const mcard = { kind: 'bug', id: 123, title: '登录页报错', status: 'active', openedBy: '张三' };
 check('matchSearch：标题 / 裸 id / #id / 状态名 / 创建人命中',
   TT.matchSearch(mcard, '登录') === true && TT.matchSearch(mcard, '123') === true

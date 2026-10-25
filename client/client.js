@@ -148,6 +148,8 @@
         '.ztp-slink{display:inline-flex;align-items:center;gap:4px;max-width:58%;height:22px;padding:0 8px;margin-right:auto;border-radius:999px;border:.5px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11px;cursor:pointer;box-sizing:border-box;min-width:0;}',
         '.ztp-slink:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);border-color:var(--dsw-alias-border-l4);}',
         '.ztp-slink svg{width:11px;height:11px;flex:none;opacity:.8;}',
+        '.ztp-hbtn{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border:none;border-radius:var(--dsw-alias-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;cursor:pointer;}',
+        '.ztp-hbtn:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
         '.ztp-slink-t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
         '.ztp-slink.dead{color:var(--dsw-alias-label-caption);border-style:dashed;}',
 
@@ -458,16 +460,30 @@
       }
       /**
        * 排序比较器（smart 是默认值）：
-       * - smart：终态沉底 → 逾期 > 临期 > 有截止 > 无截止 → 段内截止↑ → 优先级↑ → id↓；
+       * - smart：终态沉底 → 等你决策 > 处理中 > 普通卡片（逾期 > 临期 > 有截止 > 无截止）> 已完成
+       *   → 段内截止↑ → 优先级↑ → id↓。实时状态由 liveOf(card) 注入（'ask'/'running'/'done'/null，
+       *   来自 resolveLiveState），最该看的卡（agent 正在等你决策）永远第一屏；
        * - deadline：截止↑（无截止最后，终态沉底）；
        * - pri：优先级↑ → 截止↑ → id↓；
        * - origin：保持禅道返回顺序。
+       * deadline/pri/origin 不掺实时状态——用户显式选了排序维度就尊重它。
        */
+      /** 实时状态桶：ask 0 / running 1 / 普通 2 / done 3（已处理完但禅道侧未终态，沉到普通之后）。 */
+      function liveRank(c, liveOf) {
+        if (typeof liveOf !== 'function') return 2;
+        var s = liveOf(c);
+        if (s === 'ask') return 0;
+        if (s === 'running') return 1;
+        if (s === 'done') return 3;
+        return 2;
+      }
       var SORT_MAKERS = {
-        smart: function (now) {
+        smart: function (now, liveOf) {
           return function (a, b) {
             var fa = isFinalCard(a), fb = isFinalCard(b);
             if (fa !== fb) return fa ? 1 : -1;
+            var la = liveRank(a, liveOf), lb = liveRank(b, liveOf);
+            if (la !== lb) return la - lb;
             var ba = deadlineBucket(a, now), bb = deadlineBucket(b, now);
             if (ba !== bb) return ba - bb;
             var dl = cmpDeadlineAsc(a, b, now);
@@ -497,10 +513,10 @@
         },
         origin: function () { return null; },
       };
-      function sortCards(cards, mode, now) {
+      function sortCards(cards, mode, now, liveOf) {
         var list = Array.isArray(cards) ? cards.slice() : [];
         var maker = SORT_MAKERS[mode] || SORT_MAKERS.smart;
-        var cmp = maker(typeof now === 'number' ? now : Date.now());
+        var cmp = maker(typeof now === 'number' ? now : Date.now(), liveOf);
         return cmp ? list.sort(cmp) : list;
       }
 
@@ -1535,6 +1551,123 @@
         return { ok: true, sessionId: link.sessionId };
       }
 
+      // ───────────────────────── 会话头部反向跳转（Idea 3，2026-10-25）─────────────────
+      // 面板 → 会话有 chip/toast 跳转（openSessionLink），这里是另一半闭环：处理过的
+      // 会话头部（conversation.session.header.actions slot）出现「禅道」小按钮，点击
+      // 切回禅道面板并定位到该卡片。源码事实（0.2.1-rc.2，探测记录见《计划书.md》§8）：
+      //   该 slot 是 scope:'session'，entry 的 inject 回调第一个参数就是当前会话 id
+      //   （dsh-client-ui-renderer 的 runInject 传 binding.key，官方 ui-jobs 同款）；
+      //   inject 结果按会话缓存、切会话 remount，所以 links 的变化靠组件渲染时重读。
+      /** links.v1 反查：sessionId → 最新关联（多条命中取 at 最新）。返回
+       *  {key, link, parsed}（parsed = parseLinkKey 结果，含 activeId/kind/id），无则 null。 */
+      function findLinkBySession(links, sessionId) {
+        var best = null;
+        if (!links || !sessionId) return null;
+        for (var key in links) {
+          if (!Object.prototype.hasOwnProperty.call(links, key) || key === '__proto__') continue;
+          var v = links[key];
+          if (!v || v.sessionId !== sessionId) continue;
+          var at = Number(v.at) || 0;
+          if (!best || at >= best.at) best = { key: key, link: v, parsed: parseLinkKey(key), at: at };
+        }
+        return best;
+      }
+
+      /** header 跳转的定位目标在列表里找完整卡片（focus.id 与卡片 id 统一 String 比较）。 */
+      function findFocusCard(cards, focus) {
+        if (!focus) return null;
+        var list = Array.isArray(cards) ? cards : [];
+        for (var i = 0; i < list.length; i++) {
+          var c = list[i];
+          if (c && c.kind === focus.kind && String(c.id) === String(focus.id)) return c;
+        }
+        return null;
+      }
+
+      /**
+       * 会话头部「禅道」按钮点击：反查 links → （卡片属于其他账号时先 zentao.switch）→
+       * 写 paneCache（tab + focus + 新 status/清 mine）→ layout.selectPanel('zentao')。
+       * 面板挂载后由 ZentaoPane 的 focus effect 用列表数据定位完整卡片。
+       * deps 可注入（rpc / selectPanel），缺省走真实服务；返回 {ok, reason?} 不抛错。
+       */
+      function jumpToZentaoCard(sessionId, deps) {
+        deps = deps || {};
+        var found = findLinkBySession(readLinkMap(), sessionId);
+        if (!found || !found.parsed) return Promise.resolve({ ok: false, reason: 'nolink' });
+        var target = found.parsed;
+        var prevTab = paneCache.tab, prevFocus = paneCache.focus || null;
+        var jump = function () {
+          // 面板挂载读 paneCache 初始 state：tab 即目标分类；focus 由 ZentaoPane 消费
+          paneCache.tab = target.kind;
+          paneCache.focus = { kind: target.kind, id: target.id };
+          try {
+            var layout = deps.selectPanel || (function () {
+              var svc = lookupService('layout');
+              if (!svc || typeof svc.selectPanel !== 'function') throw new Error('layout unavailable');
+              return svc.selectPanel;
+            })();
+            layout(PANEL_ID);
+          } catch (e) {
+            paneCache.focus = prevFocus; // 面板没注册（selectPanel throw）→ 回滚定位意图
+            paneCache.tab = prevTab;
+            return { ok: false, reason: 'panel', message: String((e && e.message) || e) };
+          }
+          return { ok: true };
+        };
+        var cur = (paneCache.status && paneCache.status.activeId) || null;
+        if (cur === target.activeId) return Promise.resolve(jump());
+        // 卡片属于其他账号：先切过去（host 侧 cookie 即时生效），面板挂载时 status
+        // 即新账号；旧账号的 mine/detailCard 必须清掉，防止挂载瞬间闪旧账号列表
+        var call = deps.rpc || function (endpoint, payload) {
+          return appCtx.connection.rpc.call(CHANNEL, endpoint, payload || {});
+        };
+        return Promise.resolve(call('zentao.switch', { id: target.activeId }))
+          .then(function (r) {
+            if (!r || !r.ok) return { ok: false, reason: 'switch', message: (r && r.error && r.error.message) || '' };
+            paneCache.status = r.value || paneCache.status;
+            paneCache.mine = null;
+            paneCache.detailCard = null;
+            return jump();
+          })
+          .catch(function (e) {
+            return { ok: false, reason: 'switch', message: String((e && e.message) || e) };
+          });
+      }
+
+      /**
+       * 会话头部按钮组件（conversation.session.header.actions，scope:'session'）。
+       * inject(sessionId) 经 zentaoSessionId prop 传入；渲染时重读 links 决定显隐
+       * （切会话 remount + 本会话关联被覆盖/清除时下一次渲染自然消失）。
+       * 左侧栏面板没挂上（leftWired=false，旧 DSH 悬浮兜底模式）时不显示——没有可跳的面板。
+       */
+      function ZentaoHeaderAction(props) {
+        var sessionId = props && props.zentaoSessionId;
+        if (!leftWired) return null;
+        var found = sessionId ? findLinkBySession(readLinkMap(), sessionId) : null;
+        if (!found) return null;
+        var p = found.parsed || {};
+        var label = found.link && found.link.title ? found.link.title
+          : (p.kind ? p.kind + ' #' + p.id : '禅道卡片');
+        return h('button', {
+          type: 'button',
+          className: 'ztp-hbtn',
+          title: '回到禅道面板：' + label,
+          onClick: function () { jumpToZentaoCard(sessionId, {}); },
+        }, h(ZentaoGlyph, { size: 12 }), h('span', { className: 'ztp-hbtn-t' }, '禅道'));
+      }
+
+      /** 注册会话头部按钮（ui-conversation 激活该 slot 的 factory 时才真正挂 entry）。 */
+      function registerHeaderAction() {
+        appCtx.slots.inject('conversation.session.header.actions', function () {
+          return appCtx.slots.register({
+            name: 'conversation.session.header.actions',
+            id: 'zentao-card',
+            order: 25,
+            inject: function (sessionId) { return { zentaoSessionId: sessionId }; },
+          }, ZentaoHeaderAction);
+        });
+      }
+
       // ───────────────────────── M6 处理中任务的实时状态：常驻监控 ─────────────────────────
       // 「任务完成 / 需要决策」提醒不依赖面板打开：插件 apply() 即启动本监控。
       // 信号源（0.2.1-rc.2 源码确认，dsh-notify-me 同款）：
@@ -2510,7 +2643,7 @@
       // 切回会话视图（selectPanel(null)）或别的面板时禅道面板卸载——初始 state 直接取
       // 缓存，重挂瞬间就是完整列表，不闪 loading/骨架；后台 RPC 照常静默刷新。
       // 登出/切账号时这些 state 被置 null，缓存同步为 null，下次重挂走登录/重拉。
-      var paneCache = { tab: 'task', status: null, mine: null, detailCard: null };
+      var paneCache = { tab: 'task', status: null, mine: null, detailCard: null, focus: null };
       // 结果摘要自动回读的失败冷却（linkKey → 上次尝试时刻；模块级，避免重渲染干扰）
       var replyLastTry = {};
 
@@ -2609,6 +2742,18 @@
             loadMine(false);
           }
         }, [status[0] && status[0].configured, status[0] && status[0].activeId]);
+
+        // 会话头部「禅道」按钮跳转进来的定位（Idea 3）：paneCache.focus 带 {kind, id}，
+        // 等列表数据就位（快照水合或拉取）后从卡片里找完整对象选中详情；列表已就位
+        // 却没有这张卡（已完结/转派离开「指派给我」）→ 放弃定位，留在目标分类 tab。
+        useEffect(function () {
+          var f = paneCache.focus;
+          if (!f || !mine[0] || !mine[0].cards) return;
+          paneCache.focus = null;
+          var hit = findFocusCard(mine[0].cards, f);
+          tab[1](f.kind);
+          if (hit) detailCard[1](hit);
+        }, [mine[0]]);
 
         // 「插入对话」（2026-10-25 改版）：与「处理」同款弹层选工作区/模型，确认后
         // 新建会话、自动跳转过去、只填草稿不发送；失败降级插入当前会话输入框（旧版行为）
@@ -2771,8 +2916,8 @@
           var list = cards.filter(function (c) {
             return c.kind === tab[0] && matchSearch(c, search[0]);
           });
-          return sortCards(list, sortMode[0]);
-        }, [cards, tab[0], search[0], sortMode[0]]);
+          return sortCards(list, sortMode[0], undefined, liveOf);
+        }, [cards, tab[0], search[0], sortMode[0], linkRev[0], liveSnap[0]]);
         var counts = useMemo(function () {
           var m = { task: 0, bug: 0, story: 0 };
           for (var i = 0; i < cards.length; i++) m[cards[i].kind] = (m[cards[i].kind] || 0) + 1;
@@ -3074,6 +3219,13 @@
           try { console.error('[dsh-zentao-panel] register left-sidebar panel failed', e); } catch (e2) { /* 忽略 */ }
         }
 
+        // 会话头部「禅道」按钮（面板 → 会话 → 面板 闭环的另一半；slot 没声明时静默不挂）
+        try {
+          registerHeaderAction();
+        } catch (e) {
+          try { console.error('[dsh-zentao-panel] register header action failed', e); } catch (e2) { /* 忽略 */ }
+        }
+
         // 2.5s 内 main/sidebar.panellist 没就绪（旧版 DSH）→ 退回悬浮入口
         setTimeout(function () {
           if (!leftWired) registerOverlay();
@@ -3103,6 +3255,12 @@
         removeSessionLink: removeSessionLink,
         sessionLinkView: sessionLinkView,
         openSessionLink: openSessionLink,
+        // 会话头部反向跳转（Idea 3）
+        findLinkBySession: findLinkBySession,
+        findFocusCard: findFocusCard,
+        jumpToZentaoCard: jumpToZentaoCard,
+        ZentaoHeaderAction: ZentaoHeaderAction,
+        registerHeaderAction: registerHeaderAction,
         paneCache: paneCache,
         fmtLinkAt: fmtLinkAt,
         // 实时状态监控（M6）

@@ -306,6 +306,18 @@ defaultEffort 缺席加「提供商默认」）。`dispatchToNewSession(md, imag
 getSessionLink/saveSessionLink/removeSessionLink/sessionLinkView/openSessionLink/fmtLinkAt`），
 `test/client.mjs` 用挂在 window 上的 localStorage 替身直测。
 
+**反向跳转（2026-10-25 Idea 3 已实现，仅 client，⌘R 生效）**：处理过的**会话头部**出现「禅道」小按钮
+（`.ztp-hbtn`），点击切回禅道面板并定位该卡片——闭环的另一半。机制（探测记录《计划书.md》§8）：
+`conversation.session.header.actions` 是 scope:'session'，**entry 的 `inject(sessionId)` 首参即当前会话 id**
+（renderer `runInject` 传 `binding.key`，官方 ui-jobs 同款）；本项目 `inject: (sessionId) => ({zentaoSessionId: sessionId})`
+传给 `ZentaoHeaderAction`（渲染时重读 links.v1 决定显隐，`leftWired=false` 悬浮兜底模式不显示）。
+点击走 `jumpToZentaoCard`：`findLinkBySession` 反查（多条同 sessionId 取 at 最新）→ 卡片属其他账号先
+`zentao.switch`（成功后 `paneCache.status` 换新 + **mine/detailCard 清空**防闪旧账号列表）→ 写
+`paneCache.tab=kind` + `paneCache.focus={kind,id}` → `layout.selectPanel('zentao')`（服务名 'layout'，
+未注册 throw → 回滚 tab/focus 返回 reason:'panel'）。面板挂载后 ZentaoPane 的 focus effect（依赖
+`mine[0]`）用 `findFocusCard` 从列表找完整卡片选中详情（id 统一 String 比较）；列表就位却无此卡
+（已完结/转派）→ 清 focus 留在目标 tab。测试 +13（slot 注册契约/inject 传参/反查/定位/五分支 jump/渲染显隐）。
+
 ### 4.4 实时状态：卡片活性徽标 + 完成/等决策常驻提醒（M6，2026-10-24，DSH 0.2.1-rc.2 源码确认）
 
 用户原始需求：「正在处理的任务要有体现；任务完成要提醒并能点击跳转到对话；中途需要我决策同理」。
@@ -381,7 +393,7 @@ Neko3000/deepseek-whalechan 公开规范——**注意其图片素材不在开�
 
 按 1→2→3 顺序全做，**全部仅 client 改动，⌘R 生效**。测试 +38 项（见文末测试现状）。
 
-**① 搜索 + 排序 + 临期/逾期高亮（纯渲染层）**：`.ztp-head` 右侧加搜索框（`.ztp-search`）+ 排序下拉（`.ztp-sort`）。`matchSearch`：标题/#id/状态名/创建人/指派人拼 haystack，**多词空格 AND**、大小写不敏感、空查询恒 true；无命中空态给「清空搜索」，页脚变「共 X/Y 条」。`sortCards(cards, mode, now)`：**smart**（默认：终态沉底 → 逾期 > 临期(≤3天) > 有截止 > 无截止 → 段内截止↑ 优先级↑ id↓）/ **deadline** / **pri** / **origin**（禅道原序）。`deadlineInfo(deadline, now)`（now 可注入）：截止日 23:59:59 → `{ts, days, overdue, soon}`（soon 沿用旧 isUrgent ≤3 天语义，**isUrgent 已删**）；终态（`FINAL_STATUS`：done/closed/cancel）不着色不置顶；卡片/详情截止 span 换 `.ztp-dl(.soon|.overdue)`（warn/error token），逾期显示「逾期 M-d」+ title 逾期天数。
+**① 搜索 + 排序 + 临期/逾期高亮（纯渲染层）**：`.ztp-head` 右侧加搜索框（`.ztp-search`）+ 排序下拉（`.ztp-sort`）。`matchSearch`：标题/#id/状态名/创建人/指派人拼 haystack，**多词空格 AND**、大小写不敏感、空查询恒 true；无命中空态给「清空搜索」，页脚变「共 X/Y 条」。`sortCards(cards, mode, now, liveOf)`：**smart**（默认：终态沉底 → **等你决策(ask) > 处理中(running) > 普通（逾期 > 临期(≤3天) > 有截止 > 无截止）> 已完成(done，禅道侧未终态）** → 段内截止↑ 优先级↑ id↓；liveOf(card) 注入 `resolveLiveState` 的实时状态，2026-10-25 加）/ **deadline** / **pri** / **origin**（禅道原序；后三者不掺实时状态——用户显式选了维度就尊重）。ZentaoPane 调用处 useMemo deps 补 `linkRev/liveSnap`（状态变化触发重排）。`deadlineInfo(deadline, now)`（now 可注入）：截止日 23:59:59 → `{ts, days, overdue, soon}`（soon 沿用旧 isUrgent ≤3 天语义，**isUrgent 已删**）；终态（`FINAL_STATUS`：done/closed/cancel）不着色不置顶；卡片/详情截止 span 换 `.ztp-dl(.soon|.overdue)`（warn/error token），逾期显示「逾期 M-d」+ title 逾期天数。
 
 **② 列表快照 mine.v1：重启/重开秒开 + 离线兜底**：localStorage `dsh-zentao-panel.mine.v1`，`{activeId: {cards, at, savedAt}}`，读坏自愈，**上限 400 卡/账号、4 账号（按 savedAt 淘汰）**。ZentaoPane 的 activeId effect **先** `readMineSnapshot` 水合（值带 `cached:true`，页脚「HH:mm 缓存」）**再** `loadMine(false)` 后台替换——首屏不闪骨架；禅道不可达时快照即兜底视图（错误视图只在 cards 为空时抢占）。`loadMine` 成功后 `writeMineSnapshot(paneCache.status.activeId, …)`——**activeId 必须从 paneCache 读**（loadMine 是 useCallback([rpc])，闭包 status 是旧值）。登出/移除账号 → `removeMineSnapshot`。
 
@@ -521,9 +533,10 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   ④ 重启后正在跑的 turn 若已死，**不**显示「处理中」（瞬态兜底只在监控未就绪的过渡期生效）。
   **仅 client 改动，⌘R 生效**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **181 项**（注册契约 8 项 +「处理」弹层/下发/时序/
-  不跳转 +「插入对话」10 项（§4.5）+ M6 22 项（§4.4）+ 进度持久化 29 项（§4.6）+ **列表三件套 49 项**
-  （§4.7：搜索排序 18 项、mine.v1 7 项、replies/fetchLastReply 24 项含 Markdown 渲染 10 项））、
+- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **201 项**（注册契约 8 项 +「处理」弹层/下发/时序/
+  不跳转 +「插入对话」10 项（§4.5）+ M6 22 项（§4.4）+ 进度持久化 29 项（§4.6）+ **列表三件套 56 项**
+  （§4.7：搜索排序 25 项含 smart 融合实时状态、mine.v1 7 项、replies/fetchLastReply 24 项含 Markdown 渲染 10 项）
+  + **会话头部反向跳转 13 项（§4.3 末）**）、
   `multi` 25 项、`protocol` 9 项；`host.mjs` 19 项（真机 20 张卡片）、`smoke.mjs` 需真实禅道凭据。
   沙箱里跑 host.mjs 读不了 `~/.dsh/zentao-panel/config.json`（EPERM），需把凭据拷进
   `$DSH_HOME/zentao-panel/`，此时「status before config」一项会假失败（假设初始无配置）
