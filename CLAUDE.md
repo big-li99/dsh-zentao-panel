@@ -509,7 +509,10 @@ placeholder「拼到任务背景末尾，如：只分析定位原因，先不要
 + 快捷筛选新增「已标记」维度（`quickFilterHit/Counts` 第 5 参 `flaggedOf` 注入，缺省恒 false 向后兼容，
 QUICK_FILTERS 现在 6 项）；隐藏 → `visCards` 把隐藏卡从列表/计数/筛选/页脚全部滤掉，页脚
 `.ztp-foot-hide`「显示已隐藏 N」临时切换 `showHidden`（淡化 `.ztp-card.hiddenmark` 显示，点 ⊘ 取消）。
-`cleanupStaleLinks` 顺带清 marks（在线刷 lastSeen 1h 限频 / 离线 72h 宽限删 / 只动当前账号）。
+**N 只数当前列表里实际隐藏的卡**（`hiddenCount(map, activeId, cards)`；2026-10-26 用户反馈修复：
+原先按 marks 全量计数，卡片在禅道完成/转派离开「指派给我」后仍占着数字、点开却找不到那张卡）。
+隐藏标记本身仍按 72h 宽限保留（卡片重新指派回来仍然隐藏；`cleanupStaleLinks` 顺带清 marks：在线刷
+lastSeen 1h 限频 / 离线 72h 宽限删 / 只动当前账号）。
 
 **③极速重发（lastdispatch.v1）**：`{workspaceId?, cwd?, model?, instr, at}`——sendDispatch **成功即保存**
 （含批量）。卡片动作行 ⚡（`quickTitle` 非空才渲染，title=`lastDispatchSummary` 摘要：工作区/继承目录/
@@ -697,13 +700,13 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   ④ 重启后正在跑的 turn 若已死，**不**显示「处理中」（瞬态兜底只在监控未就绪的过渡期生效）。
   **仅 client 改动，⌘R 生效**
 - 改完代码后重装：`dsh plugin --profile desktop remove dsh-zentao-panel && dsh plugin --profile desktop add /path/to/dsh-zentao-panel`，再重启桌面版
-- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **297 项**（注册契约 8 项 +「处理」弹层/下发/时序/
+- 测试现状（2026-10-25 复跑全绿）：`test/client.mjs` **298 项**（注册契约 8 项 +「处理」弹层/下发/时序/
   不跳转 +「插入对话」10 项（§4.5）+ M6 22 项（§4.4）+ 进度持久化 29 项（§4.6）+ **列表三件套 56 项**
   （§4.7：搜索排序 25 项含 smart 融合实时状态、mine.v1 7 项、replies/fetchLastReply 24 项含 Markdown 渲染 10 项）
   + **会话头部反向跳转 13 项（§4.3 末）** + **账号别名 5 项（§6 多账号节：acctDisplayName 纯函数 +
   AccountSwitcher 展示/编辑态结构——fake useState 恒 null 只能测展示路径，行内编辑交互靠真机）**
   + **附加指令 7 项 + 指令模板预设 8 项 + 完成闭环 4 项（§4.11）+ 快捷筛选 6 项（§4.12）
-  + 一键复制 4 项 + 旗标隐藏 6 项（含 cleanup marks）+ 极速重发 3 项（§4.13）+ 本地备注 5 项 + 继续处理 6 项（§4.14）+ 回复摘要行 2 项 + 决策应答台 1 项（§4.15）+ 流程看板 5 项（§4.16，列内类型分组）**）
+  + 一键复制 4 项 + 旗标隐藏 7 项（含 cleanup marks、隐藏计数随列表减少）+ 极速重发 3 项（§4.13）+ 本地备注 5 项 + 继续处理 6 项（§4.14）+ 回复摘要行 2 项 + 决策应答台 1 项（§4.15）+ 流程看板 5 项（§4.16，列内类型分组）**）
   ——DetailView 首次进 _test；chips 类组件断言要 children.flat(2)（map 出的是嵌套数组，§4.8 同坑，
   指令模板与 QfBar 各踩一次）、
   `multi` 42 项（别名 11 项 + **fetchImage 缓存 6 项（§4.10）**）、`protocol` 15 项（+actions/stories 拼写 5 项，§4.8）；`host.mjs` 21+6 项

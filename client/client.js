@@ -1013,14 +1013,18 @@
           hide: Boolean(v && v.hide),
         };
       }
-      /** 当前账号的隐藏数量（页脚「显示已隐藏」入口用）。 */
-      function hiddenCount(map, activeId) {
-        var acct = String(activeId || 'anon');
+      /** 当前账号在「当前列表」中被隐藏的卡片数（页脚「显示已隐藏」入口用）。
+       *  只数列表里真实存在的卡：禅道里完成/转派后卡片离开「指派给我」，隐藏标记按
+       *  72h 宽限保留（重新指派回来仍生效），但页脚数字必须与「点开能看到几张」一致，
+       *  否则会一直挂着点开却找不到的旧卡片（2026-10-26 用户反馈）。 */
+      function hiddenCount(map, activeId, cards) {
+        var list = Array.isArray(cards) ? cards : [];
         var n = 0;
-        for (var key in map) {
-          if (!Object.prototype.hasOwnProperty.call(map, key) || key === '__proto__') continue;
-          var pk = parseLinkKey(key);
-          if (pk && pk.activeId === acct && map[key] && map[key].hide) n++;
+        for (var i = 0; i < list.length; i++) {
+          var c = list[i];
+          if (!c || !c.kind) continue;
+          var v = map && map[sessionLinkKey(activeId, c)];
+          if (v && v.hide) n++;
         }
         return n;
       }
@@ -4132,8 +4136,8 @@
           return markOf(markMap, activeAcct, card).flag;
         }
         var hiddenN = useMemo(function () {
-          return hiddenCount(markMap, activeAcct);
-        }, [markMap, activeAcct]);
+          return hiddenCount(markMap, activeAcct, cards);
+        }, [markMap, activeAcct, cards]);
         var visCards = useMemo(function () {
           if (showHidden[0]) return cards;
           return cards.filter(function (c) { return !markOf(markMap, activeAcct, c).hide; });

@@ -1532,9 +1532,14 @@ check('marks：toggleCardMark 旗标/隐藏开合 + 空条目自动删',
   && TT.readMarkMap()['acctM/bug-1'] === undefined
   && (TT.toggleCardMark('acctM', bc2, 'hide'), TT.markOf(TT.readMarkMap(), 'acctM', bc2).hide === true));
 check('marks：账号隔离 + hiddenCount 只数当前账号',
-  TT.toggleCardMark('acctN', bc1, 'hide') && TT.hiddenCount(TT.readMarkMap(), 'acctM') === 1
-  && TT.hiddenCount(TT.readMarkMap(), 'acctN') === 1
+  TT.toggleCardMark('acctN', bc1, 'hide') && TT.hiddenCount(TT.readMarkMap(), 'acctM', [bc1, bc2]) === 1
+  && TT.hiddenCount(TT.readMarkMap(), 'acctN', [bc1, bc2]) === 1
   && TT.markOf(TT.readMarkMap(), 'acctN', bc1).hide === true);
+check('marks：隐藏卡离开「指派给我」列表（禅道完成/转派）→ hiddenCount 跟着减少',
+  TT.hiddenCount(TT.readMarkMap(), 'acctM', [bc1, bc2]) === 1
+  && TT.hiddenCount(TT.readMarkMap(), 'acctM', [bc1]) === 0
+  && TT.hiddenCount(TT.readMarkMap(), 'acctM', []) === 0
+  && TT.markOf(TT.readMarkMap(), 'acctM', bc2).hide === true); // 标记本身按 72h 宽限保留
 check('marks：同一卡旗标+隐藏并存，去掉一个另一个保留',
   TT.toggleCardMark('acctM', bc2, 'flag')
   && TT.markOf(TT.readMarkMap(), 'acctM', bc2).hide === true
