@@ -835,8 +835,67 @@
           .trim();
       }
 
-      /** 卡片 → 精简 Markdown（M3：插入输入框 / 新会话用；标题 + 描述/重现步骤，图片走真实附件） */
-      function cardToMarkdown(card, detail) {
+      /** 「最近动态」在插入内容里最多带多少条（取尾部最新；更早的只报总数不展开）。 */
+      var MD_ACTIONS_MAX = 30;
+
+      /** action 日期（"2026-09-22 09:09:16"）→ "2026-09-22 09:09"（非标准格式原样返回）。 */
+      function mdActDate(s) {
+        var t = String(s == null ? '' : s).trim().replace('T', ' ');
+        return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(t) ? t.slice(0, 16) : t;
+      }
+
+      /**
+       * 最近动态的可见条目（滤掉 desc/comment/history 全空的 + 截断到 MD_ACTIONS_MAX）。
+       * 返回 {all, shown}：all 用于小节标题报总数，shown 是实际写进 Markdown / 附图的尾部最新条目。
+       */
+      function mdVisibleActions(actions) {
+        var all = (Array.isArray(actions) ? actions : []).filter(function (a) {
+          return a && (a.desc || a.comment || (a.history && a.history.length));
+        });
+        var shown = all.length > MD_ACTIONS_MAX ? all.slice(all.length - MD_ACTIONS_MAX) : all;
+        return { all: all, shown: shown };
+      }
+
+      /**
+       * 「最近动态」（v1 actions，host 已精简）→ Markdown 小节（2026-10-27 插入对话要求）。
+       * 时间正序；每条 = 日期 + 禅道渲染好的中文句（desc，已由 host 剥掉时间戳前缀），
+       * 备注与字段变更缩进成子项。备注里的图片占位符去掉——图片本身走真实附件插入
+       * （与描述同款处理，见 insertImagesOf）。
+       */
+      function actionsToMarkdown(actions) {
+        var vis = mdVisibleActions(actions);
+        var acts = vis.all, shown = vis.shown;
+        if (!shown.length) return '';
+        var lines = ['### 最近动态（' + (shown.length < acts.length
+          ? '最近 ' + shown.length + ' 条，共 ' + acts.length + ' 条'
+          : acts.length + ' 条') + '）'];
+        for (var i = 0; i < shown.length; i++) {
+          var a = shown[i];
+          var when = mdActDate(a.date);
+          var head = (when ? when + ' ' : '') + String(a.desc || a.actor || '').trim();
+          lines.push('- ' + (head || '（动态）'));
+          var cmt = stripImageMarkers(a.comment);
+          if (cmt) {
+            var cl = cmt.split('\n');
+            lines.push('  - 备注：' + cl[0]);
+            for (var j = 1; j < cl.length; j++) lines.push('    ' + cl[j]);
+          }
+          var hist = Array.isArray(a.history) ? a.history : [];
+          for (var k = 0; k < hist.length; k++) {
+            var hv = hist[k];
+            if (!hv || !hv.field) continue;
+            lines.push('  - ' + hv.field + '：' + (hv.old ? hv.old + ' → ' : '') + (hv.new || ''));
+          }
+        }
+        return lines.join('\n');
+      }
+
+      /**
+       * 卡片 → 精简 Markdown（M3：插入输入框 / 新会话用；标题 + 描述/重现步骤，图片走真实附件）。
+       * opts.actions=true 时追加「最近动态」小节（「插入对话」用，2026-10-27；「处理」、
+       * 复制 Markdown、批量下发保持原模板不变）。
+       */
+      function cardToMarkdown(card, detail, opts) {
         var lines = [];
         lines.push('## 禅道' + (KIND_LABEL[card.kind] || card.kind) + ' #' + card.id + '：' + card.title);
         var desc = stripImageMarkers((detail && detail.desc) || card.descBrief || '');
@@ -845,7 +904,67 @@
           lines.push(card.kind === 'bug' ? '### 重现步骤/描述' : '### 描述');
           lines.push(desc);
         }
+        var acts = (opts && opts.actions) ? actionsToMarkdown(detail && detail.actions) : '';
+        if (acts) {
+          lines.push('');
+          lines.push(acts);
+        }
         return lines.join('\n');
+      }
+
+      /** 「插入对话」的图片：描述图 + 最近动态备注里的图（按 url 去重，DSH 单消息 ≤20 张）。
+       *  只取实际写进 Markdown 的动态条目（被 MD_ACTIONS_MAX 截掉的老备注不附图，免得
+       *  附件里多出正文没提到的截图）。 */
+      function insertImagesOf(card, detail) {
+        var out = [];
+        var seen = {};
+        var add = function (list) {
+          if (!Array.isArray(list)) return;
+          for (var i = 0; i < list.length && out.length < 20; i++) {
+            var x = list[i];
+            if (!x || typeof x.url !== 'string' || !x.url || seen[x.url]) continue;
+            seen[x.url] = true;
+            out.push(x);
+          }
+        };
+        add(imagesOf(card, detail));
+        var acts = mdVisibleActions(detail && detail.actions).shown;
+        for (var j = 0; j < acts.length && out.length < 20; j++) add(acts[j] && acts[j].images);
+        return out;
+      }
+
+      /**
+       * 「插入对话」的内容准备（2026-10-27：最近动态只在 v1 详情里，列表卡片没有）：
+       * 调用方没带详情（从列表卡点「插入对话」）时先拉一次 detail，顺带拿到完整描述
+       * （列表 descBrief 只有 300 字）。读取失败不挡插入——退列表摘要、本次不含最近动态。
+       * 返回 {md, images, detail, fetched?, error?}。
+       */
+      function prepareInsertPayload(card, detail, rpc) {
+        var build = function (d) {
+          return {
+            md: cardToMarkdown(card, d, { actions: true }),
+            images: insertImagesOf(card, d),
+            detail: d || null,
+          };
+        };
+        if (detail && Array.isArray(detail.actions)) return Promise.resolve(build(detail));
+        if (typeof rpc !== 'function') return Promise.resolve(build(detail || null));
+        return Promise.resolve()
+          .then(function () { return rpc('zentao.detail', { kind: card.kind, id: card.id }); })
+          .then(function (r) {
+            if (r && r.ok && r.value) {
+              var ok = build(r.value);
+              ok.fetched = true;
+              return ok;
+            }
+            var p = build(detail || null);
+            p.error = (r && r.error && r.error.message) || '详情读取失败';
+            return p;
+          }, function (e) {
+            var p = build(detail || null);
+            p.error = String((e && e.message) || e) || '详情读取失败';
+            return p;
+          });
       }
 
       // ───────────── 批量下发（Idea 2，2026-10-25）─────────────
@@ -3901,10 +4020,23 @@
           if (hit) detailCard[1](hit);
         }, [mine[0]]);
 
-        // 「插入对话」（2026-10-25 改版）：与「处理」同款弹层选工作区/模型，确认后
-        // 新建会话、自动跳转过去、只填草稿不发送；失败降级插入当前会话输入框（旧版行为）
+        // 「插入对话」（2026-10-25 改版；2026-10-27 加最近动态）：与「处理」同款弹层选
+        // 工作区/模型，确认后新建会话、自动跳转过去、只填草稿不发送；失败降级插入当前会话输入框。
+        // 内容模板 = 标题 + 描述 + 最近动态（v1 actions）——详情不在手边（从列表卡点进来）
+        // 就先拉一次 detail（顺带补全描述与备注图片），读取失败只退标题+摘要，不挡插入。
         var insertToChat = useCallback(function (card, detail) {
-          dispatch[1]({ card: card, md: cardToMarkdown(card, detail), images: imagesOf(card, detail), intent: 'insert' });
+          var needFetch = !(detail && Array.isArray(detail.actions));
+          if (needFetch) toast[1]({ text: '正在读取禅道详情与最近动态…', sticky: true });
+          Promise.resolve(prepareInsertPayload(card, detail, rpc)).then(function (p) {
+            if (needFetch) toast[1](p && p.error ? '详情读取失败，本次只插入标题与摘要' : null);
+            dispatch[1]({ card: card, md: p.md, images: p.images, intent: 'insert' });
+          }, function (e) {
+            if (needFetch) toast[1](null);
+            dispatch[1]({
+              card: card, md: cardToMarkdown(card, detail || null, { actions: true }),
+              images: imagesOf(card, detail || null), intent: 'insert',
+            });
+          });
         }, []);
 
         // 「处理」：弹确认层选工作区与模型，确认后新建会话后台自动发送、不跳转（失败降级 → 剪贴板）
@@ -4750,6 +4882,11 @@
         fmtActDate: fmtActDate,
         ActionTimeline: ActionTimeline,
         ACTION_FOLD_N: ACTION_FOLD_N,
+        // 插入对话带最近动态（2026-10-27）
+        actionsToMarkdown: actionsToMarkdown,
+        insertImagesOf: insertImagesOf,
+        prepareInsertPayload: prepareInsertPayload,
+        MD_ACTIONS_MAX: MD_ACTIONS_MAX,
         // 自动轮询 + 在线/离线状态 + 新指派检测（Idea 1，2026-10-25）
         POLL_INTERVAL_MS: POLL_INTERVAL_MS,
         cardKeyMap: cardKeyMap,

@@ -113,6 +113,80 @@ check('cardToMarkdown 去掉 [图片：xxx] 文本占位符',
 check('cardToMarkdown 描述为空时只有标题行',
   mod.cardToMarkdown({ kind: 'bug', id: 1, title: 't' }, null) === '## 禅道Bug #1：t');
 
+// ── 插入对话带「最近动态」（2026-10-27 用户要求；只加在插入模板，「处理」保持原样）──
+const actsSample = [
+  { actor: '张三', date: '2026-09-20 10:00:00', desc: '由 张三 创建。', comment: '', images: [], history: [] },
+  {
+    actor: '李四', date: '2026-09-21 11:30:00', desc: '由 李四 指派给 我。',
+    comment: '看下这个 [图片：35861.png]', images: [{ url: 'http://z/file-read-35861.png', name: '35861.png' }],
+    history: [{ field: '状态', old: '激活', new: '已解决' }],
+  },
+];
+const insCard = { kind: 'bug', id: 123, title: '登录页报错', descBrief: '列表摘要…' };
+const insDetail = { desc: '完整描述正文', images: [{ url: 'http://z/file-read-1.png', name: '1.png' }], actions: actsSample };
+const plainMd = mod.cardToMarkdown(insCard, insDetail);
+check('cardToMarkdown 默认模板不含最近动态（处理/复制/批量行为不变）',
+  !plainMd.includes('最近动态') && plainMd.includes('完整描述正文'));
+const insMd = mod.cardToMarkdown(insCard, insDetail, { actions: true });
+check('插入 Markdown 追加「最近动态（N 条）」小节', insMd.includes('### 最近动态（2 条）'));
+check('插入 Markdown 动态行带日期 + host 现成中文句',
+  insMd.includes('- 2026-09-21 11:30 由 李四 指派给 我。'));
+check('插入 Markdown 备注压成子项并去掉图片占位符',
+  insMd.includes('  - 备注：看下这个') && !insMd.includes('[图片'));
+check('插入 Markdown 字段变更写成「字段：旧 → 新」', insMd.includes('  - 状态：激活 → 已解决'));
+check('插入 Markdown 无 actions 时不加小节',
+  !mod.cardToMarkdown(insCard, { desc: 'd', actions: [] }, { actions: true }).includes('最近动态'));
+const manyActs = Array.from({ length: 40 }, (_, i) => ({ date: '2026-09-01 08:00:00', desc: '第 ' + (i + 1) + ' 条' }));
+const manyMd = mod._test.actionsToMarkdown(manyActs);
+check('动态超过上限只带最近 30 条并报总数',
+  manyMd.includes('### 最近动态（最近 30 条，共 40 条）')
+  && manyMd.split('\n').filter((l) => l.startsWith('- 2026')).length === 30
+  && manyMd.includes('第 40 条') && !manyMd.includes('第 10 条\n'));
+check('动态全空条目 → 空串（不产生空小节）',
+  mod._test.actionsToMarkdown([{ desc: '', comment: '', history: [] }, null]) === ''
+  && mod._test.actionsToMarkdown(null) === '');
+
+const insImgs = mod._test.insertImagesOf(insCard, insDetail);
+check('插入图片 = 描述图 + 动态备注图（按 url 去重）',
+  insImgs.length === 2
+  && insImgs.some((x) => x.url.includes('file-read-1.png'))
+  && insImgs.some((x) => x.url.includes('file-read-35861.png')));
+check('插入图片上限 20 张（DSH 单消息上限）',
+  mod._test.insertImagesOf({ kind: 'bug', id: 1 }, {
+    images: Array.from({ length: 25 }, (_, i) => ({ url: 'http://z/file-read-' + (i + 1) + '.png', name: i + '.png' })),
+  }).length === 20);
+const longActs = Array.from({ length: 31 }, (_, i) => ({
+  date: '2026-09-01 08:00:00', desc: '第 ' + (i + 1) + ' 条',
+  images: i === 0 ? [{ url: 'http://z/file-read-old.png', name: 'old.png' }]
+    : (i === 30 ? [{ url: 'http://z/file-read-new.png', name: 'new.png' }] : []),
+}));
+const longImgs = mod._test.insertImagesOf({ kind: 'bug', id: 1 }, { images: [], actions: longActs });
+check('被截掉的老动态备注图不附图（只取写进 Markdown 的条目）',
+  longImgs.length === 1 && longImgs[0].url.includes('file-read-new.png'));
+
+const prepCalls = [];
+const prepDetail = await mod._test.prepareInsertPayload(insCard, null, (ep, payload) => {
+  prepCalls.push({ ep, payload });
+  return Promise.resolve({ ok: true, value: insDetail });
+});
+check('插入准备：列表卡（无详情）先拉 zentao.detail 再拼内容',
+  prepCalls.length === 1 && prepCalls[0].ep === 'zentao.detail'
+  && prepCalls[0].payload.kind === 'bug' && prepCalls[0].payload.id === 123);
+check('插入准备：拉到详情后带完整描述 + 最近动态 + 备注图',
+  prepDetail.fetched === true && prepDetail.md.includes('完整描述正文')
+  && prepDetail.md.includes('### 最近动态（2 条）')
+  && prepDetail.images.some((x) => x.url.includes('file-read-35861.png')));
+let noCall = 0;
+const prepLocal = await mod._test.prepareInsertPayload(insCard, insDetail, () => { noCall++; return Promise.resolve({ ok: false }); });
+check('插入准备：详情已在手边（含 actions）→ 不再发 RPC',
+  noCall === 0 && prepLocal.md.includes('### 最近动态（2 条）') && !prepLocal.error);
+const prepFail = await mod._test.prepareInsertPayload(insCard, null, () => Promise.resolve({ ok: false, error: { message: '不存在' } }));
+check('插入准备：详情读取失败 → 退列表摘要、标 error（插入照常）',
+  prepFail.error === '不存在' && !prepFail.md.includes('最近动态')
+  && prepFail.md.includes('列表摘要…') && prepFail.images.length === 0 && prepFail.fetched === undefined);
+const prepThrow = await mod._test.prepareInsertPayload(insCard, null, () => Promise.reject(new Error('network down')));
+check('插入准备：RPC 抛错同样退摘要不 reject', prepThrow.error === 'network down' && prepThrow.md.includes('列表摘要…'));
+
 // ── 真实图片附件管线（conversation.createDrafts + facade.addAttachments）──
 const base64Png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x01]).toString('base64');
 const images = mod._test.imagesOf(

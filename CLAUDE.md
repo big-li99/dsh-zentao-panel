@@ -569,6 +569,31 @@ board 模式占满主体渲染 `BoardView`，**tab 段/快捷筛选条/排序/�
 - 数据零新增 RPC：cards=visCards 过 matchSearch；活性随 liveSnap/linkRev 渲染周期自动刷新。
 - 测试：client +4（296 项）。⚠️ 又踩 map 嵌套（第 4 次）：BoardView 列体 children 要 flat(2)。
 
+### 4.17 「插入对话」带上最近动态（2026-10-27，用户要求）
+
+用户要求：「插入对话 需要把最近动态也插入进去」。**只动插入模板**——「处理」/「复制 Markdown」/
+批量下发/拖拽仍用原精简模板（M3 用户拍板的「标题 + 描述」），避免误改既有行为。仅 client 改动，⌘R 生效。
+
+- **模板**：`cardToMarkdown(card, detail, opts)` 新增可选第三参——`opts.actions=true` 时在描述后追加
+  `### 最近动态（N 条）` 小节（`actionsToMarkdown()`）。每条 = `- <YYYY-MM-DD HH:mm> <desc>`（host 已剥
+  时间戳前缀、actor 已是真名），备注缩进成 `  - 备注：…`（多行续行 4 空格），字段变更缩进成
+  `  - 字段：旧 → 新`。**备注里的 `[图片：x]` 占位符仍去掉**（图片走真实附件，见下）。
+- **上限 `MD_ACTIONS_MAX = 30`**：取尾部最新 30 条（时间正序），更早的只在小节标题报总数
+  （「最近 30 条，共 87 条」）——防长寿命 Bug 的百来条历史灌爆上下文。
+- **详情不在手边时先拉**：最近动态只在 v1 详情里（列表卡片没有），而「插入对话」按钮在卡片上、
+  `detail` 传的是 null。`prepareInsertPayload(card, detail, rpc)`：detail 已带 `actions` 数组 → 直接用；
+  否则 `rpc('zentao.detail', {kind, id})` 拉一次——**顺带把描述从 300 字 `descBrief` 换成完整正文**。
+  读取失败不挡插入：退列表摘要 + 标 `error`，面板 toast「详情读取失败，本次只插入标题与摘要」。
+  返回 `{md, images, detail, fetched?, error?}`（纯函数，进 `_test` 直测）。
+  `insertToChat` 在拉取期间挂 sticky toast「正在读取禅道详情与最近动态…」，到手后再开弹层。
+- **备注图片也作为附件**：`insertImagesOf(card, detail)` = 描述图 + `actions[].images`，按 url 去重、
+  **上限 20 张**（DSH 单消息上限；与 `batchToMarkdown` 的 `mergeCardImages` 同款约束）。
+- 未做：拖拽进输入框（dragstart 只能同步取 `text/plain`，列表数据里没有 actions）、批量插入的
+  逐卡动态（N 张卡 = N 次 detail RPC，代价与收益不划算）。
+- 测试：client +16（共 317 项；默认模板不变 / 小节标题与行格式 / 备注去占位符 / 字段变更 / 空 actions 无小节 /
+  30 条截断报总数 / 图片去重与上限 / 被截掉的老备注不附图 / prepareInsertPayload 五分支：有详情不 RPC、
+  列表卡拉详情、失败与抛错退摘要）。真机样本（bug #15977 / #15964）确认输出形态（后者带备注截图）。
+
 ### 5. DSH 插件体系（本机实测）
 
 - DSH Desktop **0.2.1-rc.2**，desktop profile，macOS
