@@ -12,6 +12,22 @@ function check(name, cond, extra = '') {
   console.log(`${cond ? '✅' : '❌'} ${name}${extra ? ` — ${extra}` : ''}`);
   if (!cond) failures++;
 }
+// fake createElement 不展平 children；CardItem 动作行自 2026-10-27 起分「工具组 + 主操作」
+// 两层（.ztp-acts-right / .ztp-utils），找按钮/下拉统一递归展平。
+function flatNodes(nodes, out = []) {
+  for (const n of nodes || []) {
+    if (!n || typeof n !== 'object') continue;
+    out.push(n);
+    if (Array.isArray(n.children)) flatNodes(n.children, out);
+  }
+  return out;
+}
+// 递归取节点文本（判断 label/说明文案用；fake createElement 下元素是普通对象）
+function textOf(node) {
+  if (node == null) return '';
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  return (node.children || []).map(textOf).join('');
+}
 
 // ── 最小浏览器环境 ────────────────────────────────────────────
 const appended = [];
@@ -437,6 +453,50 @@ ctx.get = function (name) {
 const ir3 = await mod._test.insertToNewSession('## 丙', [], {});
 check('conversation 服务缺失 → 返回 unavailable 供上层降级当前会话，并释放 retain',
   ir3.ok === false && ir3.mode === 'unavailable' && ir3.sessionId === 's-ins3' && ins3Released === 1);
+
+// ── 「新建对话」的空白会话（2026-10-27）：弹层取消「自动带入」→ 只建会话 + 设模型 + 跳转 ──
+let nbCreated = null, nbOpened = null, nbSelected = null;
+const nbGet = function (name) {
+  if (name === 'sessions') return {
+    list: { getSnapshot: () => ({ current: 's1', byId: { s1: { cwd: '/tmp/proj' } } }) },
+    create(opts) { nbCreated = opts; return 's-blank'; },
+  };
+  if (name === 'remote.session') return {
+    selectModel: async (req) => { nbSelected = req; return { ok: true, value: { selected: {} } }; },
+  };
+  if (name === 'uiWorkspace') return { openSession(id) { nbOpened = id; } };
+  return undefined;
+};
+ctx.get = nbGet;
+let nbr = await mod._test.newBlankSession({ workspaceId: 'w9', model: { provider: 'custom', model: 'glm-4.6' } });
+check('newBlankSession：按所选工作区建会话 + 设置模型 + 跳转（不依赖 conversation 服务）',
+  nbCreated && nbCreated.workspaceId === 'w9' && !('cwd' in nbCreated)
+  && nbSelected && nbSelected.sessionId === 's-blank' && nbSelected.provider === 'custom'
+  && nbSelected.model === 'glm-4.6' && nbOpened === 's-blank'
+  && nbr.ok && nbr.mode === 'jumped' && nbr.sessionId === 's-blank'
+  && nbr.message.includes('空白会话'));
+nbOpened = null; nbCreated = null;
+ctx.get = function (name) { return name === 'uiWorkspace' ? undefined : nbGet(name); };
+nbr = await mod._test.newBlankSession({ cwd: '/other/dir' });
+check('newBlankSession：uiWorkspace 缺失 → 会话已建但不跳转（mode created，可从会话列表打开）',
+  nbr.ok && nbr.mode === 'created' && nbr.sessionId === 's-blank'
+  && nbOpened === null && nbCreated && nbCreated.cwd === '/other/dir' && nbr.message.includes('会话列表'));
+ctx.get = function (name) { return name === 'sessions' ? undefined : nbGet(name); };
+nbr = await mod._test.newBlankSession({});
+check('newBlankSession：sessions 缺失 → ok:false（交上层提示，不静默）',
+  nbr.ok === false && nbr.mode === 'unavailable' && nbr.message.includes('sessions'));
+ctx.get = nbGet;
+
+// 「自动带入」偏好：默认勾选；取消后记住；可恢复
+window.localStorage.removeItem('dsh-zentao-panel.carry.v1');
+check('「自动带入」偏好：默认勾选', mod._test.readCarryPref() === true);
+mod._test.saveCarryPref(false);
+check('「自动带入」偏好：取消后落盘并读回 false',
+  mod._test.readCarryPref() === false
+  && window.localStorage.getItem('dsh-zentao-panel.carry.v1') === '0');
+mod._test.saveCarryPref(true);
+check('「自动带入」偏好：恢复勾选', mod._test.readCarryPref() === true);
+window.localStorage.removeItem('dsh-zentao-panel.carry.v1');
 
 // ── 会话关联：「处理」成功后卡片上显示关联会话，可一键跳转 ──
 const card123 = { kind: 'bug', id: 123, title: '登录页报错' };
@@ -1476,6 +1536,30 @@ check('CardItem 普通模式回归：无勾选框 + 动作行仍在 + 可拖拽 
   && normNode.props.draggable === true
   && (toggled = null, normNode.props.onClick(), toggled === bc1));
 
+// ── 「新建对话」单入口（2026-10-27）：替代原「插入对话」，动作行分工具组 + 主操作 ──
+let newChatCard = null;
+const ncNode = TT.CardItem({
+  card: bc1, linkView: null, live: null,
+  onNewChat: (c) => { newChatCard = c; },
+  onDispatch: () => {}, onToggleMark: () => {}, onCopyTitle: () => {},
+  onOpen: () => {}, onOpenSession: () => {},
+});
+const ncActs = ncNode.children.find((n) => n && n.props && n.props.className === 'ztp-acts');
+const ncFlat = flatNodes(ncActs.children);
+const ncBtn = ncFlat.find((n) => n && n.type === 'button'
+  && Array.isArray(n.children) && n.children[1] === '新建对话');
+const ncPrimary = ncFlat.find((n) => n && n.type === 'button' && String(n.props.className).includes('primary'));
+check('CardItem：动作行「新建对话」单入口（原「插入对话」已移除）+ 处理主按钮',
+  Boolean(ncBtn) && typeof ncBtn.children[0].type === 'function'
+  && Boolean(ncPrimary) && ncPrimary.children[1] === '处理'
+  && !ncFlat.some((n) => Array.isArray(n && n.children) && n.children.includes('插入对话')));
+ncBtn.props.onClick({ stopPropagation() {} });
+check('CardItem：「新建对话」点击回传卡片（打开新建会话弹层）', newChatCard === bc1);
+check('CardItem：动作行分成工具组 + 分隔线 + 主操作（窄面板换行不拆散）',
+  ncActs.children.some((n) => n && n.props && n.props.className === 'ztp-acts-right')
+  && ncFlat.some((n) => n && n.props && n.props.className === 'ztp-utils')
+  && ncFlat.some((n) => n && n.props && n.props.className === 'ztp-acts-sep'));
+
 // 批量弹层标题（fake useState 恒初值：下拉区显示「正在读取…」属预期，只断言标题/副标题）
 const ddBatch = TT.DispatchDialog({
   card: bc1, cards: [bc1, bc2, bc3], batch: TT.batchSummary([bc1, bc2, bc3]),
@@ -1486,12 +1570,94 @@ const ddPop = ddBatch.children[0];
 check('DispatchDialog 批量模式：标题「批量处理：N 项」+ 类型摘要副标题',
   ddPop.children[0].children[0] === '批量处理：3 项'
   && ddPop.children[1].children[0] === '任务×1 · Bug×2，将合并为一份任务背景');
+
+const ddBatchIns = TT.DispatchDialog({
+  card: bc1, cards: [bc1, bc2, bc3], batch: TT.batchSummary([bc1, bc2, bc3]),
+  images: [], md: bmd, intent: 'insert', activeAcct: 'a',
+  onSend: () => {}, onClose: () => {},
+});
+const ddBatchInsPop = ddBatchIns.children[0];
+check('DispatchDialog 批量新建：标题「新建对话：N 项」，且批量不带「自动带入」开关',
+  ddBatchInsPop.children[0].children[0] === '新建对话：3 项'
+  && !flatNodes(ddBatchInsPop.children).some(
+    (n) => n && n.type === 'label' && String(n.props && n.props.className).includes('ztp-carry')));
 const ddSingle = TT.DispatchDialog({
   card: bc1, images: [], md: 'x', intent: 'dispatch', activeAcct: 'a',
   onSend: () => {}, onClose: () => {},
 });
 check('DispatchDialog 单卡模式回归：标题仍为「处理 Bug #id」',
   ddSingle.children[0].children[0].children[0] === '处理 Bug #1');
+
+// 「新建对话」弹层（2026-10-27）：单入口 + 自动带入开关（默认勾选 / 取消则空白会话）
+const ddNew = TT.DispatchDialog({
+  card: bc1, images: [], md: null, intent: 'insert', lazy: true, activeAcct: 'a',
+  onSend: () => {}, onClose: () => {},
+});
+const ddNewPop = ddNew.children[0];
+const ddNewTitle = ddNewPop.children[0].children[0];
+const ddNewCarry = flatNodes(ddNewPop.children).find(
+  (n) => n && n.type === 'label' && String(n.props && n.props.className).includes('ztp-carry'));
+const ddNewCarryInput = flatNodes(ddNewCarry ? ddNewCarry.children : []).find((n) => n && n.type === 'input');
+const ddNewNote = flatNodes(ddNewPop.children).find(
+  (n) => n && String(n.props && n.props.className).includes('ztp-disp-note'));
+check('DispatchDialog（新建对话）：标题「新建对话：Bug #1」，不再出现「插入到新会话」',
+  ddNewTitle === '新建对话：Bug #1');
+check('DispatchDialog（新建对话）：自动带入开关默认勾选 + 文案说明',
+  Boolean(ddNewCarryInput) && ddNewCarryInput.props.type === 'checkbox'
+  && ddNewCarryInput.props.checked === true
+  && textOf(ddNewCarry).includes('自动带入任务背景')
+  && textOf(ddNewCarry).includes('最近动态与截图填入草稿')
+  && textOf(ddNewNote).includes('截图（如有）'));
+check('DispatchDialog（新建对话）：懒读取时仍显示附加指令（带入模式下可拼要求）',
+  flatNodes(ddNewPop.children).some(
+    (n) => n && n.type === 'textarea' && String(n.props.className).includes('ztp-instr')));
+
+// 取消勾选（偏好已记住）→ 文案变空白会话、附加指令收起
+TT.saveCarryPref(false);
+const ddBlank = TT.DispatchDialog({
+  card: bc1, images: [], md: null, intent: 'insert', lazy: true, activeAcct: 'a',
+  onSend: () => {}, onClose: () => {},
+});
+const ddBlankCarry = flatNodes(ddBlank.children[0].children).find(
+  (n) => n && n.type === 'label' && String(n.props && n.props.className).includes('ztp-carry'));
+const ddBlankInput = flatNodes(ddBlankCarry ? ddBlankCarry.children : []).find((n) => n && n.type === 'input');
+const ddBlankNote = flatNodes(ddBlank.children[0].children).find(
+  (n) => n && String(n.props && n.props.className).includes('ztp-disp-note'));
+check('DispatchDialog（取消自动带入）：勾选框未选中 + 文案「空白会话」+ 附加指令收起',
+  Boolean(ddBlankInput) && ddBlankInput.props.checked === false
+  && String(ddBlankNote.children[0]).includes('空白会话')
+  && !String(ddBlankNote.children[0]).includes('任务背景')
+  && !flatNodes(ddBlank.children[0].children).some(
+    (n) => n && n.type === 'textarea' && String(n.props.className).includes('ztp-instr')));
+TT.saveCarryPref(true);
+
+// send 回传：带入 → carry=true + md/images 透传；取消 → carry=false 且清空 md/images/instr
+let ddNewSent = null;
+const ddNewSend = TT.DispatchDialog({
+  card: bc1, images: [{ url: 'http://z/1.png', name: '1.png' }], md: 'MD-NEW', intent: 'insert',
+  activeAcct: 'a', onSend: (c, d) => { ddNewSent = d; }, onClose: () => {},
+});
+const ddNewActs = flatNodes(ddNewSend.children[0].children).find(
+  (n) => n && n.props && n.props.className === 'ztp-disp-acts');
+ddNewActs.children[1].props.onClick();
+check('DispatchDialog（新建对话）：send 回传 intent=insert + carry=true + md/images',
+  ddNewSent && ddNewSent.intent === 'insert' && ddNewSent.carry === true
+  && ddNewSent.md === 'MD-NEW' && ddNewSent.images.length === 1);
+
+TT.saveCarryPref(false);
+let ddBlankSent = null;
+const ddBlankSend = TT.DispatchDialog({
+  card: bc1, images: [{ url: 'http://z/1.png', name: '1.png' }], md: 'MD-NEW', intent: 'insert',
+  activeAcct: 'a', onSend: (c, d) => { ddBlankSent = d; }, onClose: () => {},
+});
+const ddBlankActs = flatNodes(ddBlankSend.children[0].children).find(
+  (n) => n && n.props && n.props.className === 'ztp-disp-acts');
+ddBlankActs.children[1].props.onClick();
+check('DispatchDialog（取消自动带入）：send 回传 carry=false，md/images/instr 清空',
+  ddBlankSent && ddBlankSent.carry === false && ddBlankSent.md === null
+  && Array.isArray(ddBlankSent.images) && ddBlankSent.images.length === 0
+  && ddBlankSent.instr === '');
+TT.saveCarryPref(true);
 
 // ── 附加指令（2026-10-25 迭代）：弹层可选输入 + 记忆上次 + 拼到任务背景末尾 ──
 check('appendInstruction：空白指令原样返回',
@@ -1632,10 +1798,10 @@ check('copyToClipboard：无 clipboard API 时走 DOM 兜底不抛错',
 let cpCard = null;
 const cpNode = TT.CardItem({
   card: bc1, linkView: null, live: null, onCopyTitle: (c) => { cpCard = c; },
-  onInsert: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
+  onNewChat: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
 });
 const cpActs = cpNode.children.find((n) => n && n.props && n.props.className === 'ztp-acts');
-const cpBtn = cpActs.children.find((n) => n && n.type === 'button' && String(n.props.title).startsWith('复制「#'));
+const cpBtn = flatNodes(cpActs.children).find((n) => n && n.type === 'button' && String(n.props.title).startsWith('复制「#'));
 cpBtn.props.onClick({ stopPropagation() {} });
 check('CardItem：动作行有复制按钮，点击回传卡片（复制 #id+标题）',
   Boolean(cpBtn) && cpCard === bc1 && typeof cpBtn.children[0].type === 'function');
@@ -1681,11 +1847,11 @@ let mkArgs = null;
 const mkNode = TT.CardItem({
   card: bc1, linkView: null, live: null, flagged: true, hidden: true,
   onToggleMark: (c, f) => { mkArgs = [c, f]; },
-  onCopyTitle: () => {}, onInsert: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
+  onCopyTitle: () => {}, onNewChat: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
 });
 const mkActs = mkNode.children.find((n) => n && n.props && n.props.className === 'ztp-acts');
-const mkFlagBtn = mkActs.children.find((n) => n && n.type === 'button' && String(n.props.title).includes('取消标记'));
-const mkHideBtn = mkActs.children.find((n) => n && n.type === 'button' && String(n.props.title).includes('取消隐藏'));
+const mkFlagBtn = flatNodes(mkActs.children).find((n) => n && n.type === 'button' && String(n.props.title).includes('取消标记'));
+const mkHideBtn = flatNodes(mkActs.children).find((n) => n && n.type === 'button' && String(n.props.title).includes('取消隐藏'));
 mkFlagBtn.props.onClick({ stopPropagation() {} });
 const mkFlagArg = mkArgs;
 mkHideBtn.props.onClick({ stopPropagation() {} });
@@ -1713,19 +1879,19 @@ let quickCard = null;
 const boltNode = TT.CardItem({
   card: bc1, linkView: null, live: null, quickTitle: '工作区 · 模型 glm-x',
   onQuick: (c) => { quickCard = c; },
-  onToggleMark: () => {}, onCopyTitle: () => {}, onInsert: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
+  onToggleMark: () => {}, onCopyTitle: () => {}, onNewChat: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
 });
 const boltActs = boltNode.children.find((n) => n && n.props && n.props.className === 'ztp-acts');
-const boltBtn = boltActs.children.find((n) => n && n.type === 'button' && String(n.props.title).startsWith('极速重发'));
+const boltBtn = flatNodes(boltActs.children).find((n) => n && n.type === 'button' && String(n.props.title).startsWith('极速重发'));
 boltBtn.props.onClick({ stopPropagation() {} });
 const noBoltNode = TT.CardItem({
   card: bc1, linkView: null, live: null,
-  onToggleMark: () => {}, onCopyTitle: () => {}, onInsert: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
+  onToggleMark: () => {}, onCopyTitle: () => {}, onNewChat: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
 });
 const noBoltActs = noBoltNode.children.find((n) => n && n.props && n.props.className === 'ztp-acts');
 check('CardItem：⚡ 按钮有 quickTitle 才渲染，点击回传卡片',
   Boolean(boltBtn) && String(boltBtn.props.title).includes('工作区 · 模型 glm-x') && quickCard === bc1
-  && !noBoltActs.children.some((n) => n && String(n && n.props && n.props.title).startsWith('极速重发')));
+  && !flatNodes(noBoltActs.children).some((n) => n && String(n && n.props && n.props.title).startsWith('极速重发')));
 
 // ── 本地备注（2026-10-25 迭代）：notes.v1 卡片自己的备忘 ──
 window.localStorage.removeItem('dsh-zentao-panel.notes.v1');
@@ -1751,7 +1917,7 @@ check('cleanupStaleLinks 顺带清 notes：在线保留 / 孤儿超宽限删 / �
 window.localStorage.removeItem('dsh-zentao-panel.notes.v1');
 const noteNode = TT.CardItem({
   card: bc1, linkView: null, live: null, note: '备注摘要测试',
-  onToggleMark: () => {}, onCopyTitle: () => {}, onInsert: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
+  onToggleMark: () => {}, onCopyTitle: () => {}, onNewChat: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
 });
 const noteLineNode = noteNode.children.find((n) => n && n.props && n.props.className === 'ztp-note-line');
 let noteSaved = null;
@@ -1781,13 +1947,13 @@ const selCalls = [];
 const manNode2 = TT.CardItem({
   card: bc1, linkView: null, live: 'done', liveManual: 'done',
   onSetState: (c, s) => { selCalls.push([c, s]); },
-  onToggleMark: () => {}, onCopyTitle: () => {}, onInsert: () => {}, onDispatch: () => {},
+  onToggleMark: () => {}, onCopyTitle: () => {}, onNewChat: () => {}, onDispatch: () => {},
   onOpen: () => {}, onOpenSession: () => {},
 });
 const manTop2 = manNode2.children.find((n) => n && n.props && n.props.className === 'ztp-top');
 const manBadge2 = manTop2.children.find((n) => n && n.type === TT.LiveBadge);
 const manActs2 = manNode2.children.find((n) => n && n.props && n.props.className === 'ztp-acts');
-const manSel2 = manActs2.children.find((n) => n && n.type === 'select');
+const manSel2 = flatNodes(manActs2.children).find((n) => n && n.type === 'select');
 check('CardItem：渲染「处理状态」下拉（回显手动值 + on + 四个选项）与带 manual 标记的徽标',
   Boolean(manSel2) && manSel2.props.value === 'done'
   && manSel2.props.className.split(' ').includes('on')
@@ -1800,11 +1966,12 @@ check('CardItem：下拉变更回传 (card, state)；选「自动」回传 null'
   && selCalls[1][1] === null);
 const autoNode2 = TT.CardItem({
   card: bc1, linkView: null, live: null,
-  onToggleMark: () => {}, onCopyTitle: () => {}, onInsert: () => {}, onDispatch: () => {},
+  onToggleMark: () => {}, onCopyTitle: () => {}, onNewChat: () => {}, onDispatch: () => {},
   onOpen: () => {}, onOpenSession: () => {},
 });
-const autoSel2 = autoNode2.children.find((n) => n && n.props && n.props.className === 'ztp-acts')
-  .children.find((n) => n && n.type === 'select');
+const autoSel2 = flatNodes(autoNode2.children.find(
+  (n) => n && n.props && n.props.className === 'ztp-acts').children)
+  .find((n) => n && n.type === 'select');
 check('CardItem：无手动状态时下拉回显「状态：自动」且不带 on 类',
   autoSel2.props.value === '' && !autoSel2.props.className.split(' ').includes('on'));
 
@@ -2068,7 +2235,7 @@ check('replyLine：压空白 + 60 字截断（程序生成避免手数）',
   && TT.replyLine('短回复') === '短回复' && TT.replyLine(null) === '');
 const rlNode = TT.CardItem({
   card: bc1, linkView: null, live: 'done', note: '备注', replySummary: '已定位到根因：并发写冲突',
-  onToggleMark: () => {}, onCopyTitle: () => {}, onInsert: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
+  onToggleMark: () => {}, onCopyTitle: () => {}, onNewChat: () => {}, onDispatch: () => {}, onOpen: () => {}, onOpenSession: () => {},
 });
 const rlLine = rlNode.children.find((n) => n && n.props && n.props.className === 'ztp-reply-line');
 check('CardItem：备注行与回复摘要行并存，回复行在备注行之后',
@@ -2146,7 +2313,7 @@ check('BoardView：点缩略卡回传 onPick；逾期卡在 ask 列、截止 chi
 // 选中态二轮加强：active 卡片带「查看中」文字角标（不依赖颜色感知）
 const actNode = TT.CardItem({
   card: bc1, active: true, live: null, linkView: null,
-  onOpen: () => {}, onInsert: () => {}, onDispatch: () => {}, onCopyTitle: () => {},
+  onOpen: () => {}, onNewChat: () => {}, onDispatch: () => {}, onCopyTitle: () => {},
   onToggleMark: () => {}, onOpenSession: () => {},
 });
 const actMeta = actNode.children.find((n) => n && n.props && n.props.className === 'ztp-top').children.find((n) => n && n.props && n.props.className === 'ztp-top-meta');

@@ -23,7 +23,7 @@
 | M1 host 插件（登录/取数/RPC） | ✅ 代码完成，测试全绿，**已装入 desktop profile 加载树**（重启 DSH Desktop 激活） |
 | M2 client 左侧栏全局面板 | ✅ 2026-10-24 已改为**左侧栏全局面板**入口（对齐 dsh-mnemon「记忆系统」：`sidebar.panellist` 图标行 + `main` keyed 面板，见 §5.1），样式走 DSH token 支持日/夜；注册契约有测试，待真机目视确认 |
 | M3 插入输入框 + 新会话下发 | ✅ 服务级 `setDraft` 真机可用；**描述里的截图改为真实图片附件**（`conversation.createDrafts` + `facade.addAttachments`，见 §4.1）；新会话下发待真机复验 |
-| M4 打磨 | 🔄 进行中（细节见各节）：2026-10-24 修会话超时静默空白 + 拉取失败 toast/错误视图；「处理」改弹层确认式（§4.2）+ 关联会话 chip（§4.3）+ 弹层闭包 bug 修复与下发时序优化 + 入口改左侧栏全局面板（§5.1）+「处理」不自动跳转（§4.2 末）；2026-10-25「插入对话」改弹层式新会话自动跳转不自动发（§4.5）；**同日新增列表三件套：搜索/排序/逾期高亮 + mine.v1 快照秒开 + 处理结果回读（§4.7，待真机目视确认）**；**自动轮询/在线离线状态/新指派提醒 + 列表多选批量下发已完成（§4.9，待真机目视确认）**——M4 既有欠账已清零 |
+| M4 打磨 | 🔄 进行中（细节见各节）：2026-10-24 修会话超时静默空白 + 拉取失败 toast/错误视图；「处理」改弹层确认式（§4.2）+ 关联会话 chip（§4.3）+ 弹层闭包 bug 修复与下发时序优化 + 入口改左侧栏全局面板（§5.1）+「处理」不自动跳转（§4.2 末）；2026-10-25「插入对话」改弹层式新会话自动跳转不自动发（§4.5）；**同日新增列表三件套：搜索/排序/逾期高亮 + mine.v1 快照秒开 + 处理结果回读（§4.7，待真机目视确认）**；**自动轮询/在线离线状态/新指派提醒 + 列表多选批量下发已完成（§4.9，待真机目视确认）**——M4 既有欠账已清零；2026-10-27「新建对话」单入口 + 自动带入开关 + 动作行/工具栏界面整理（§4.19） |
 | M5 多账号 | ✅ 2026-10-24 完成：schema v2（accounts[]+activeId，旧格式自动迁移）、每账号独立 client/cookie/缓存、账号菜单切换/添加/按账号移除；**2026-10-25 补账号别名**（菜单内 ✎ 行内编辑 + 添加账号时可填 + chip/页脚优先显示别名，新 RPC `zentao.rename`，详见 §6 多账号节；host 改动需重装+重启）；测试全绿（multi 36 项 + client +5），待真机目视确认 |
 | M6 实时状态 | ✅ 2026-10-24 完成：**禅道卡片活性徽标（处理中/等你决策/已完成）+ 完成/等决策常驻提醒 toast（「去看看」跳回会话）**，信号来自 DSH 宿主 `uiSession.sessionStatus`（见 §4.4）。当天先做过一版「鲸鱼娘办公室」可视化面板（左侧栏第二面板 + 自绘 SVG 工位场景，角色参考 Neko3000/deepseek-whalechan），**用户看过后明确否决（「太垃圾」）已整体移除**——不要再做办公室/娘化角色类可视化；保留监控内核改为卡片上的活性体现。2026-10-25 补**处理进度持久化（states.v1）+ 不在面板列表事项的定时清理**（见 §4.6，待真机目视确认）；2026-10-27 补**处理状态手动修正**（§4.18：自动检测丢了可手改，持久化、不被自动评估覆盖）。仅 client 改动，⌘R 生效 |
 
@@ -369,6 +369,8 @@ Neko3000/deepseek-whalechan 公开规范——**注意其图片素材不在开�
 
 ### 4.5 「插入对话」改版：弹层 + 新会话 + 自动跳转不自动发（2026-10-25，用户要求）
 
+> 2026-10-27 起「插入对话」并入「新建对话」（单入口 + 自动带入开关），见 §4.19。
+
 用户要求：「插入对话」改成和「处理」差不多（弹层选工作区/模型/思考强度、新建会话），但**会自动跳转到新对话**（与「处理」相反，§4.2 末）且**不会自动开始对话**（只填草稿不 submit）。仅 client 改动，⌘R 生效。
 
 - **实现拆分**：原 `dispatchToNewSession` 的前半段（create 与图片预取并行 → `retain('zentao-panel')` → `facade.setDraft`）抽成 **`createDraftSession(md, images, choice)`** 共用；`dispatchToNewSession` 行为不变（并行 selectModel+附件 → 模型 OK 才 submit → 3s release；被拒只留草稿）。
@@ -629,6 +631,39 @@ board 模式占满主体渲染 `BoardView`，**tab 段/快捷筛选条/排序/�
   实时且无 link 可用、syncPersistedStates 不改写/会话删除不删、再处理作废、无 link 在线保留
   与超宽限清理、LiveBadge manual 类与 title、CardItem 下拉回显与回传、DetailView chip 高亮
   与回传/自动高亮）。
+
+### 4.19 「新建对话」单一入口 + 自动带入开关 + 界面整理（2026-10-27，用户要求）
+
+用户先说「参考插入对话按钮再搞一个新建对话按钮」，澄清后拍板：**只留一个「新建对话」**，
+弹层里可勾选「自动带入」。**仅 client 改动，⌘R 生效**。
+
+- **卡片动作行**：删除「插入对话」，只留「新建对话」（NewChatIcon：对话气泡 + 加号）与「处理」
+  （PlayIcon：播放三角，primary）。动作行拆两层——左侧会话 chip；右侧 `.ztp-acts-right` =
+  `.ztp-utils`（状态下拉 + ⚡/旗标/隐藏/复制）+ `.ztp-acts-sep` 分隔线 + 两个主操作。
+  图标按钮 24×24、边框透明；窄面板换行时工具组整体换行，主操作不拆散。状态下拉收窄到 11px/98px。
+- **弹层**：`intent='insert'` 且非批量（`allowCarry = insert && !batch`）时渲染 `.ztp-carry`
+  勾选框「自动带入任务背景」，默认 `readCarryPref()`（localStorage `dsh-zentao-panel.carry.v1`；
+  发送时 `saveCarryPref` 记住，取消后下次沿用，勾选框始终可见不会静默）。取消勾选 → `withContent=false`：
+  文案变「新建空白会话」、附加指令 textarea + 模板 chip 整段收起、`onSend` 回传
+  `{carry:false, md:null, images:[], instr:''}`。标题统一「新建对话：X #id」/「新建对话：N 项」。
+- **懒读取**：从卡片点「新建对话」不再提前拉详情（`dispatch[1]({card, md:null, images:null,
+  intent:'insert', lazy:true})`）；sendDispatch 在确认后、且 carry=true 时才
+  `prepareInsertPayload`（sticky toast「正在读取禅道详情与最近动态…」），失败只退标题+摘要并把
+  「（详情读取失败，仅带入标题与摘要）」拼到结果文案——取消带入时零详情 RPC。
+- **空白会话**：`newBlankSession(choice)`（模块级，进 `_test`）——create（workspaceId|cwd|继承
+  当前 cwd）→ selectModelFor → `uiWorkspace.openSession` 跳转；**不填草稿/不挂附件/不
+  saveSessionLink**（没有内容，关联会让卡片误亮处理中/已完成），也不存 lastDispatch。返回
+  mode `jumped|created`（uiWorkspace 缺失 → created，提示从会话列表打开）；sessions 缺失 →
+  ok:false → toast「sessions 服务不可用」。sendDispatch 的 `carry===false` 分支直接走它，
+  **不降级插入当前会话**（没有内容可插）。
+- **批量**：底部「批量插入」改名「批量新建对话」（intent 仍是 insert，不带勾选框，始终带内容）。
+- **样式整理**（用户一并要求的界面优化，全部走 `--dsw-alias-*`，不引入不存在的变量名）：
+  head 加 `.ztp-head-sep`、行高 40、gap 6、搜索框 28 高 + 聚焦主题色描边、视图切换改胶囊分段
+  （`.ztp-viewseg` 边框圆角 + 按钮 22 高）；卡片 hover 加 `shadow-lv1`；`.ztp-acts` 间距 6/8、
+  主操作 27 高；弹层 380 宽 + `max-height:86vh` 内部滚动；新增 `.ztp-carry*` 样式。
+- 测试：client 349 项（新增 16：CardItem 单入口与动作行分层 / 弹层默认勾选与文案 / 取消后空白
+  文案 + 附加指令收起 / send 回传 carry 与清空 md/images / 批量弹层标题且无开关 / 空白会话 3 项 / carry 偏好 3 项）。
+  布局用 headless Chrome 静态预览（日/夜 token + 1280/820/560 三档宽度）核对，未在真机 DSH 内目视。
 
 ### 5. DSH 插件体系（本机实测）
 

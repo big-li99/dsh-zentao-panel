@@ -54,7 +54,8 @@
         '.ztp-mast-sub{font-size:11.5px;color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;}',
 
         // 头部（分段 tab 行）
-        '.ztp-head{flex:none;display:flex;align-items:center;gap:2px;min-height:38px;padding:0 8px 0 10px;border-bottom:.5px solid var(--dsw-alias-border-l3);box-sizing:border-box;}',
+        '.ztp-head{flex:none;display:flex;align-items:center;gap:6px;min-height:40px;padding:0 10px;border-bottom:.5px solid var(--dsw-alias-border-l3);box-sizing:border-box;}',
+        '.ztp-head-sep{width:1px;height:16px;flex:none;background:var(--dsw-alias-border-l2);margin:0 1px;}',
         '.ztp-seg{display:flex;align-items:center;gap:2px;min-width:0;overflow-x:auto;scrollbar-width:none;}',
         '.ztp-seg::-webkit-scrollbar{display:none;}',
         '.ztp-seg-btn{appearance:none;border:0;background:transparent;font:inherit;font-size:12.5px;line-height:1;color:var(--dsw-alias-label-secondary);height:26px;padding:0 10px;border-radius:999px;display:inline-flex;align-items:center;gap:6px;cursor:pointer;white-space:nowrap;}',
@@ -65,10 +66,11 @@
         '.ztp-grow{flex:1;min-width:6px;}',
 
         // 列表工具行（tab 行右侧）：搜索框 + 排序下拉
-        '.ztp-search{flex:none;height:26px;width:150px;box-sizing:border-box;padding:0 9px;border-radius:var(--dsw-radius-md);border:.5px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;outline:none;}',
+        '.ztp-search{flex:none;height:28px;width:146px;box-sizing:border-box;padding:0 9px;border-radius:var(--dsw-radius-md);border:.5px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;outline:none;transition:border-color .12s ease,box-shadow .12s ease;}',
         '.ztp-search::placeholder{color:var(--dsw-alias-label-caption);}',
-        '.ztp-search:focus{border-color:var(--dsw-alias-border-l4);box-shadow:0 0 0 1px var(--dsw-alias-border-l4);}',
-        '.ztp-sort{flex:none;height:26px;box-sizing:border-box;padding:0 2px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;outline:none;cursor:pointer;}',
+        '.ztp-search:hover{border-color:var(--dsw-alias-border-l4);}',
+        '.ztp-search:focus{border-color:var(--dsw-alias-state-business-primary);box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-state-business-primary) 18%,transparent);}',
+        '.ztp-sort{flex:none;height:28px;box-sizing:border-box;padding:0 4px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;outline:none;cursor:pointer;}',
         '.ztp-sort:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
         // 快捷筛选条：head 下方独立一行 chip（等你决策/处理中/逾期/今天到期/已完成）
         '.ztp-qfbar{flex:none;display:flex;align-items:center;gap:4px;padding:6px 8px 6px 10px;border-bottom:.5px solid var(--dsw-alias-border-l2);overflow-x:auto;scrollbar-width:none;}',
@@ -79,10 +81,10 @@
         '.ztp-qf.on{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);border-color:transparent;}',
         '.ztp-qf.on:hover{background:var(--dsw-alias-button-primary-hover);color:var(--dsw-alias-label-primary-foreground);}',
         '.ztp-qf .ztp-num{font-size:10px;opacity:.85;}',
-        '.ztp-viewseg{flex:none;display:inline-flex;align-items:center;gap:2px;}',
-        '.ztp-view-btn{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;line-height:1;height:24px;padding:0 9px;border-radius:var(--dsw-alias-radius-sm,var(--dsw-radius-sm));cursor:pointer;}',
+        '.ztp-viewseg{flex:none;display:inline-flex;align-items:center;gap:1px;height:28px;box-sizing:border-box;padding:2px;border:.5px solid var(--dsw-alias-border-l3);border-radius:999px;background:var(--dsw-alias-bg-layer-1);}',
+        '.ztp-view-btn{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;line-height:1;height:22px;padding:0 11px;border-radius:999px;cursor:pointer;}',
         '.ztp-view-btn:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover);}',
-        '.ztp-view-btn.on{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary);}',
+        '.ztp-view-btn.on{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary);font-weight:500;}',
         // 流程看板：四列泳道（不做装饰动画，信息密度优先）
         '.ztp-board{flex:1;display:flex;gap:10px;padding:12px 14px;min-height:0;overflow-x:auto;}',
         '.ztp-bcol{flex:1;min-width:180px;display:flex;flex-direction:column;min-height:0;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-alias-radius-lg,var(--dsw-radius-lg));background:var(--dsw-alias-bg-layer-1);overflow:hidden;}',
@@ -128,7 +130,7 @@
 
         // 卡片
         '.ztp-card{position:relative;display:block;width:100%;box-sizing:border-box;text-align:left;font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);padding:11px 14px 11px 16px;margin:0 0 10px;cursor:pointer;transition:background .12s ease,border-color .12s ease,transform .12s ease,box-shadow .12s ease;}',
-        '.ztp-card:hover{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l4);}',
+        '.ztp-card:hover{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l4);box-shadow:var(--dsw-alias-shadow-lv1,0 1px 4px rgba(0,0,0,.1));}',
         '.ztp-card:active{background:var(--dsw-alias-interactive-bg-active);}',
         // 选中态二轮加强（2026-10-25 用户反馈「只是颜色变化不够明显」）：全高 4px 类型彩条 +
         // 阴影浮起 + 向右微移（示意指向右侧详情）+「查看中」文字角标——不依赖颜色感知也能识别。
@@ -171,23 +173,31 @@
         '.ztp-dl.soon{color:var(--dsw-alias-state-warn-primary);font-weight:600;}',
         '.ztp-dl.overdue{color:var(--dsw-alias-state-error-primary);font-weight:600;}',
 
-        // 按钮
-        '.ztp-acts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;margin-top:8px;}',
+        // 动作行（2026-10-27 改版）：左侧会话 chip；右侧「工具组 + 分隔线 + 主操作」——
+        // 图标按钮与状态下拉收进 .ztp-utils（窄面板换行时整组不散），主操作永远在最后。
+        '.ztp-acts{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:6px 8px;margin-top:9px;}',
+        '.ztp-acts-right{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:6px;margin-left:auto;min-width:0;}',
+        '.ztp-utils{display:inline-flex;align-items:center;gap:1px;flex:none;}',
+        '.ztp-acts-sep{width:1px;height:15px;flex:none;background:var(--dsw-alias-border-l2);margin:0 2px;}',
+        '.ztp-acts .ztp-btn{height:27px;padding:0 11px;font-size:11.5px;}',
         '.ztp-btn{appearance:none;font:inherit;font-size:12px;line-height:1;height:28px;padding:0 12px;border-radius:var(--dsw-radius-sm);border:.5px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;box-sizing:border-box;}',
         '.ztp-btn:hover{background:var(--dsw-alias-interactive-bg-hover);}',
         '.ztp-btn.primary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);border-color:transparent;}',
         '.ztp-btn.primary:hover{background:var(--dsw-alias-button-primary-hover);}',
         '.ztp-btn:disabled{opacity:.45;cursor:default;}',
         '.ztp-btn svg{width:13px;height:13px;}',
-        // 纯图标小按钮（旗标/隐藏/复制）与激活态；隐藏态卡片淡化
+        // 纯图标小按钮（旗标/隐藏/复制）与激活态；卡片上再收紧到 24×24，和状态下拉排成一组
         '.ztp-btn.icon{padding:0 7px;color:var(--dsw-alias-label-tertiary);}',
         '.ztp-btn.icon:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover);}',
         '.ztp-btn.icon.on{color:var(--dsw-alias-state-business-primary);}',
-        // 卡片上的「手动处理状态」下拉（状态：自动 / 处理中 / 等你决策 / 已完成）
+        '.ztp-acts .ztp-btn.icon{width:24px;height:24px;padding:0;justify-content:center;border-color:transparent;}',
+        '.ztp-acts .ztp-btn.icon:hover{background:var(--dsw-alias-interactive-bg-hover);}',
+        '.ztp-acts .ztp-btn.icon.on{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent);}',
+        // 卡片上的「手动处理状态」下拉（自动 / 处理中 / 等你决策 / 已完成）
         // 与 head 的排序下拉同款轻量样式（原生 select，不设外观避免日/夜主题错色）
-        '.ztp-statesel{flex:none;height:24px;box-sizing:border-box;padding:0 2px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;outline:none;cursor:pointer;max-width:104px;}',
+        '.ztp-statesel{flex:none;height:22px;box-sizing:border-box;padding:0 3px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:11px;outline:none;cursor:pointer;max-width:98px;}',
         '.ztp-statesel:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
-        '.ztp-statesel.on{color:var(--dsw-alias-state-business-primary);}',
+        '.ztp-statesel.on{color:var(--dsw-alias-state-business-primary);font-weight:500;}',
         '.ztp-card.hiddenmark{opacity:.55;}',
         '.ztp-note-line{margin-top:3px;display:flex;align-items:flex-start;gap:4px;font-size:11.5px;line-height:1.4;color:var(--dsw-alias-label-caption);word-break:break-word;}',
         '.ztp-note-line svg{width:10px;height:10px;flex:none;margin-top:2px;}',
@@ -240,7 +250,7 @@
         '.ztp-check.on{background:var(--dsw-alias-state-business-primary);border-color:var(--dsw-alias-state-business-primary);color:#fff;}',
         '.ztp-card.sel{border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 60%,var(--dsw-alias-border-l3));background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 7%,var(--dsw-alias-bg-layer-1));}',
         '.ztp-card.sel:before{opacity:1;}',
-        // 底部批量操作条（多选模式常驻）：已选计数 + 全选/批量插入/批量处理/退出
+        // 底部批量操作条（多选模式常驻）：已选计数 + 全选/批量新建对话/批量处理/退出
         '.ztp-batchbar{flex:none;display:flex;align-items:center;gap:8px;padding:8px 14px;border-top:.5px solid var(--dsw-alias-border-l3);background:var(--dsw-alias-bg-layer-2);}',
         '.ztp-batch-info{font-size:12px;color:var(--dsw-alias-label-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;}',
 
@@ -383,13 +393,20 @@
 
         // 「处理」确认弹层：先选工作区与模型，再新建会话下发
         '.ztp-disp-layer{position:fixed;inset:0;z-index:2147482000;display:flex;align-items:center;justify-content:center;background:var(--dsw-alias-bg-mask-2);}',
-        '.ztp-disp-pop{width:min(360px,92vw);box-sizing:border-box;padding:16px;border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-2);border:.5px solid var(--dsw-alias-border-l3);box-shadow:var(--dsw-shadow-lv3);animation:ztp-pop .14s ease-out;}',
+        '.ztp-disp-pop{width:min(380px,92vw);max-height:min(86vh,720px);overflow-y:auto;box-sizing:border-box;padding:16px;border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-layer-2);border:.5px solid var(--dsw-alias-border-l3);box-shadow:var(--dsw-shadow-lv3);animation:ztp-pop .14s ease-out;}',
         '@keyframes ztp-pop{from{transform:scale(.97);opacity:.6}to{transform:none;opacity:1}}',
         '.ztp-disp-title{font-size:13.5px;font-weight:600;color:var(--dsw-alias-label-primary);}',
         '.ztp-disp-sub{margin:5px 0 2px;font-size:12px;line-height:1.6;color:var(--dsw-alias-label-tertiary);word-break:break-word;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}',
         '.ztp-disp-acts{display:flex;gap:8px;margin-top:16px;}',
         '.ztp-disp-acts .ztp-btn{flex:1;height:30px;justify-content:center;}',
         '.ztp-disp-note{margin-top:10px;font-size:11px;color:var(--dsw-alias-label-caption);line-height:1.6;}',
+        // 「自动带入」勾选（新建对话专用）：默认勾选 = 任务背景与截图填入草稿；取消 = 只建空白会话
+        '.ztp-carry{display:flex;align-items:flex-start;gap:8px;margin-top:12px;padding:9px 11px;box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1);cursor:pointer;user-select:none;}',
+        '.ztp-carry:hover{border-color:var(--dsw-alias-border-l4);}',
+        '.ztp-carry input{width:14px;height:14px;margin:1px 0 0;flex:none;accent-color:var(--dsw-alias-state-business-primary);cursor:pointer;}',
+        '.ztp-carry-main{min-width:0;}',
+        '.ztp-carry-t{display:block;font-size:12.5px;line-height:1.45;color:var(--dsw-alias-label-primary);}',
+        '.ztp-carry-d{display:block;margin-top:2px;font-size:11px;line-height:1.5;color:var(--dsw-alias-label-tertiary);word-break:break-word;}',
 
         // ───────────────── 处理中任务的实时状态（M6：卡片上的活性徽标 + 常驻提醒）─────────────────────────
         // 会话关联（§4.3）+ uiSession.sessionStatus（running/pendingInteraction/completionUnread）
@@ -521,6 +538,19 @@
       function ChatIcon() {
         return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
           h('path', { d: 'M3 4.3c0-.72.58-1.3 1.3-1.3h7.4c.72 0 1.3.58 1.3 1.3v5c0 .72-.58 1.3-1.3 1.3H7.8L5.2 13.2v-2.6h-.9C3.58 10.6 3 10.02 3 9.3z', stroke: 'currentColor', strokeWidth: 1.1, strokeLinejoin: 'round' }),
+        );
+      }
+      /** 新建对话（卡片动作行）：对话气泡 + 右上角加号，跟「处理」的播放三角区分开。 */
+      function NewChatIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('path', { d: 'M13.4 8.5v1.9c0 .72-.58 1.3-1.3 1.3H7.9l-2.6 2.1v-2.1h-.9c-.72 0-1.3-.58-1.3-1.3v-5c0-.72.58-1.3 1.3-1.3h3.2', stroke: 'currentColor', strokeWidth: 1.1, strokeLinejoin: 'round', strokeLinecap: 'round' }),
+          h('path', { d: 'M12.6 2.6v4.2M10.5 4.7h4.2', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round' }),
+        );
+      }
+      /** 处理（卡片主操作）：播放三角——「交给 agent 跑」。 */
+      function PlayIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('path', { d: 'M5.4 3.7l6.4 4.3-6.4 4.3z', stroke: 'currentColor', strokeWidth: 1.2, strokeLinejoin: 'round' }),
         );
       }
       /** 复制（卡片动作行/详情栏）：两张叠纸。 */
@@ -874,7 +904,7 @@
       }
 
       /**
-       * 「最近动态」（v1 actions，host 已精简）→ Markdown 小节（2026-10-27 插入对话要求）。
+       * 「最近动态」（v1 actions，host 已精简）→ Markdown 小节（2026-10-27 新建对话要求）。
        * 时间正序；每条 = 日期 + 禅道渲染好的中文句（desc，已由 host 剥掉时间戳前缀），
        * 备注与字段变更缩进成子项。备注里的图片占位符去掉——图片本身走真实附件插入
        * （与描述同款处理，见 insertImagesOf）。
@@ -909,7 +939,7 @@
 
       /**
        * 卡片 → 精简 Markdown（M3：插入输入框 / 新会话用；标题 + 描述/重现步骤，图片走真实附件）。
-       * opts.actions=true 时追加「最近动态」小节（「插入对话」用，2026-10-27；「处理」、
+       * opts.actions=true 时追加「最近动态」小节（「新建对话」用，2026-10-27；「处理」、
        * 复制 Markdown、批量下发保持原模板不变）。
        */
       function cardToMarkdown(card, detail, opts) {
@@ -929,7 +959,7 @@
         return lines.join('\n');
       }
 
-      /** 「插入对话」的图片：描述图 + 最近动态备注里的图（按 url 去重，DSH 单消息 ≤20 张）。
+      /** 「新建对话」的图片：描述图 + 最近动态备注里的图（按 url 去重，DSH 单消息 ≤20 张）。
        *  只取实际写进 Markdown 的动态条目（被 MD_ACTIONS_MAX 截掉的老备注不附图，免得
        *  附件里多出正文没提到的截图）。 */
       function insertImagesOf(card, detail) {
@@ -951,8 +981,8 @@
       }
 
       /**
-       * 「插入对话」的内容准备（2026-10-27：最近动态只在 v1 详情里，列表卡片没有）：
-       * 调用方没带详情（从列表卡点「插入对话」）时先拉一次 detail，顺带拿到完整描述
+       * 「新建对话」的内容准备（2026-10-27：最近动态只在 v1 详情里，列表卡片没有）：
+       * 调用方没带详情（从列表卡点「新建对话」）时先拉一次 detail，顺带拿到完整描述
        * （列表 descBrief 只有 300 字）。读取失败不挡插入——退列表摘要、本次不含最近动态。
        * 返回 {md, images, detail, fetched?, error?}。
        */
@@ -1017,6 +1047,25 @@
           for (var j = 0; j < imgs.length && out.length < 20; j++) out.push(imgs[j]);
         }
         return out;
+      }
+
+      // ───────── 「自动带入」偏好（2026-10-27，新建对话弹层）：默认勾选 ─────────
+      // 记住上次确认时的选择：常开空白会话的人不必每次取消勾选（勾选框始终可见，不会误操作）。
+      var CARRY_KEY = 'dsh-zentao-panel.carry.v1';
+      function readCarryPref() {
+        try {
+          var s = root.localStorage;
+          var v = s && s.getItem(CARRY_KEY);
+          if (v === '0') return false;
+          if (v === '1') return true;
+        } catch (e) { /* localStorage 不可用 → 默认勾选 */ }
+        return true;
+      }
+      function saveCarryPref(on) {
+        try {
+          var s = root.localStorage;
+          if (s) s.setItem(CARRY_KEY, on === false ? '0' : '1');
+        } catch (e) { /* 忽略 */ }
       }
 
       // ───────── 附加指令（2026-10-25 迭代）：弹层可选输入，拼到任务背景末尾 ─────────
@@ -1721,7 +1770,7 @@
       }
 
       /**
-       * 新会话公共前段（「处理」与「插入对话」共用，2026-10-25 抽出）：
+       * 新会话公共前段（「处理」与「新建对话」共用，2026-10-25 抽出）：
        *   点击确认瞬间：prefetchImageBytes 与 sessions.create 并行（host 拉禅道图最慢，提前开始）
        *   → create 完成：sessions.retain 后台保活（不切视图）+ 立即 facade.setDraft。
        * 成功返回 {ok:true, sessionId, target, retainRef, prefetch}；失败返回
@@ -1827,7 +1876,7 @@
       }
 
       /**
-       * 「插入对话」（2026-10-25 用户要求改版）：与「处理」同款弹层选好工作区/
+       * 「新建对话」的插入路径（2026-10-25 用户要求改版）：与「处理」同款弹层选好工作区/
        * 模型后走这里——新建会话、**自动跳转过去**（uiWorkspace.openSession），
        * 但只填草稿+图片附件，**不自动发送**。
        * 时序：createDraftSession（create 与图片预取并行、setDraft 先行，跳过去
@@ -1901,6 +1950,61 @@
             message: '已新建会话并填入草稿（未能自动跳转，可从会话列表打开确认发送）' };
         });
       }
+
+      /**
+       * 新建**空白**会话（「新建对话」弹层取消勾选「自动带入」时，2026-10-27）：
+       * 只建会话 + 按所选模型设置 + 跳转过去，不填草稿、不挂附件、不记卡片关联
+       * （没有内容，关联只会让卡片误显示「处理中/已完成」）。
+       * 顺序：create → selectModel（竞态小，跳过去模型已生效）→ uiWorkspace.openSession。
+       * 服务缺失时：sessions 缺失 → ok:false 交上层提示；uiWorkspace 缺失 → 会话已建，
+       * mode:'created'（从会话列表打开）。
+       */
+      function newBlankSession(choice) {
+        var sessions = lookupService('sessions');
+        if (!sessions || typeof sessions.create !== 'function') {
+          return Promise.resolve({ ok: false, mode: 'unavailable', message: 'sessions 服务不可用（DSH 版本过旧？）' });
+        }
+        var opts = {};
+        if (choice && choice.workspaceId) opts.workspaceId = choice.workspaceId;
+        else if (choice && choice.cwd) opts.cwd = choice.cwd;
+        else {
+          // 未指定位置 → 继承当前会话工作目录（与 createDraftSession 同款兜底）
+          try {
+            var cur = currentSessionId(sessions);
+            if (cur) {
+              var row = sessions.list.getSnapshot().byId[cur];
+              if (row && row.cwd) opts = { cwd: row.cwd };
+            }
+          } catch (e) { /* 忽略 */ }
+        }
+        return Promise.resolve()
+          .then(function () { return sessions.create(opts); })
+          .then(function (sessionId) {
+            if (!sessionId) throw new Error('session.create 未返回会话 id');
+            var modelStep = (choice && choice.model)
+              ? selectModelFor(sessionId, choice.model)
+              : Promise.resolve({ ok: true });
+            return modelStep.then(function (mres) {
+              var note = (mres && mres.ok === false) ? '（模型设置失败：' + mres.message + '）' : '';
+              var ws = null;
+              try { ws = lookupService('uiWorkspace'); } catch (e) { ws = null; }
+              var jumped = Boolean(ws && typeof ws.openSession === 'function');
+              if (jumped) {
+                try { ws.openSession(sessionId); } catch (e) { jumped = false; }
+              }
+              return {
+                ok: true, mode: jumped ? 'jumped' : 'created', sessionId: sessionId,
+                message: (jumped
+                  ? '已新建空白会话并跳转过去（未带入禅道内容）'
+                  : '已新建空白会话（未能自动跳转，可从会话列表打开）') + note,
+              };
+            });
+          })
+          .catch(function (err) {
+            return { ok: false, mode: 'failed', message: '新会话创建失败：' + (err && err.message ? err.message : String(err)) };
+          });
+      }
+
 
       // ───────────────── 会话关联（「处理」后卡片可跳回该会话）─────────────────
       // 「处理」成功后把 禅道卡片 → DSH 会话 的映射存进 localStorage（DSH 会话
@@ -2057,7 +2161,7 @@
        *  会话被删（byIdReady 且无该行）→ 一律删；live 有值 → 记录（状态或会话变了才
        *  刷新 at，同一状态保留原时间——「更新于」语义要的是状态变化时刻）；
        *  live 归零 → done 保留（粘性）；**running 归零 → 升级为 done**（宿主的完成未读
-       *  只对「后台」会话置位——用户正看着的会话（插入对话跳过去手动发、点 chip 去看过）
+       *  只对「后台」会话置位——用户正看着的会话（新建对话跳过去手动发、点 chip 去看过）
        *  跑完永远不置位，只认 completionUnread 会把「完成」漏成「无状态」）；ask 归零 =
        *  用户已回应（agent 会继续跑），不是完成 → 删。
        *  「确认结束」信号 confirmed = 状态源就绪（快照非空）或该会话在状态源里有行
@@ -3056,51 +3160,56 @@
               onClick: function (e) { e.stopPropagation(); props.onOpenSession(c); },
             }, h(SlinkDot, { state: live }), h(ChatIcon), h('span', { className: 'ztp-slink-t' },
               props.linkView.state === 'dead' ? '会话已删除' : props.linkView.title)) : null,
-            // 极速重发：有上次配置才显示——跳过弹层直接按上次的工作区/模型/指令下发
-            props.quickTitle ? h('button', {
-              className: 'ztp-btn icon', type: 'button',
-              title: '极速重发（不弹窗）：' + props.quickTitle,
-              onClick: function (e) { e.stopPropagation(); props.onQuick(c); },
-            }, h(BoltIcon)) : null,
-            // 旗标/隐藏（本地标记，不回写禅道）：旗标进「已标记」筛选；隐藏从列表滤掉（页脚可临时显示）
-            h('button', {
-              className: 'ztp-btn icon' + (props.flagged ? ' on' : ''), type: 'button',
-              title: props.flagged ? '取消标记（重点关注）' : '标记为重点关注（快捷筛选「已标记」可一键过滤）',
-              onClick: function (e) { e.stopPropagation(); props.onToggleMark(c, 'flag'); },
-            }, h(FlagIcon)),
-            h('button', {
-              className: 'ztp-btn icon' + (props.hidden ? ' on' : ''), type: 'button',
-              title: props.hidden ? '取消隐藏，恢复在列表显示' : '本地隐藏（不回写禅道；页脚「显示已隐藏」可找回）',
-              onClick: function (e) { e.stopPropagation(); props.onToggleMark(c, 'hide'); },
-            }, h(HideIcon)),
-            // 处理状态手动修正（2026-10-27）：自动检测偶尔会丢（会话被删/重启/看着会话跑完），
-            // 这里直接改；「自动」= 清除手动设置，回到跟随关联会话。选中值 = 手动值（空 = 自动）。
-            h('select', {
-              className: 'ztp-statesel' + (props.liveManual ? ' on' : ''),
-              value: props.liveManual || '',
-              title: '手动设置处理状态（覆盖自动检测）：「自动」= 跟随关联会话',
-              'aria-label': '手动设置处理状态',
-              onClick: function (e) { e.stopPropagation(); },
-              onChange: function (e) { if (props.onSetState) props.onSetState(c, e.target.value || null); },
-            }, h('option', { value: '' }, '状态：自动'),
-              h('option', { value: 'running' }, '处理中'),
-              h('option', { value: 'ask' }, '等你决策'),
-              h('option', { value: 'done' }, '已完成')),
-            h('button', {
-              className: 'ztp-btn', type: 'button',
-              title: '复制「#' + c.id + ' ' + (c.title || '') + '」到剪贴板（贴 IM 用）',
-              onClick: function (e) { e.stopPropagation(); props.onCopyTitle(c); },
-            }, h(CopyIcon)),
-            h('button', {
-              className: 'ztp-btn', type: 'button',
-              title: '选择工作区与模型，新建会话填入草稿并跳转（不自动发送）',
-              onClick: function (e) { e.stopPropagation(); props.onInsert(c, null); },
-            }, '插入对话'),
-            h('button', {
-              className: 'ztp-btn primary', type: 'button',
-              title: '选择工作区与模型，新建会话发送任务背景',
-              onClick: function (e) { e.stopPropagation(); props.onDispatch(c, null); },
-            }, '处理')),
+            // 右侧：工具组（状态下拉 + 图标动作）+ 分隔线 + 主操作。
+            // 工具组整体换行，窄面板下不会把「新建对话 / 处理」拆散。
+            h('div', { className: 'ztp-acts-right' },
+              h('span', { className: 'ztp-utils' },
+                // 处理状态手动修正（2026-10-27）：自动检测偶尔会丢（会话被删/重启/看着会话跑完），
+                // 这里直接改；「自动」= 清除手动设置，回到跟随关联会话。选中值 = 手动值（空 = 自动）。
+                h('select', {
+                  className: 'ztp-statesel' + (props.liveManual ? ' on' : ''),
+                  value: props.liveManual || '',
+                  title: '手动设置处理状态（覆盖自动检测）：「自动」= 跟随关联会话',
+                  'aria-label': '手动设置处理状态',
+                  onClick: function (e) { e.stopPropagation(); },
+                  onChange: function (e) { if (props.onSetState) props.onSetState(c, e.target.value || null); },
+                }, h('option', { value: '' }, '状态：自动'),
+                  h('option', { value: 'running' }, '处理中'),
+                  h('option', { value: 'ask' }, '等你决策'),
+                  h('option', { value: 'done' }, '已完成')),
+                // 极速重发：有上次配置才显示——跳过弹层直接按上次的工作区/模型/指令下发
+                props.quickTitle ? h('button', {
+                  className: 'ztp-btn icon', type: 'button',
+                  title: '极速重发（不弹窗）：' + props.quickTitle,
+                  onClick: function (e) { e.stopPropagation(); props.onQuick(c); },
+                }, h(BoltIcon)) : null,
+                // 旗标/隐藏（本地标记，不回写禅道）：旗标进「已标记」筛选；隐藏从列表滤掉（页脚可临时显示）
+                h('button', {
+                  className: 'ztp-btn icon' + (props.flagged ? ' on' : ''), type: 'button',
+                  title: props.flagged ? '取消标记（重点关注）' : '标记为重点关注（快捷筛选「已标记」可一键过滤）',
+                  onClick: function (e) { e.stopPropagation(); props.onToggleMark(c, 'flag'); },
+                }, h(FlagIcon)),
+                h('button', {
+                  className: 'ztp-btn icon' + (props.hidden ? ' on' : ''), type: 'button',
+                  title: props.hidden ? '取消隐藏，恢复在列表显示' : '本地隐藏（不回写禅道；页脚「显示已隐藏」可找回）',
+                  onClick: function (e) { e.stopPropagation(); props.onToggleMark(c, 'hide'); },
+                }, h(HideIcon)),
+                h('button', {
+                  className: 'ztp-btn icon', type: 'button',
+                  title: '复制「#' + c.id + ' ' + (c.title || '') + '」到剪贴板（贴 IM 用）',
+                  onClick: function (e) { e.stopPropagation(); props.onCopyTitle(c); },
+                }, h(CopyIcon))),
+              h('span', { className: 'ztp-acts-sep', 'aria-hidden': 'true' }),
+              h('button', {
+                className: 'ztp-btn', type: 'button',
+                title: '新建对话：选工作区与模型，可勾选「自动带入」任务背景与截图（跳过去，不自动发送）',
+                onClick: function (e) { e.stopPropagation(); props.onNewChat(c, null); },
+              }, h(NewChatIcon), '新建对话'),
+              h('button', {
+                className: 'ztp-btn primary', type: 'button',
+                title: '选择工作区与模型，新建会话发送任务背景',
+                onClick: function (e) { e.stopPropagation(); props.onDispatch(c, null); },
+              }, h(PlayIcon), '处理'))),
         );
       }
 
@@ -3725,24 +3834,29 @@
       }
 
       /**
-       * 「处理」/「插入对话」确认弹层：先选工作区与模型（provider/模型 + 思考强度）。
+       * 「处理」/「新建对话」确认弹层：先选工作区与模型（provider/模型 + 思考强度）。
        * intent='dispatch'（默认）：新建会话后台自动发送、不跳转；
-       * intent='insert'：新建会话并跳转过去、只填草稿不自动发送（2026-10-25 改版）。
+       * intent='insert'（「新建对话」）：新建会话并跳转过去、只填草稿不自动发送；
+       *   单卡模式下可取消「自动带入」（默认勾选，偏好记在本机）——取消则只建空白会话。
        * props.batch（Idea 2 批量模式）= batchSummary() 结果：标题/副标题换批量文案，
-       * md/images 此时是 N 卡合并后的任务背景；card 仍传首卡作 fallback。
+       * md/images 此时是 N 卡合并后的任务背景；card 仍传首卡作 fallback（批量不带带入开关）。
+       * props.lazy = 内容还没读取（确认后才拉详情）——文案不说图片张数，只说「截图（如有）」。
        * 服务不可用/列表为空时对应下拉退化为单项说明，仍可直接确认（走默认）。
        */
       function DispatchDialog(props) {
         var card = props.card || { kind: '', id: '', title: '' };
         var insert = props.intent === 'insert';
         var batch = props.batch || null;
+        var allowCarry = insert && !batch; // 只有「单卡新建对话」需要带入开关
         var ctx0 = useState(null);   // collectDispatchContext 结果
         var wsSel = useState(null);  // 选中 workspaceId | '__cwd__' | null
         var modelKey = useState(null); // 选中 'provider\u0000model' | null
         var effortSel = useState(null); // 选中思考强度 id | ''（提供商默认）| null
         var instr = useState(readLastInstruction()); // 附加指令（可选），默认带出上次输入
         var presets = useState(readInstrPresets()); // 指令模板预设：chip 一键填入
+        var carry = useState(readCarryPref()); // 「自动带入」偏好（默认勾选；上次的选择会记住）
         var busy = useState(false);
+        var withContent = !allowCarry || carry[0] !== false; // 取消带入 → 空白会话（没有附加指令）
 
         useEffect(function () {
           var alive = true;
@@ -3796,11 +3910,15 @@
           // 接收方 useCallback 闭包里读不到最新 state（见 sendDispatch 注释）
           try {
             saveLastInstruction(instr[0]); // 记住这次的输入（含清空），下次打开弹层带出
+            if (allowCarry) saveCarryPref(withContent); // 记住「自动带入」选择
             props.onSend(choice, {
               card: card, cards: props.cards || null,
-              md: props.md, images: props.images,
+              md: withContent ? props.md : null,
+              images: withContent ? props.images : [],
               activeAcct: props.activeAcct, intent: props.intent || 'dispatch',
-              instr: instr[0],
+              instr: withContent ? instr[0] : '',
+              carry: withContent,
+              lazy: Boolean(props.lazy),
             });
           } catch (e) {
             busy[1](false); // 发起本身失败 → 至少让弹层可以再操作/关闭
@@ -3818,10 +3936,23 @@
           h('div', { className: 'ztp-disp-pop', onClick: function (e) { e.stopPropagation(); } },
             h('div', { className: 'ztp-disp-title' },
               batch
-                ? ((insert ? '插入到新会话：' : '批量处理：') + batch.count + ' 项')
-                : ((insert ? '插入到新会话 ' : '处理 ') + (KIND_LABEL[card.kind] || card.kind) + ' #' + card.id)),
+                ? ((insert ? '新建对话：' : '批量处理：') + batch.count + ' 项')
+                : ((insert ? '新建对话：' : '处理 ') + (KIND_LABEL[card.kind] || card.kind) + ' #' + card.id)),
             h('div', { className: 'ztp-disp-sub' },
               batch ? ((batch.label || String(batch.count) + ' 项') + '，将合并为一份任务背景') : (card.title || '')),
+
+            // 「自动带入」开关（单卡新建对话）：默认勾选 = 任务背景 + 最近动态 + 截图进草稿；
+            // 取消 = 只建空白会话（下面的附加指令一起收起）。偏好记在本机，下次打开沿用。
+            allowCarry ? h('label', { className: 'ztp-carry' },
+              h('input', {
+                type: 'checkbox', checked: withContent, disabled: busy[0],
+                onChange: function (e) { carry[1](e.target.checked); },
+              }),
+              h('span', { className: 'ztp-carry-main' },
+                h('span', { className: 'ztp-carry-t' }, '自动带入任务背景'),
+                h('span', { className: 'ztp-carry-d' }, withContent
+                  ? '标题、描述、最近动态与截图填入草稿（不自动发送）'
+                  : '不带入禅道内容：只新建一个空白会话并跳转'))) : null,
 
             h('label', { className: 'ztp-label' }, '工作区'),
             h('select', {
@@ -3871,14 +4002,14 @@
                 return h('option', { key: e.id, value: e.id }, e.name);
               })) : null,
 
-            h('label', { className: 'ztp-label' }, '附加指令（可选）'),
-            h('textarea', {
+            withContent ? h('label', { className: 'ztp-label' }, '附加指令（可选）') : null,
+            withContent ? h('textarea', {
               className: 'ztp-input ztp-instr', value: instr[0] || '', disabled: busy[0], rows: 2,
               placeholder: '拼到任务背景末尾，如：只分析定位原因，先不要改代码',
               onChange: function (e) { instr[1](e.target.value); },
-            }),
+            }) : null,
             // 指令模板预设：chip 点击填入 textarea、× 删除、「存为预设」存当前输入（空 = no-op）
-            h('div', { className: 'ztp-instr-tps' },
+            withContent ? h('div', { className: 'ztp-instr-tps' },
               presets[0].map(function (p) {
                 return h('span', { key: p.id, className: 'ztp-tp' },
                   h('button', {
@@ -3894,11 +4025,15 @@
                 type: 'button', className: 'ztp-tp-add', disabled: busy[0],
                 title: '把当前输入存为模板（重复内容不重复存，最多 ' + MAX_INSTR_PRESETS + ' 条）',
                 onClick: function () { presets[1](saveInstrPreset(instr[0])); },
-              }, '+ 存为预设')),
+              }, '+ 存为预设')) : null,
 
             h('div', { className: 'ztp-disp-note' },
               insert
-                ? '将新建会话并跳转过去，任务背景' + (props.images && props.images.length ? '与 ' + props.images.length + ' 张图片' : '') + '填入草稿，不会自动发送。'
+                ? (withContent
+                  ? (props.lazy
+                    ? '将新建会话并跳转过去，任务背景（标题、描述与最近动态）与截图（如有）一并填入草稿，不会自动发送。'
+                    : '将新建会话并跳转过去，任务背景' + (props.images && props.images.length ? '与 ' + props.images.length + ' 张图片' : '') + '填入草稿，不会自动发送。')
+                  : '将新建一个空白会话并跳转过去（不带禅道内容，不会自动发送）。')
                 : '将在新会话发送任务背景' + (props.images && props.images.length ? '，含 ' + props.images.length + ' 张图片附件' : '') + '。'),
 
             h('div', { className: 'ztp-disp-acts' },
@@ -3998,7 +4133,7 @@
         var toast = useState(null);
         var acctOpen = useState(false);  // 账号管理弹出层
         var adding = useState(false);    // 已有账号时再添加一个（LoginView 复用）
-        var dispatch = useState(null);   // 「处理」/「插入对话」确认弹层：{card, md, images, intent}
+        var dispatch = useState(null);   // 「处理」/「新建对话」确认弹层：{card, md, images, intent, carry, lazy}
         var linkRev = useState(0);       // 会话关联存储版本号（保存/清除后 bump 重读）
         var stateRev = useState(0);      // 处理状态版本号（手动修正后 bump 重读 states.v1）
         var liveSnap = useState(watchGetSnapshot()); // 关联会话活性（M6 监控快照）
@@ -4135,23 +4270,12 @@
           if (hit) detailCard[1](hit);
         }, [mine[0]]);
 
-        // 「插入对话」（2026-10-25 改版；2026-10-27 加最近动态）：与「处理」同款弹层选
-        // 工作区/模型，确认后新建会话、自动跳转过去、只填草稿不发送；失败降级插入当前会话输入框。
-        // 内容模板 = 标题 + 描述 + 最近动态（v1 actions）——详情不在手边（从列表卡点进来）
-        // 就先拉一次 detail（顺带补全描述与备注图片），读取失败只退标题+摘要，不挡插入。
-        var insertToChat = useCallback(function (card, detail) {
-          var needFetch = !(detail && Array.isArray(detail.actions));
-          if (needFetch) toast[1]({ text: '正在读取禅道详情与最近动态…', sticky: true });
-          Promise.resolve(prepareInsertPayload(card, detail, rpc)).then(function (p) {
-            if (needFetch) toast[1](p && p.error ? '详情读取失败，本次只插入标题与摘要' : null);
-            dispatch[1]({ card: card, md: p.md, images: p.images, intent: 'insert' });
-          }, function (e) {
-            if (needFetch) toast[1](null);
-            dispatch[1]({
-              card: card, md: cardToMarkdown(card, detail || null, { actions: true }),
-              images: imagesOf(card, detail || null), intent: 'insert',
-            });
-          });
+        // 「新建对话」（2026-10-27 改版，替代原「插入对话」）：只留一个入口，先开弹层选
+        // 工作区/模型/思考强度/附加指令，弹层里可勾选「自动带入」（默认勾选 = 任务背景 +
+        // 最近动态 + 截图填入草稿；取消 = 只建一个空白会话）。内容在**确认后**才读取——
+        // 想开空白会话时不白拉一次禅道详情（最近动态只在 v1 详情里）。
+        var openNewChat = useCallback(function (card) {
+          dispatch[1]({ card: card, md: null, images: null, intent: 'insert', lazy: true });
         }, []);
 
         // 「处理」：弹确认层选工作区与模型，确认后新建会话后台自动发送、不跳转（失败降级 → 剪贴板）
@@ -4179,7 +4303,8 @@
         };
 
         // 弹层确认：intent='dispatch' 走 dispatchToNewSession（后台自动发送、不跳转），
-        // intent='insert' 走 insertToNewSession（新建会话、跳转过去、只填草稿不发送）；
+        // intent='insert'（「新建对话」）走 insertToNewSession（新建会话、跳转过去、只填草稿
+        // 不发送）；插入路径取消「自动带入」时（d.carry === false）只建空白会话（newBlankSession）。
         // choice 即所选工作区/模型。批量（Idea 2）时 d.cards 是 N 张卡、md/images 已合并，
         // 成功后逐卡 saveSessionLink 指向同一会话（M6 徽标/chip 对每张卡照常工作）。
         // ⚠️ 数据（card/cards/md/images/activeAcct）由弹层回传：useCallback([]) 的闭包捕获
@@ -4189,47 +4314,81 @@
         var sendDispatch = useCallback(function (choice, d) {
           var cards = (d && d.cards && d.cards.length) ? d.cards
             : (d && d.card ? [d.card] : null);
-          if (!d || !d.md || !cards || !cards.length) return;
+          if (!d || !cards || !cards.length) return;
           var insert = d.intent === 'insert';
-          var md = appendInstruction(d.md, d.instr); // 附加指令拼到任务背景末尾（三条链路统一走这里）
+          var carry = !(insert && d.carry === false); // 取消「自动带入」→ 只建空白会话
           dispatch[1](null);
           if (d.cards) { selMode[1](false); selKeys[1]({}); } // 批量发起即退出多选清空选中
-          // 过程提示（sticky）：图片还在预取/注册、模型还在设置，让用户知道在等什么；
-          // 完成后由下方结果 toast（非 sticky，自动消失）替换。「插入对话」跳转后
-          // 面板卸载、toast 随之消失，提示只覆盖跳转前的准备期，无害。
-          toast[1](insert
-            ? { text: (d.images && d.images.length
-              ? '正在新建会话（准备 ' + d.images.length + ' 张图片附件）…'
-              : '正在新建会话并跳转…'), sticky: true }
-            : ((d.images && d.images.length)
-              ? { text: '正在准备 ' + d.images.length + ' 张图片附件，随后自动发送…', sticky: true }
-              : { text: '正在新建会话…', sticky: true }));
-          var run = insert
-            ? insertToNewSession(md, d.images || [], choice)
-            : dispatchToNewSession(md, d.images || [], choice);
-          Promise.resolve(run).then(function (r) {
-            if (r && r.ok) {
-              // 成功即记住本次完整配置（工作区/模型/指令）——卡片 ⚡「极速重发」用它跳过弹层
-              saveLastDispatch({
-                workspaceId: choice && choice.workspaceId, cwd: choice && choice.cwd,
-                model: choice && choice.model, instr: d.instr || '', at: Date.now(),
-              });
-              // 新会话建好即记录关联（draft 模式也算：内容已填进那个会话；批量逐卡指向同一会话）
-              if (r.sessionId) {
-                for (var i = 0; i < cards.length; i++) {
-                  saveSessionLink(d.activeAcct || null, cards[i], r.sessionId);
+
+          // ① 空白会话：不带禅道内容、不挂附件、不记卡片关联（没有内容可关联）
+          if (!carry) {
+            toast[1]({ text: '正在新建空白会话…', sticky: true });
+            Promise.resolve(newBlankSession(choice)).then(function (r) {
+              toast[1](r && r.message ? r.message : '新会话创建失败');
+            }).catch(function (e) { toast[1]('新建会话失败：' + String((e && e.message) || e)); });
+            return;
+          }
+
+          // ② 内容懒读取（2026-10-27）：从卡片点「新建对话」时不再提前拉详情——
+          // 用户可能取消「自动带入」，确认后真要带入才拉（最近动态只在 v1 详情里）。
+          if (!d.md && !d.lazy) return;
+          if (!d.md) {
+            toast[1]({ text: '正在读取禅道详情与最近动态…', sticky: true });
+          } else {
+            // 过程提示（sticky）：图片还在预取/注册、模型还在设置，让用户知道在等什么；
+            // 完成后由下方结果 toast（非 sticky，自动消失）替换。跳转后面板卸载、toast
+            // 随之消失，提示只覆盖跳转前的准备期，无害。
+            toast[1](insert
+              ? { text: (d.images && d.images.length
+                ? '正在新建会话（准备 ' + d.images.length + ' 张图片附件）…'
+                : '正在新建会话并跳转…'), sticky: true }
+              : ((d.images && d.images.length)
+                ? { text: '正在准备 ' + d.images.length + ' 张图片附件，随后自动发送…', sticky: true }
+                : { text: '正在新建会话…', sticky: true }));
+          }
+          var prepared = d.md
+            ? Promise.resolve({ md: d.md, images: d.images || [], error: null })
+            : Promise.resolve(prepareInsertPayload(d.card, d.detail || null, rpc)).then(function (p) {
+              return { md: p.md, images: p.images || [], error: p.error || null };
+            }).catch(function () {
+              // 极端情况（prepareInsertPayload 自身抛错）：退回标题+摘要，不挡建会话
+              return {
+                md: cardToMarkdown(d.card, d.detail || null, { actions: true }),
+                images: imagesOf(d.card, d.detail || null), error: 'detail',
+              };
+            });
+
+          prepared.then(function (payload) {
+            var md = appendInstruction(payload.md, d.instr); // 附加指令拼到任务背景末尾（三条链路统一走这里）
+            if (!d.md && insert) toast[1]({ text: '正在新建会话并跳转…', sticky: true });
+            var run = insert
+              ? insertToNewSession(md, payload.images, choice)
+              : dispatchToNewSession(md, payload.images, choice);
+            return Promise.resolve(run).then(function (r) {
+              if (r && r.ok) {
+                // 成功即记住本次完整配置（工作区/模型/指令）——卡片 ⚡「极速重发」用它跳过弹层
+                saveLastDispatch({
+                  workspaceId: choice && choice.workspaceId, cwd: choice && choice.cwd,
+                  model: choice && choice.model, instr: d.instr || '', at: Date.now(),
+                });
+                // 新会话建好即记录关联（draft 模式也算：内容已填进那个会话；批量逐卡指向同一会话）
+                if (r.sessionId) {
+                  for (var i = 0; i < cards.length; i++) {
+                    saveSessionLink(d.activeAcct || null, cards[i], r.sessionId);
+                  }
+                  linkRev[1](function (v) { return v + 1; });
                 }
-                linkRev[1](function (v) { return v + 1; });
+                toast[1](r.message + (payload.error ? '（详情读取失败，仅带入标题与摘要）' : ''));
+                return;
               }
-              toast[1](r.message); return;
-            }
-            var msg = r && r.message ? r.message + '，已改为插入当前会话' : '新会话不可用，已改为插入当前会话';
-            insertToCurrentChat(md, d.images).then(function (x) {
-              if (x.mode === 'clipboard') {
-                toast[1](msg + (x.failed ? '（复制失败，请手动复制）' : '（已复制到剪贴板）'));
-              } else {
-                toast[1](msg + (x.attached ? '（含 ' + x.attached + ' 张图片）' : ''));
-              }
+              var msg = r && r.message ? r.message + '，已改为插入当前会话' : '新会话不可用，已改为插入当前会话';
+              return insertToCurrentChat(md, payload.images).then(function (x) {
+                if (x.mode === 'clipboard') {
+                  toast[1](msg + (x.failed ? '（复制失败，请手动复制）' : '（已复制到剪贴板）'));
+                } else {
+                  toast[1](msg + (x.attached ? '（含 ' + x.attached + ' 张图片）' : ''));
+                }
+              });
             });
           }).catch(function (e) { toast[1]('下发失败：' + String((e && e.message) || e)); });
         }, []);
@@ -4547,7 +4706,7 @@
               onSetState: setStateHere,
               onOpenSession: function (c2) { openLinkedSession(c2, activeAcct); },
               onOpen: function (x) { detailCard[1](x); },
-              onInsert: insertToChat, onDispatch: dispatchCard,
+              onNewChat: openNewChat, onDispatch: dispatchCard,
               onCopyTitle: copyCardTitle,
               flagged: flaggedOf(c),
               hidden: Boolean(markOf(markMap, activeAcct, c).hide),
@@ -4674,6 +4833,7 @@
               style: selMode[0] ? { color: 'var(--dsw-alias-state-business-primary)' } : undefined,
               onClick: function () { if (selMode[0]) exitSelMode(); else selMode[1](true); },
             }, h(BatchIcon)),
+            h('span', { className: 'ztp-head-sep', 'aria-hidden': 'true' }),
             h('input', {
               className: 'ztp-search', type: 'text', value: search[0], spellCheck: false,
               placeholder: '搜索' + (KIND_LABEL[tab[0]] ? ' ' + KIND_LABEL[tab[0]] : '') + ' / #ID',
@@ -4726,7 +4886,7 @@
               className: 'ztp-btn', type: 'button', disabled: !selCount,
               title: '所选事项合并为一份任务背景，新建会话并跳转（不自动发送）',
               onClick: function () { openBatchDialog('insert'); },
-            }, '批量插入'),
+            }, '批量新建对话'),
             h('button', {
               className: 'ztp-btn primary', type: 'button', disabled: !selCount,
               title: '所选事项合并为一份任务背景，新建会话自动发送（不跳转）',
@@ -4768,6 +4928,7 @@
             batch: dispatch[0].cards ? batchSummary(dispatch[0].cards) : null,
             images: dispatch[0].images,
             md: dispatch[0].md,
+            lazy: dispatch[0].lazy,
             intent: dispatch[0].intent,
             activeAcct: activeAcct,
             onSend: sendDispatch,
@@ -4928,6 +5089,9 @@
         collectDispatchContext: collectDispatchContext,
         dispatchToNewSession: dispatchToNewSession,
         insertToNewSession: insertToNewSession,
+        newBlankSession: newBlankSession,
+        readCarryPref: readCarryPref,
+        saveCarryPref: saveCarryPref,
         sessionLinkKey: sessionLinkKey,
         parseLinkKey: parseLinkKey,
         readLinkMap: readLinkMap,
@@ -5017,7 +5181,7 @@
         fmtActDate: fmtActDate,
         ActionTimeline: ActionTimeline,
         ACTION_FOLD_N: ACTION_FOLD_N,
-        // 插入对话带最近动态（2026-10-27）
+        // 新建对话带最近动态（2026-10-27）
         actionsToMarkdown: actionsToMarkdown,
         insertImagesOf: insertImagesOf,
         prepareInsertPayload: prepareInsertPayload,
