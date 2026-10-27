@@ -856,6 +856,59 @@ check('cleanupStaleLinks 顺带清 marks：在线保留 / 孤儿超宽限删 / �
   && TT.readMarkMap()['acct1/task-99'] === undefined
   && TT.readMarkMap()['acct2/bug-1'] !== undefined);
 
+// ── 处理状态手动修正（2026-10-27 用户要求：已完成状态偶尔会丢）──
+// states.v1 加 manual 标记：resolveLiveState 优先取它、syncPersistedStates 不改写；
+// 卡片下拉 / 详情 chip 随时改，「自动」清除覆盖回到会话检测。
+lsBacking.clear();
+const manCard = { kind: 'bug', id: 321, title: '手动状态卡' };
+TT.setManualState('acct1', manCard, 'done', NOW);
+const manRec = TT.readStateMap()['acct1/bug-321'];
+check('setManualState：无关联会话也能设，落盘 {sessionId:null, state, at, manual, lastSeen}',
+  manRec && manRec.state === 'done' && manRec.manual === true && manRec.sessionId === null
+  && manRec.at === NOW && manRec.lastSeen === NOW);
+check('resolveLiveState：手动状态优先（无关联会话也返回，带 manual 标记）',
+  JSON.stringify(TT.resolveLiveState(null, { ready: true, statusReady: true, states: {} }, manRec))
+  === JSON.stringify({ state: 'done', since: NOW, manual: true })
+  && TT.resolveLiveState({ sessionId: 's1' }, { ready: true, states: { s1: 'running' } }, manRec).state === 'done');
+TT.syncPersistedStates([{ key: 'acct1/bug-321', sessionId: 's1', kind: 'bug', id: 321 }],
+  { s1: 'running' }, SOPT, NOW + 1000);
+check('syncPersistedStates：手动状态不被自动评估覆盖（实时 running 也不改）',
+  TT.readStateMap()['acct1/bug-321'].state === 'done'
+  && TT.readStateMap()['acct1/bug-321'].manual === true);
+TT.saveReply('acct1', { kind: 'bug', id: 321 }, 's1', '旧会话的回复');
+TT.syncPersistedStates([{ key: 'acct1/bug-321', sessionId: 's1', kind: 'bug', id: 321 }],
+  { s1: null }, { byId: {}, byIdReady: true, statusReady: true }, NOW + 2000);
+check('syncPersistedStates：关联会话被删也不删手动状态（人设的比会话存活权威），旧结果摘要照常清掉',
+  TT.readStateMap()['acct1/bug-321'] !== undefined
+  && TT.readReplyMap()['acct1/bug-321'] === undefined);
+
+lsBacking.clear();
+TT.saveSessionLink('acct1', { kind: 'bug', id: 322, title: 'y' }, 's-322');
+TT.setManualState('acct1', { kind: 'bug', id: 322, title: 'y' }, 'ask', NOW);
+check('setManualState：有关联会话时带上 sessionId（chip / 会话删除判定照常）',
+  TT.readStateMap()['acct1/bug-322'].sessionId === 's-322'
+  && TT.readStateMap()['acct1/bug-322'].state === 'ask');
+TT.saveSessionLink('acct1', { kind: 'bug', id: 322, title: 'y' }, 's-323');
+check('saveSessionLink：再处理换会话 → 手动状态作废（新一轮处理重新自动判断）',
+  TT.readStateMap()['acct1/bug-322'] === undefined);
+
+lsBacking.clear();
+const manOrphan = { kind: 'bug', id: 77, title: 'z' };
+TT.setManualState('acct1', manOrphan, 'done', NOW - 100 * H);
+const keepOnline = TT.cleanupStaleLinks('acct1', [manOrphan], NOW);
+check('cleanupStaleLinks：手动状态（无 link）在卡片仍在线时保留，只刷新 lastSeen',
+  keepOnline === true && TT.readStateMap()['acct1/bug-77'] !== undefined
+  && TT.readStateMap()['acct1/bug-77'].lastSeen === NOW
+  && TT.cleanupStaleLinks('acct1', [manOrphan], NOW + 1000) === false);
+check('cleanupStaleLinks：手动状态在卡片离开列表超宽限期后清（与 links 同规则）',
+  TT.cleanupStaleLinks('acct1', [], NOW + 80 * H) === true
+  && TT.readStateMap()['acct1/bug-77'] === undefined);
+TT.setManualState('acct1', { kind: 'bug', id: 78 }, 'done', NOW);
+TT.setManualState('acct1', { kind: 'bug', id: 78 }, null, NOW);
+TT.setManualState('acct1', { kind: 'bug', id: 78 }, 'bogus', NOW);
+check('setManualState：null / 非法值 = 清除手动设置（回到自动检测）',
+  TT.readStateMap()['acct1/bug-78'] === undefined);
+
 // saveSessionLink 值带 lastSeen；再处理会清掉旧进度记录
 lsBacking.clear();
 const nl = TT.saveSessionLink('acct1', { kind: 'bug', id: 42, title: 'x' }, 's-42');
@@ -1714,6 +1767,72 @@ check('CardItem 备注摘要行 + DetailView 编辑区（textarea 初值/保存�
   Boolean(noteLineNode) && noteLineNode.children[1] === '备注摘要测试'
   && Boolean(noteArea) && noteArea.props.value === '旧备注'
   && noteSaved && noteSaved[0] === bc1);
+
+// ── 手动处理状态的 UI（卡片下拉 + 详情 chip + 徽标 manual 标记）──
+const manBadge = TT.LiveBadge({ state: 'done', since: NOW, manual: true });
+const autoBadge = TT.LiveBadge({ state: 'done', since: null, manual: false });
+check('LiveBadge：手动状态带 manual 类，title 标注「手动设置」；自动状态不加',
+  manBadge.props.className.split(' ').includes('manual')
+  && /手动设置/.test(manBadge.props.title)
+  && !autoBadge.props.className.split(' ').includes('manual')
+  && !/手动设置/.test(autoBadge.props.title));
+
+const selCalls = [];
+const manNode2 = TT.CardItem({
+  card: bc1, linkView: null, live: 'done', liveManual: 'done',
+  onSetState: (c, s) => { selCalls.push([c, s]); },
+  onToggleMark: () => {}, onCopyTitle: () => {}, onInsert: () => {}, onDispatch: () => {},
+  onOpen: () => {}, onOpenSession: () => {},
+});
+const manTop2 = manNode2.children.find((n) => n && n.props && n.props.className === 'ztp-top');
+const manBadge2 = manTop2.children.find((n) => n && n.type === TT.LiveBadge);
+const manActs2 = manNode2.children.find((n) => n && n.props && n.props.className === 'ztp-acts');
+const manSel2 = manActs2.children.find((n) => n && n.type === 'select');
+check('CardItem：渲染「处理状态」下拉（回显手动值 + on + 四个选项）与带 manual 标记的徽标',
+  Boolean(manSel2) && manSel2.props.value === 'done'
+  && manSel2.props.className.split(' ').includes('on')
+  && manSel2.children.map((o) => o.props.value).join() === ',running,ask,done'
+  && manBadge2 && manBadge2.props.manual === true && manBadge2.props.state === 'done');
+manSel2.props.onChange({ target: { value: 'running' } });
+manSel2.props.onChange({ target: { value: '' } });
+check('CardItem：下拉变更回传 (card, state)；选「自动」回传 null',
+  selCalls.length === 2 && selCalls[0][0] === bc1 && selCalls[0][1] === 'running'
+  && selCalls[1][1] === null);
+const autoNode2 = TT.CardItem({
+  card: bc1, linkView: null, live: null,
+  onToggleMark: () => {}, onCopyTitle: () => {}, onInsert: () => {}, onDispatch: () => {},
+  onOpen: () => {}, onOpenSession: () => {},
+});
+const autoSel2 = autoNode2.children.find((n) => n && n.props && n.props.className === 'ztp-acts')
+  .children.find((n) => n && n.type === 'select');
+check('CardItem：无手动状态时下拉回显「状态：自动」且不带 on 类',
+  autoSel2.props.value === '' && !autoSel2.props.className.split(' ').includes('on'));
+
+const chipCalls = [];
+const manDv2 = TT.DetailView({
+  card: bc1, rpc: () => {}, live: 'done', manual: 'done', onBack: () => {},
+  onSetState: (c, s) => { chipCalls.push([c, s]); },
+});
+const stateEdit2 = manDv2.children.find((n) => n && n.props && n.props.className === 'ztp-state-edit');
+const chipBox2 = stateEdit2.children.find((n) => n && n.props && n.props.className === 'ztp-state-chips');
+const chipBtns2 = chipBox2.children.flat(2).filter(Boolean);
+check('DetailView：处理状态 chip 组（自动 + 三态），手动值高亮且带「手动设置」提示',
+  chipBtns2.length === 4 && chipBtns2[0].children[0] === '自动'
+  && !chipBtns2[0].props.className.split(' ').includes('on')
+  && chipBtns2[3].props.className.split(' ').includes('on')
+  && stateEdit2.children[0].children.some((n) => n && n.props && n.props.className === 'ztp-state-hint'));
+chipBtns2[3].props.onClick();
+chipBtns2[0].props.onClick();
+check('DetailView：点 chip 回传 (card, state)；点「自动」清除手动设置（null）',
+  chipCalls.length === 2 && chipCalls[0][0] === bc1
+  && chipCalls[0][1] === 'done' && chipCalls[1][1] === null);
+const autoDv2 = TT.DetailView({ card: bc1, rpc: () => {}, live: null, onBack: () => {} });
+const autoChips2 = autoDv2.children.find((n) => n && n.props && n.props.className === 'ztp-state-edit')
+  .children.find((n) => n && n.props && n.props.className === 'ztp-state-chips')
+  .children.flat(2).filter(Boolean);
+check('DetailView：无手动状态时「自动」chip 高亮',
+  autoChips2[0].props.className.split(' ').includes('on')
+  && !autoChips2[3].props.className.split(' ').includes('on'));
 
 // ── 完成闭环（2026-10-25 迭代）：finishUrl 深链 + 详情 done 态按钮 ──
 check('finishUrl：三类卡片替换为操作页（同 base 同 id）',

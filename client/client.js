@@ -172,7 +172,7 @@
         '.ztp-dl.overdue{color:var(--dsw-alias-state-error-primary);font-weight:600;}',
 
         // 按钮
-        '.ztp-acts{display:flex;justify-content:flex-end;gap:6px;margin-top:8px;}',
+        '.ztp-acts{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;margin-top:8px;}',
         '.ztp-btn{appearance:none;font:inherit;font-size:12px;line-height:1;height:28px;padding:0 12px;border-radius:var(--dsw-radius-sm);border:.5px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;box-sizing:border-box;}',
         '.ztp-btn:hover{background:var(--dsw-alias-interactive-bg-hover);}',
         '.ztp-btn.primary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);border-color:transparent;}',
@@ -183,6 +183,11 @@
         '.ztp-btn.icon{padding:0 7px;color:var(--dsw-alias-label-tertiary);}',
         '.ztp-btn.icon:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover);}',
         '.ztp-btn.icon.on{color:var(--dsw-alias-state-business-primary);}',
+        // 卡片上的「手动处理状态」下拉（状态：自动 / 处理中 / 等你决策 / 已完成）
+        // 与 head 的排序下拉同款轻量样式（原生 select，不设外观避免日/夜主题错色）
+        '.ztp-statesel{flex:none;height:24px;box-sizing:border-box;padding:0 2px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;outline:none;cursor:pointer;max-width:104px;}',
+        '.ztp-statesel:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
+        '.ztp-statesel.on{color:var(--dsw-alias-state-business-primary);}',
         '.ztp-card.hiddenmark{opacity:.55;}',
         '.ztp-note-line{margin-top:3px;display:flex;align-items:flex-start;gap:4px;font-size:11.5px;line-height:1.4;color:var(--dsw-alias-label-caption);word-break:break-word;}',
         '.ztp-note-line svg{width:10px;height:10px;flex:none;margin-top:2px;}',
@@ -258,6 +263,16 @@
         '.ztp-kv dd{margin:0;word-break:break-word;}',
         // 完成闭环按钮行（详情元信息卡下，仅 done 状态渲染）
         '.ztp-finish-row{margin-top:12px;display:flex;}',
+        // 处理状态手动修正（详情元信息卡下）：自动检测丢失时可手改，持久化在本机
+        '.ztp-state-edit{margin-top:12px;padding:10px 12px;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-2);}',
+        '.ztp-state-head{display:flex;align-items:center;gap:8px;margin-bottom:7px;}',
+        '.ztp-state-label{font-size:11.5px;font-weight:600;color:var(--dsw-alias-label-secondary);letter-spacing:.02em;}',
+        '.ztp-state-hint{font-size:11px;color:var(--dsw-alias-state-business-primary);}',
+        '.ztp-state-chips{display:flex;flex-wrap:wrap;gap:6px;}',
+        '.ztp-state-chip{appearance:none;font:inherit;font-size:12px;height:26px;padding:0 11px;border-radius:999px;border:.5px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;}',
+        '.ztp-state-chip:hover{border-color:var(--dsw-alias-border-l4);color:var(--dsw-alias-label-primary);}',
+        '.ztp-state-chip.on{background:var(--dsw-alias-state-business-primary);border-color:transparent;color:var(--dsw-alias-label-primary-foreground);}',
+        '.ztp-state-tip{margin-top:7px;font-size:11px;line-height:1.45;color:var(--dsw-alias-label-tertiary);}',
         '.ztp-desc{margin-top:10px;padding:10px 12px;border-radius:var(--dsw-radius-md);background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);font-size:12.5px;line-height:1.7;white-space:pre-wrap;word-break:break-word;}',
         '.ztp-section{font-size:11.5px;color:var(--dsw-alias-label-tertiary);margin:14px 2px 6px;}',
         // 处理结果摘要（关联会话最新回复，replies.v1 缓存）：详情页回读 agent 最后说了什么。
@@ -384,6 +399,8 @@
         '.ztp-live.running{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 13%,transparent);}',
         '.ztp-live.ask{color:var(--dsw-alias-state-warn-primary);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 15%,transparent);}',
         '.ztp-live.done{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 14%,transparent);}',
+        // 手动修正过的状态：内描边区分「人设的」与「自动检测的」（title 里也写明）
+        '.ztp-live.manual{box-shadow:inset 0 0 0 1px color-mix(in srgb,currentColor 42%,transparent);}',
         // 处理中：三点依次跳动
         '.ztp-live.running .ztp-dots{display:inline-flex;gap:2.5px;align-items:center;}',
         '.ztp-live.running .ztp-dots b{width:4px;height:4px;border-radius:50%;background:currentColor;animation:ztp-dot 1.05s ease-in-out infinite;}',
@@ -1994,6 +2011,39 @@
         statesFallback = map;
       }
 
+      /** 可手动修正的处理状态（与 LIVE_STATE_LABEL 的键一致；顺序即详情里的 chip 顺序）。 */
+      var LIVE_STATES = ['running', 'ask', 'done'];
+
+      /**
+       * 手动修正处理状态（2026-10-27 用户要求：已完成状态偶尔会丢）。
+       * state 为 null/不认识 → 清除手动设置（回到自动检测）；否则写
+       * {sessionId, state, at, manual:true, lastSeen}。
+       * - resolveLiveState 优先取它，syncPersistedStates 不再改写（会话被删也不动：人明确
+       *   断言过这个事项的状态，比会话存活更权威）；
+       * - 没有关联会话也能设（sessionId 为 null）——没处理过的卡也能先标「已完成」。
+       */
+      function setManualState(activeId, card, state, now) {
+        var key = sessionLinkKey(activeId, card);
+        var map = readStateMap();
+        var val = LIVE_STATES.indexOf(state) === -1 ? null : state;
+        if (!val) {
+          if (Object.prototype.hasOwnProperty.call(map, key)) {
+            delete map[key];
+            writeStateMap(map);
+          }
+          return map;
+        }
+        var link = getSessionLink(activeId, card);
+        var prev = map[key];
+        var t = (typeof now === 'number' && now) || Date.now();
+        map[key] = {
+          sessionId: (link && link.sessionId) || (prev && prev.sessionId) || null,
+          state: val, at: t, manual: true, lastSeen: t,
+        };
+        writeStateMap(map);
+        return map;
+      }
+
       /** 状态源就绪判定：sessionStatus 快照里有任何条目才算就绪。
        *  空 Map/对象 = DSH 刚启动还没跟踪任何会话 → 不做「状态已结束」类写删（防重启风暴）。 */
       function statusMapReady(statusMap) {
@@ -2023,6 +2073,15 @@
           var gone = opts.byIdReady && opts.byId && opts.byId[en.sessionId] === undefined;
           if (!map) map = readStateMap();
           var cur = map[en.key];
+          // 手动设置优先：自动评估既不覆盖，也不因会话归零/被删而清掉（人明确改过的状态）。
+          // 唯一例外：关联会话确实被删时，旧结果摘要仍清（与 chip「会话已删除」一致）。
+          if (cur && cur.manual) {
+            if (gone) {
+              if (!rmap) rmap = readReplyMap();
+              if (rmap[en.key]) { delete rmap[en.key]; rdirty = true; }
+            }
+            continue;
+          }
           if (live) {
             if (!cur || cur.state !== live || cur.sessionId !== en.sessionId) {
               map[en.key] = { sessionId: en.sessionId, state: live, at: t };
@@ -2062,6 +2121,11 @@
        *  - running/ask 只在监控未就绪（快照没起来 / 状态源为空，DSH 刚启动）时
        *    兜底显示，就绪后以实时为准，避免把重启前死掉的 turn 显示成「处理中」。 */
       function resolveLiveState(link, snap, persisted) {
+        // 手动修正优先（允许没有关联会话）：人明确设置过的状态比自动检测权威。
+        // manual 标记由 setManualState 写入 states.v1，syncPersistedStates 不会改写它。
+        if (persisted && persisted.manual && LIVE_STATES.indexOf(persisted.state) !== -1) {
+          return { state: persisted.state, since: Number(persisted.at) || null, manual: true };
+        }
         if (!link) return null;
         if (snap && snap.ready && snap.states && snap.states[link.sessionId]) {
           return { state: snap.states[link.sessionId], since: null };
@@ -2074,8 +2138,9 @@
       /** 清理已不在「指派给我」列表里的事项（每次 mine 拉取成功后顺带跑，即「定时清理」）：
        *  卡片还在线 → 刷新 lastSeen（每小时最多写一次盘，减少 localStorage 磨损）；
        *  不在线且距 lastSeen（旧值退回 at）超过宽限期 → links 与 states 条目一起删
-       *  （事项已完结/转派，会话关联与处理进度都没意义了）。只动当前账号的条目。
-       *  mine 一次返回 task/bug/story 三类全量，不存在「某类数据没刷新误删」的情况。 */
+       *  （事项已完结/转派，会话关联与处理进度都没意义了）。
+       *  无关联的手动状态（setManualState）按同一个 seen 判定保留——卡片在线就不清。
+       *  只动当前账号的条目。mine 一次返回 task/bug/story 三类全量，不存在「某类数据没刷新误删」的情况。 */
       var LINK_GRACE_MS = 72 * 3600 * 1000; // 离开列表 72h 后清理（容忍列表短暂波动）
       function cleanupStaleLinks(activeId, cards, now) {
         var t = (typeof now === 'number' && now) || Date.now();
@@ -2108,12 +2173,21 @@
             if (Object.prototype.hasOwnProperty.call(replies, key)) { delete replies[key]; dirtyReplies = true; }
           }
         }
-        // 孤儿进度/结果记录（关联已没了）同样按宽限期清
+        // 进度记录（含「手动状态」这类可以没有关联会话的条目）：
+        // 卡片还在列表 → 只刷新 lastSeen（每小时最多写一次）；关联已没了且超宽限期 → 清。
+        // ⚠️ 不能按「无 link 即孤儿」直接删——手动状态允许在没处理过（无 link）的卡上设置。
         for (var sk in states) {
           if (!Object.prototype.hasOwnProperty.call(states, sk) || sk === '__proto__') continue;
           var spk = parseLinkKey(sk);
-          if (!spk || spk.activeId !== acct || links[sk]) continue;
-          var sref = Number(states[sk] && states[sk].at) || t;
+          if (!spk || spk.activeId !== acct) continue;
+          var sv = states[sk];
+          if (seen[spk.kind + '-' + spk.id]) {
+            var sls = Number(sv && sv.lastSeen) || 0;
+            if (t - sls > 3600 * 1000) { sv.lastSeen = t; dirtyStates = true; }
+            continue;
+          }
+          if (links[sk]) continue; // 仍有关联的：由上面的 links 循环按 link.lastSeen 处理
+          var sref = Number(sv && (sv.lastSeen || sv.at)) || t;
           if (t - sref > LINK_GRACE_MS) { delete states[sk]; dirtyStates = true; }
         }
         for (var rk in replies) {
@@ -2889,8 +2963,9 @@
         var s = props.state;
         if (!s) return null;
         return h('span', {
-          className: 'ztp-live ' + s,
-          title: LIVE_STATE_TITLE[s] + (props.since ? '（更新于 ' + fmtLinkAt(props.since) + '）' : ''),
+          className: 'ztp-live ' + s + (props.manual ? ' manual' : ''),
+          title: (props.manual ? '手动设置的状态：' : '') + LIVE_STATE_TITLE[s]
+            + (props.since ? '（更新于 ' + fmtLinkAt(props.since) + '）' : ''),
         },
           s === 'running'
             ? h('span', { className: 'ztp-dots' }, h('b'), h('b'), h('b'))
@@ -2948,7 +3023,7 @@
               props.selected ? h(CheckMarkIcon) : null) : null,
             h(KindTag, { kind: c.kind }),
             props.flagged ? h('span', { className: 'ztp-flagdot', title: '已标记重点关注' }, h(FlagIcon)) : null,
-            live ? h(LiveBadge, { state: live, since: props.liveSince || null }) : null,
+            live ? h(LiveBadge, { state: live, since: props.liveSince || null, manual: Boolean(props.liveManual) }) : null,
             h('span', { className: 'ztp-id' }, '#' + c.id),
             // 禅道超链接在卡片上（详情里不再放链接/按钮）；draggable 关掉避免链接拖拽覆盖卡片 Markdown 拖拽
             (!sel && c.url) ? h('a', {
@@ -2998,6 +3073,19 @@
               title: props.hidden ? '取消隐藏，恢复在列表显示' : '本地隐藏（不回写禅道；页脚「显示已隐藏」可找回）',
               onClick: function (e) { e.stopPropagation(); props.onToggleMark(c, 'hide'); },
             }, h(HideIcon)),
+            // 处理状态手动修正（2026-10-27）：自动检测偶尔会丢（会话被删/重启/看着会话跑完），
+            // 这里直接改；「自动」= 清除手动设置，回到跟随关联会话。选中值 = 手动值（空 = 自动）。
+            h('select', {
+              className: 'ztp-statesel' + (props.liveManual ? ' on' : ''),
+              value: props.liveManual || '',
+              title: '手动设置处理状态（覆盖自动检测）：「自动」= 跟随关联会话',
+              'aria-label': '手动设置处理状态',
+              onClick: function (e) { e.stopPropagation(); },
+              onChange: function (e) { if (props.onSetState) props.onSetState(c, e.target.value || null); },
+            }, h('option', { value: '' }, '状态：自动'),
+              h('option', { value: 'running' }, '处理中'),
+              h('option', { value: 'ask' }, '等你决策'),
+              h('option', { value: 'done' }, '已完成')),
             h('button', {
               className: 'ztp-btn', type: 'button',
               title: '复制「#' + c.id + ' ' + (c.title || '') + '」到剪贴板（贴 IM 用）',
@@ -3268,7 +3356,7 @@
               + (props.live === 'ask' ? ' ztp-live-ask' : props.live === 'done' ? ' ztp-live-done' : '') },
             h('div', { className: 'ztp-row' },
               h(KindTag, { kind: card.kind }),
-              props.live ? h(LiveBadge, { state: props.live, since: props.liveSince || null }) : null,
+              props.live ? h(LiveBadge, { state: props.live, since: props.liveSince || null, manual: Boolean(props.manual) }) : null,
               h('span', { className: 'ztp-id' }, '#' + card.id)),
             h('div', { className: 'ztp-detail-title' }, card.title || ''),
             h('div', { className: 'ztp-meta' },
@@ -3287,6 +3375,32 @@
               d.stage ? h('dt', null, '阶段') : null, d.stage ? h('dd', null, String(d.stage)) : null,
               d.estStarted ? h('dt', null, '预计开始') : null, d.estStarted ? h('dd', null, fmtDate(d.estStarted)) : null,
               d.resolvedBuild ? h('dt', null, '解决版本') : null, d.resolvedBuild ? h('dd', null, String(d.resolvedBuild)) : null)),
+
+          // 处理状态手动修正（2026-10-27 用户要求）：自动检测偶尔会丢（会话被删、DSH 重启、
+          // 正看着的会话跑完宿主不置完成未读），这里手动覆盖；持久化在 states.v1，重开面板/
+          // 重启后仍在。「自动」清除覆盖，回到跟随关联会话的自动检测。
+          h('div', { className: 'ztp-state-edit' },
+            h('div', { className: 'ztp-state-head' },
+              h('span', { className: 'ztp-state-label' }, '处理状态'),
+              props.manual
+                ? h('span', { className: 'ztp-state-hint' }, '手动设置 · 覆盖自动检测')
+                : null),
+            h('div', { className: 'ztp-state-chips' },
+              h('button', {
+                className: 'ztp-state-chip' + (!props.manual ? ' on' : ''), type: 'button',
+                title: '跟随关联会话自动判断（清除手动设置）',
+                onClick: function () { if (props.onSetState) props.onSetState(card, null); },
+              }, '自动'),
+              LIVE_STATES.map(function (s) {
+                return h('button', {
+                  key: s, type: 'button',
+                  className: 'ztp-state-chip' + (props.manual === s ? ' on' : ''),
+                  title: '手动标记为「' + LIVE_STATE_LABEL[s] + '」（覆盖自动检测，保存在本机）',
+                  onClick: function () { if (props.onSetState) props.onSetState(card, s); },
+                }, LIVE_STATE_LABEL[s]);
+              })),
+            h('div', { className: 'ztp-state-tip' },
+              '自动检测丢了可在这里改；手动状态保存在本机，重开面板/重启后仍在。')),
 
           // 完成闭环（2026-10-25）：agent 处理完（done）才显示——深链到禅道的
           // 完成/解决操作页，由人在禅道里做最终操作（插件保持只读，不 API 回写）
@@ -3886,6 +4000,7 @@
         var adding = useState(false);    // 已有账号时再添加一个（LoginView 复用）
         var dispatch = useState(null);   // 「处理」/「插入对话」确认弹层：{card, md, images, intent}
         var linkRev = useState(0);       // 会话关联存储版本号（保存/清除后 bump 重读）
+        var stateRev = useState(0);      // 处理状态版本号（手动修正后 bump 重读 states.v1）
         var liveSnap = useState(watchGetSnapshot()); // 关联会话活性（M6 监控快照）
         var search = useState('');       // 列表搜索（标题/#id/状态/人员，纯前端过滤）
         var sortMode = useState('smart');// 列表排序（smart/deadline/pri/origin）
@@ -4185,7 +4300,7 @@
             && Date.now() - (Number(cached.at) || 0) < REPLY_TTL_MS) return;
           if (Date.now() - (Number(replyLastTry[key]) || 0) < 60000) return; // 失败冷却
           fetchReplyNow(activeAcct, card, link);
-        }, [detailCard[0], linkRev[0], liveSnap[0], replyRev[0]]);
+        }, [detailCard[0], linkRev[0], liveSnap[0], replyRev[0], stateRev[0]]);
 
         var logout = useCallback(function () {
           Promise.resolve(rpc('zentao.logout')).then(function () {
@@ -4249,7 +4364,7 @@
         }
         /** 卡片活性：实时监控优先（running/ask/done）；实时拿不到 → 兜底持久化进度
          *  （done 粘性显示「已处理完」，running/ask 仅监控未就绪时短暂兜底，见 resolveLiveState）。 */
-        var stateMap = useMemo(readStateMap, [linkRev[0], liveSnap[0]]);
+        var stateMap = useMemo(readStateMap, [linkRev[0], liveSnap[0], stateRev[0]]);
         function liveInfoOf(card) {
           var k = sessionLinkKey(activeAcct, card);
           return resolveLiveState(linkMap[k], liveSnap[0], stateMap[k] || null);
@@ -4262,6 +4377,20 @@
           var info = liveInfoOf(card);
           return info ? info.since : null;
         }
+        /** 手动设置的状态值（null = 跟随自动检测）；徽标加「手动」描边、状态下拉回显用。 */
+        function liveManualOf(card) {
+          var p = stateMap[sessionLinkKey(activeAcct, card)];
+          return (p && p.manual && LIVE_STATES.indexOf(p.state) !== -1) ? p.state : null;
+        }
+        /** 手动修正处理状态（2026-10-27）：写 states.v1 后 bump 版本号重读；「自动」= 清除覆盖。 */
+        var setStateHere = useCallback(function (card, state) {
+          setManualState(activeAcct, card, state);
+          stateRev[1](function (v) { return v + 1; });
+          watchPoke(); // 清除手动后让自动评估立刻回填实时状态
+          toast[1](state
+            ? '已手动标记为「' + (LIVE_STATE_LABEL[state] || state) + '」（选「自动」可恢复跟随会话）'
+            : '已恢复自动检测处理状态');
+        }, [activeAcct]);
         // 本地标记（旗标/隐藏）：marks.v1 按 <activeId>/<kind>-<id> 隔离；hidden 默认从列表滤掉
         var markMap = useMemo(readMarkMap, [markRev[0]]);
         function flaggedOf(card) {
@@ -4291,11 +4420,11 @@
             ? visCards.filter(function (c) { return matchSearch(c, search[0]); })
             : visCards.filter(function (c) { return c.kind === tab[0] && matchSearch(c, search[0]); });
           return sortCards(quickFilterCards(pool, qf[0], liveOf, undefined, flaggedOf), sortMode[0], undefined, liveOf);
-        }, [visCards, tab[0], search[0], sortMode[0], qf[0], markRev[0], linkRev[0], liveSnap[0]]);
+        }, [visCards, tab[0], search[0], sortMode[0], qf[0], markRev[0], linkRev[0], liveSnap[0], stateRev[0]]);
         // 快捷筛选计数：在「搜索过滤后的全量卡片」上统计（chip 数字随搜索联动）
         var qfCounts = useMemo(function () {
           return quickFilterCounts(visCards.filter(function (c) { return matchSearch(c, search[0]); }), liveOf, undefined, flaggedOf);
-        }, [visCards, search[0], markRev[0], linkRev[0], liveSnap[0]]);
+        }, [visCards, search[0], markRev[0], linkRev[0], liveSnap[0], stateRev[0]]);
         var counts = useMemo(function () {
           var m = { task: 0, bug: 0, story: 0 };
           for (var i = 0; i < visCards.length; i++) m[visCards[i].kind] = (m[visCards[i].kind] || 0) + 1;
@@ -4414,6 +4543,8 @@
               linkView: selMode[0] ? null : linkViewOf(c),
               live: liveOf(c),
               liveSince: liveSinceOf(c),
+              liveManual: liveManualOf(c),
+              onSetState: setStateHere,
               onOpenSession: function (c2) { openLinkedSession(c2, activeAcct); },
               onOpen: function (x) { detailCard[1](x); },
               onInsert: insertToChat, onDispatch: dispatchCard,
@@ -4447,6 +4578,8 @@
             rpc: rpc, card: dCard,
             live: liveOf(dCard),
             liveSince: liveSinceOf(dCard),
+            manual: liveManualOf(dCard),
+            onSetState: setStateHere,
             replyLink: dLink,
             // 只展示当前关联会话的缓存（再处理换会话后旧回复不显示）
             reply: (dLink && dReply && dReply.sessionId === dLink.sessionId) ? dReply : null,
@@ -4828,6 +4961,8 @@
         statusMapReady: statusMapReady,
         syncPersistedStates: syncPersistedStates,
         resolveLiveState: resolveLiveState,
+        setManualState: setManualState,
+        LIVE_STATES: LIVE_STATES,
         cleanupStaleLinks: cleanupStaleLinks,
         LINK_GRACE_MS: LINK_GRACE_MS,
         // 列表搜索 / 排序 / 截止强调
@@ -4906,6 +5041,7 @@
         instrChipLabel: instrChipLabel,
         normInstrPresets: normInstrPresets,
         finishUrl: finishUrl,
+        LiveBadge: LiveBadge,
         CardItem: CardItem,
         DetailView: DetailView,
         DispatchDialog: DispatchDialog,

@@ -25,7 +25,7 @@
 | M3 插入输入框 + 新会话下发 | ✅ 服务级 `setDraft` 真机可用；**描述里的截图改为真实图片附件**（`conversation.createDrafts` + `facade.addAttachments`，见 §4.1）；新会话下发待真机复验 |
 | M4 打磨 | 🔄 进行中（细节见各节）：2026-10-24 修会话超时静默空白 + 拉取失败 toast/错误视图；「处理」改弹层确认式（§4.2）+ 关联会话 chip（§4.3）+ 弹层闭包 bug 修复与下发时序优化 + 入口改左侧栏全局面板（§5.1）+「处理」不自动跳转（§4.2 末）；2026-10-25「插入对话」改弹层式新会话自动跳转不自动发（§4.5）；**同日新增列表三件套：搜索/排序/逾期高亮 + mine.v1 快照秒开 + 处理结果回读（§4.7，待真机目视确认）**；**自动轮询/在线离线状态/新指派提醒 + 列表多选批量下发已完成（§4.9，待真机目视确认）**——M4 既有欠账已清零 |
 | M5 多账号 | ✅ 2026-10-24 完成：schema v2（accounts[]+activeId，旧格式自动迁移）、每账号独立 client/cookie/缓存、账号菜单切换/添加/按账号移除；**2026-10-25 补账号别名**（菜单内 ✎ 行内编辑 + 添加账号时可填 + chip/页脚优先显示别名，新 RPC `zentao.rename`，详见 §6 多账号节；host 改动需重装+重启）；测试全绿（multi 36 项 + client +5），待真机目视确认 |
-| M6 实时状态 | ✅ 2026-10-24 完成：**禅道卡片活性徽标（处理中/等你决策/已完成）+ 完成/等决策常驻提醒 toast（「去看看」跳回会话）**，信号来自 DSH 宿主 `uiSession.sessionStatus`（见 §4.4）。当天先做过一版「鲸鱼娘办公室」可视化面板（左侧栏第二面板 + 自绘 SVG 工位场景，角色参考 Neko3000/deepseek-whalechan），**用户看过后明确否决（「太垃圾」）已整体移除**——不要再做办公室/娘化角色类可视化；保留监控内核改为卡片上的活性体现。2026-10-25 补**处理进度持久化（states.v1）+ 不在面板列表事项的定时清理**（见 §4.6，待真机目视确认）。仅 client 改动，⌘R 生效 |
+| M6 实时状态 | ✅ 2026-10-24 完成：**禅道卡片活性徽标（处理中/等你决策/已完成）+ 完成/等决策常驻提醒 toast（「去看看」跳回会话）**，信号来自 DSH 宿主 `uiSession.sessionStatus`（见 §4.4）。当天先做过一版「鲸鱼娘办公室」可视化面板（左侧栏第二面板 + 自绘 SVG 工位场景，角色参考 Neko3000/deepseek-whalechan），**用户看过后明确否决（「太垃圾」）已整体移除**——不要再做办公室/娘化角色类可视化；保留监控内核改为卡片上的活性体现。2026-10-25 补**处理进度持久化（states.v1）+ 不在面板列表事项的定时清理**（见 §4.6，待真机目视确认）；2026-10-27 补**处理状态手动修正**（§4.18：自动检测丢了可手改，持久化、不被自动评估覆盖）。仅 client 改动，⌘R 生效 |
 
 测试命令：
 ```bash
@@ -593,6 +593,42 @@ board 模式占满主体渲染 `BoardView`，**tab 段/快捷筛选条/排序/�
 - 测试：client +16（共 317 项；默认模板不变 / 小节标题与行格式 / 备注去占位符 / 字段变更 / 空 actions 无小节 /
   30 条截断报总数 / 图片去重与上限 / 被截掉的老备注不附图 / prepareInsertPayload 五分支：有详情不 RPC、
   列表卡拉详情、失败与抛错退摘要）。真机样本（bug #15977 / #15964）确认输出形态（后者带备注截图）。
+
+### 4.18 处理状态手动修正（2026-10-27，用户要求：已完成状态偶尔会丢）
+
+用户反馈「有时候已完成的状态可能会丢失，需要支持手动修改这个状态」。**仅 client 改动，⌘R 生效**。
+
+- **丢失根因**（既有设计，见 §4.6）：done 是 states.v1 的粘性进度记录，但会话被删
+  （syncPersistedStates 的 gone 分支）、再处理换会话（saveSessionLink 清 states）、卡片离开
+  列表 72h（cleanupStaleLinks）都会清；宿主的 completionUnread 又只对后台会话置位，正看着
+  的会话跑完没有完成信号（§4.6 已用 running→done 补，但重启/会话删除等场景仍可能漏）。
+- **数据模型**：states.v1 条目新增 `manual:true`，完整值 `{sessionId, state, at, manual,
+  lastSeen}`。`setManualState(activeId, card, state, now)`：state 为 null/不在 `LIVE_STATES`
+  → 清除手动设置（回到自动检测）；合法值写入，sessionId 取关联会话，没有关联也能设
+  （sessionId 为 null——没处理过的卡也能先标「已完成」）。
+- **优先级**：`resolveLiveState` 先看 `persisted.manual`（返回 `{state, since, manual:true}`，
+  **无 link 也返回**），手动状态压过实时检测；`syncPersistedStates` 遇到 manual 条目直接
+  `continue`——自动评估不覆盖、会话归零/被删也不删（人明确断言过的状态比会话存活权威）；
+  唯一例外是关联会话确实被删时顺手清该条的旧结果摘要（replies.v1，与 chip「会话已删除」一致）。
+  手动值非法（坏 localStorage）时 `resolveLiveState` 不认（`LIVE_STATES.indexOf` 校验）。
+- **清理**：`cleanupStaleLinks` 的 states 循环改成按 `seen`（卡片还在当前列表）判定——在线
+  就保留并按 1h 限频刷 `lastSeen`，离线且超 `LINK_GRACE_MS` 才清。**旧逻辑把「无 link 的
+  状态记录」一律当孤儿**，会把手动状态当垃圾删掉；手动状态允许没有 link，不能这样判。
+- **UI**：卡片动作行加 `<select class="ztp-statesel">`（状态：自动/处理中/等你决策/已完成，
+  回显手动值，非空时 `.on` 高亮）→ `onSetState`；详情元信息卡下加 `.ztp-state-edit`
+  （「自动 + 三态」chip 组，手动态高亮，`.ztp-state-hint` 标「手动设置 · 覆盖自动检测」，
+  底部说明持久化）。`LiveBadge` 加 `manual` prop：title 前缀「手动设置的状态：」+ `.manual`
+  内描边。两处都走 ZentaoPane 的 `setStateHere`（`useCallback([activeAcct])`）→
+  `setManualState` → bump `stateRev` 重读 states.v1 → toast；清除时 `watchPoke()` 让自动
+  评估立刻回填。
+- **联动**：手动状态走同一个 `liveOf`，所以徽标 / 快捷筛选计数与过滤 / 智能排序 / 流程看板
+  分列 / 「去禅道标记完成」闭环按钮全部自动生效。`stateRev` 已补进 stateMap、filtered、
+  qfCounts、reply 自动回读 effect 的 deps；`.ztp-acts` 加 `flex-wrap:wrap`（多了一个下拉，
+  窄面板换行不溢出）。`watchStateForCard`（toast 边沿）保持纯实时，不受手动设置影响。
+- 测试：client +16（共 333 项；setManualState 落盘/带 sessionId/清除/非法值、manual 优先于
+  实时且无 link 可用、syncPersistedStates 不改写/会话删除不删、再处理作废、无 link 在线保留
+  与超宽限清理、LiveBadge manual 类与 title、CardItem 下拉回显与回传、DetailView chip 高亮
+  与回传/自动高亮）。
 
 ### 5. DSH 插件体系（本机实测）
 
