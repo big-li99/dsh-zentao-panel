@@ -291,7 +291,7 @@
         '.ztp-acts .ztp-btn.icon{width:23px;height:23px;padding:0;justify-content:center;border-color:transparent;}',
         '.ztp-acts .ztp-btn.icon:hover{background:var(--dsw-alias-interactive-bg-hover);}',
         '.ztp-acts .ztp-btn.icon.on{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent);}',
-        // 卡片上的「手动处理状态」下拉（自动 / 处理中 / 等你决策 / 已完成）
+        // 卡片上的「手动处理状态」下拉（自动 / 处理中 / 等你决策 / 已完成 / 已结束）
         // 与 head 的排序下拉同款轻量样式（原生 select，不设外观避免日/夜主题错色）
         '.ztp-statesel{flex:none;height:22px;box-sizing:border-box;padding:0 3px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-tertiary);font:inherit;font-size:11px;outline:none;cursor:pointer;max-width:98px;}',
         '.ztp-statesel:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
@@ -532,11 +532,22 @@
         '.ztp-live.done .ztp-live-ok{animation:ztp-pop2 .3s ease-out;}',
         '.ztp-card.ztp-live-done:not(.on){border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 40%,var(--dsw-alias-border-l3));}',
         '@keyframes ztp-pop2{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}',
+        // 已结束（只能人设的终态，2026-10-27）：灰色「封存章」+ 卡片整体灰化。
+        // 列表里沉到最底（sortCards 的 endedRank）；hover/选中/详情面板恢复可读，不影响操作。
+        '.ztp-live.ended{color:var(--dsw-alias-label-tertiary);background:color-mix(in srgb,var(--dsw-alias-label-tertiary) 15%,transparent);}',
+        '.ztp-live.ended svg{width:11px;height:11px;flex:none;}',
+        '.ztp-card.ztp-live-ended{opacity:.6;transition:opacity .14s ease;}',
+        '.ztp-card.ztp-live-ended:hover,.ztp-card.ztp-live-ended:focus-within,.ztp-card.ztp-live-ended.on,.ztp-card.ztp-live-ended.sel{opacity:.95;}',
+        '.ztp-card.ztp-live-ended .ztp-card-title{color:var(--dsw-alias-label-secondary);}',
+        '.ztp-card.ztp-live-ended:not(.on){border-color:var(--dsw-alias-border-l2);}',
+        '.ztp-panel-card.ztp-live-ended{border-color:var(--dsw-alias-border-l2);}',
+        '.ztp-panel-card.ztp-live-ended .ztp-detail-title{color:var(--dsw-alias-label-secondary);}',
         // 会话 chip 前的活性小点（有实时状态时随状态变色，处理中闪烁）
         '.ztp-slink .ztp-slink-dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--dsw-alias-label-caption);}',
         '.ztp-slink .ztp-slink-dot.running{background:var(--dsw-alias-state-business-primary);animation:ztp-blink 1.2s ease-in-out infinite;}',
         '.ztp-slink .ztp-slink-dot.ask{background:var(--dsw-alias-state-warn-primary);animation:ztp-blink 1.2s ease-in-out infinite;}',
         '.ztp-slink .ztp-slink-dot.done{background:var(--dsw-alias-state-success-primary);}',
+        '.ztp-slink .ztp-slink-dot.ended{background:var(--dsw-alias-label-caption);}',
         '@keyframes ztp-blink{0%,100%{opacity:1}50%{opacity:.35}}',
 
         // 常驻提醒 toast（监控驱动，面板关着也能弹）：带「去看看」一键跳回会话
@@ -782,14 +793,20 @@
       }
       /**
        * 排序比较器（smart 是默认值）：
-       * - smart：终态沉底 → 等你决策 > 处理中 > 普通卡片（逾期 > 临期 > 有截止 > 无截止）> 已完成
-       *   → 段内截止↑ → 优先级↑ → id↓。实时状态由 liveOf(card) 注入（'ask'/'running'/'done'/null，
-       *   来自 resolveLiveState），最该看的卡（agent 正在等你决策）永远第一屏；
-       * - deadline：截止↑（无截止最后，终态沉底）；
-       * - pri：优先级↑ → 截止↑ → id↓；
+       * - smart：手动「已结束」沉到最底 → 禅道终态沉底 → 等你决策 > 处理中 > 普通卡片
+       *   （逾期 > 临期 > 有截止 > 无截止）> 已完成 → 段内截止↑ → 优先级↑ → id↓。
+       *   实时状态由 liveOf(card) 注入（'ask'/'running'/'done'/'ended'/null，来自
+       *   resolveLiveState），最该看的卡（agent 正在等你决策）永远第一屏；
+       * - deadline：截止↑（无截止最后，终态沉底；手动已结束沉到最底）；
+       * - pri：优先级↑ → 截止↑ → id↓（手动已结束沉到最底）；
        * - origin：保持禅道返回顺序。
-       * deadline/pri/origin 不掺实时状态——用户显式选了排序维度就尊重它。
+       * deadline/pri 不吃 ask/running/done 这类「活动」状态（用户显式选了维度就尊重），
+       * 但「已结束」是终态而不是活动状态，和禅道终态一样必须沉底，否则会夹在待办中间。
        */
+      /** 手动「已结束」= 比禅道终态更彻底的收尾（只能人设）：1 表示要沉到最底。 */
+      function endedRank(c, liveOf) {
+        return (typeof liveOf === 'function' && liveOf(c) === 'ended') ? 1 : 0;
+      }
       /** 实时状态桶：ask 0 / running 1 / 普通 2 / done 3（已处理完但禅道侧未终态，沉到普通之后）。 */
       function liveRank(c, liveOf) {
         if (typeof liveOf !== 'function') return 2;
@@ -802,6 +819,8 @@
       var SORT_MAKERS = {
         smart: function (now, liveOf) {
           return function (a, b) {
+            var ea = endedRank(a, liveOf), eb = endedRank(b, liveOf);
+            if (ea !== eb) return ea - eb;
             var fa = isFinalCard(a), fb = isFinalCard(b);
             if (fa !== fb) return fa ? 1 : -1;
             var la = liveRank(a, liveOf), lb = liveRank(b, liveOf);
@@ -815,8 +834,10 @@
             return cmpIdDesc(a, b);
           };
         },
-        deadline: function (now) {
+        deadline: function (now, liveOf) {
           return function (a, b) {
+            var ea = endedRank(a, liveOf), eb = endedRank(b, liveOf);
+            if (ea !== eb) return ea - eb;
             var fa = isFinalCard(a), fb = isFinalCard(b);
             if (fa !== fb) return fa ? 1 : -1;
             var dl = cmpDeadlineAsc(a, b, now);
@@ -824,8 +845,10 @@
             return cmpIdDesc(a, b);
           };
         },
-        pri: function (now) {
+        pri: function (now, liveOf) {
           return function (a, b) {
+            var ea = endedRank(a, liveOf), eb = endedRank(b, liveOf);
+            if (ea !== eb) return ea - eb;
             var pa = priWeight(a), pb = priWeight(b);
             if (pa !== pb) return pa - pb;
             var dl = cmpDeadlineAsc(a, b, now);
@@ -871,14 +894,16 @@
         { id: 'done', label: '已完成' },
       ];
 
-      /** 单卡是否命中快捷筛选；liveOf(card) → 'ask'|'running'|'done'|null（同列表排序注入）；
-       *  flaggedOf(card) → bool（本地旗标，缺省恒 false）。 */
+      /** 单卡是否命中快捷筛选；liveOf(card) → 'ask'|'running'|'done'|'ended'|null（同列表排序注入）；
+       *  flaggedOf(card) → bool（本地旗标，缺省恒 false）。
+       *  已结束 = 不再跟进：不参与逾期/今天到期维度（否则收摊的旧账天天在「逾期」里报到）。 */
       function quickFilterHit(card, qf, liveOf, now, flaggedOf) {
         if (qf === 'flagged') return Boolean(flaggedOf) && flaggedOf(card) === true;
         if (qf === 'ask' || qf === 'running' || qf === 'done') {
           return Boolean(liveOf) && liveOf(card) === qf;
         }
         if (!card || isFinalCard(card)) return false;
+        if (typeof liveOf === 'function' && liveOf(card) === 'ended') return false;
         var dl = deadlineInfo(card.deadline, now);
         if (!dl) return false;
         if (qf === 'overdue') return dl.overdue;
@@ -910,8 +935,9 @@
         { id: 'ask', label: '等你决策' },
         { id: 'done', label: '已完成待闭环' },
       ];
-      /** 卡片按处理阶段分四列（禅道终态卡不出现在看板；段内按截止↑优先级↑排）。
-       *  liveOf(card) → 'ask'|'running'|'done'|null；null（含从未下发/进度已清）归「待处理」。 */
+      /** 卡片按处理阶段分四列（禅道终态与手动「已结束」都不出现在看板——阶段已终结，
+       *  留在「待处理」列会变成假待办；段内按截止↑优先级↑排）。
+       *  liveOf(card) → 'ask'|'running'|'done'|'ended'|null；null（含从未下发/进度已清）归「待处理」。 */
       function boardColumns(cards, liveOf, now) {
         var out = { todo: [], running: [], ask: [], done: [] };
         var list = Array.isArray(cards) ? cards : [];
@@ -919,6 +945,7 @@
           var c = list[i];
           if (!c || isFinalCard(c)) continue;
           var st = liveOf ? liveOf(c) : null;
+          if (st === 'ended') continue;
           if (st === 'ask') out.ask.push(c);
           else if (st === 'running') out.running.push(c);
           else if (st === 'done') out.done.push(c);
@@ -2299,8 +2326,10 @@
         statesFallback = map;
       }
 
-      /** 可手动修正的处理状态（与 LIVE_STATE_LABEL 的键一致；顺序即详情里的 chip 顺序）。 */
-      var LIVE_STATES = ['running', 'ask', 'done'];
+      /** 可手动修正的处理状态（与 LIVE_STATE_LABEL 的键一致；顺序即详情里的 chip 顺序）。
+       *  ended（已结束）是**只能人设**的终态——自动检测永远产不出它（见 deriveLiveState）；
+       *  人和 agent 的完成分开表达：done = agent 干完了，ended = 我验收/收摊了。 */
+      var LIVE_STATES = ['running', 'ask', 'done', 'ended'];
 
       /**
        * 手动修正处理状态（2026-10-27 用户要求：已完成状态偶尔会丢）。
@@ -2308,7 +2337,7 @@
        * {sessionId, state, at, manual:true, lastSeen}。
        * - resolveLiveState 优先取它，syncPersistedStates 不再改写（会话被删也不动：人明确
        *   断言过这个事项的状态，比会话存活更权威）；
-       * - 没有关联会话也能设（sessionId 为 null）——没处理过的卡也能先标「已完成」。
+       * - 没有关联会话也能设（sessionId 为 null）——没处理过的卡也能先标「已完成」/「已结束」。
        */
       function setManualState(activeId, card, state, now) {
         var key = sessionLinkKey(activeId, card);
@@ -2896,11 +2925,12 @@
       // watchGetSnapshot().states（sessionId → 'running'|'ask'|'done'|null），禅道卡片/chip
       // 渲染时查询；边沿事件触发常驻 toast（带「去看看」一键跳回会话）。
       var INTERACTION_LABEL = { approval: '审批', 'plan-review': '方案确认', question: '提问' };
-      var LIVE_STATE_LABEL = { running: '处理中', ask: '等你决策', done: '已完成' };
+      var LIVE_STATE_LABEL = { running: '处理中', ask: '等你决策', done: '已完成', ended: '已结束' };
       var LIVE_STATE_TITLE = {
         running: '关联会话正在处理这个任务',
         ask: '关联会话在等你决策，点击会话 chip 跳回',
         done: '关联会话已处理完成，去看看结果',
+        ended: '你已手动标记为已结束（不再跟进；选「自动」可恢复跟随会话）',
       };
 
       var watch = {
@@ -2978,6 +3008,7 @@
        * 活性推导（给卡片徽标/chip 状态点）：
        * ask（等你决策）> done（完成未读）> running（处理中）；idle（turn 结束且无事发生）
        * 与会话已删都返回 null——「已处理」这件事由会话 chip 表达，不叠徽标。
+       * ended（已结束）**永不在这里产生**：它只能由人手动标记（见 LIVE_STATES / setManualState）。
        */
       function deriveLiveState(next, live) {
         if (!live || !next) return null;
@@ -3346,9 +3377,9 @@
       }
 
       /**
-       * 处理中任务的活性徽标（M6）：处理中三点跳动 / 等你决策琥珀呼吸 / 已完成绿色对勾。
-       * state 来自 resolveLiveState（实时优先，持久化进度兜底）；since 有值时说明
-       * 是持久化兜底（DSH 重启后恢复的进度），title 里带「更新于」时间。
+       * 处理中任务的活性徽标（M6）：处理中三点跳动 / 等你决策琥珀呼吸 / 已完成绿色对勾 /
+       * 已结束灰色封存章（只能手动）。state 来自 resolveLiveState（实时优先，持久化进度
+       * 兜底）；since 有值时说明是持久化兜底（DSH 重启后恢复的进度），title 里带「更新于」时间。
        */
       function LiveBadge(props) {
         var s = props.state;
@@ -3362,8 +3393,18 @@
             ? h('span', { className: 'ztp-dots' }, h('b'), h('b'), h('b'))
             : s === 'ask'
               ? h('i', null)
-              : h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
-                  h('path', { className: 'ztp-live-ok', d: 'M4.2 8.7l2.5 2.5 5.1-5.7', stroke: 'currentColor', strokeWidth: 1.9, strokeLinecap: 'round', strokeLinejoin: 'round' })),
+              : s === 'ended'
+                ? h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+                    h('rect', {
+                      x: 2.1, y: 2.1, width: 11.8, height: 11.8, rx: 3.6,
+                      stroke: 'currentColor', strokeWidth: 1.1, opacity: 0.5,
+                    }),
+                    h('path', {
+                      className: 'ztp-live-seal', d: 'M5.1 8.2l2.1 2.1 3.9-4.3',
+                      stroke: 'currentColor', strokeWidth: 1.7, strokeLinecap: 'round', strokeLinejoin: 'round',
+                    }))
+                : h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+                    h('path', { className: 'ztp-live-ok', d: 'M4.2 8.7l2.5 2.5 5.1-5.7', stroke: 'currentColor', strokeWidth: 1.9, strokeLinecap: 'round', strokeLinejoin: 'round' })),
           LIVE_STATE_LABEL[s]);
       }
 
@@ -3385,19 +3426,20 @@
       function CardItem(props) {
         var c = props.card;
         var sel = props.selectable === true;
-        var due = boardDue(c.deadline);
-        var dlCls = (!isFinalCard(c) && due && due.tone) ? ' ' + due.tone : '';
-        var final = isFinalCard(c);
-        var dueText = (!final && due) ? due.text : fmtDate(c.deadline);
-        var dueTitle = c.deadline ? '截止 ' + fmtDate(c.deadline) : '';
-        if (!final && due && due.tone === 'overdue') dueTitle += ' · 已逾期 ' + (-due.days) + ' 天';
         var live = props.live || null;
+        var due = boardDue(c.deadline);
+        // 终态（禅道完成/关闭）与手动「已结束」都不再强调逾期/临期——已经收摊的事不该继续报警
+        var quiet = isFinalCard(c) || live === 'ended';
+        var dlCls = (!quiet && due && due.tone) ? ' ' + due.tone : '';
+        var dueText = (!quiet && due) ? due.text : fmtDate(c.deadline);
+        var dueTitle = c.deadline ? '截止 ' + fmtDate(c.deadline) : '';
+        if (!quiet && due && due.tone === 'overdue') dueTitle += ' · 已逾期 ' + (-due.days) + ' 天';
         return h('div', {
           className: 'ztp-card ztp-k-' + c.kind
             + (props.active ? ' on' : '')
             + (sel && props.selected ? ' sel' : '')
             + (props.hidden ? ' hiddenmark' : '')
-            + (live === 'ask' ? ' ztp-live-ask' : live === 'done' ? ' ztp-live-done' : ''),
+            + (live === 'ask' ? ' ztp-live-ask' : live === 'done' ? ' ztp-live-done' : live === 'ended' ? ' ztp-live-ended' : ''),
           'data-zcard': c.kind + '-' + c.id, // 选中滚动定位锚点（scrollCardIntoView）
           draggable: !sel,
           title: sel ? '点击选中/取消选中' : '点击查看详情，可拖拽到对话输入框',
@@ -3466,9 +3508,9 @@
                   onClick: function (e) { e.stopPropagation(); },
                   onChange: function (e) { if (props.onSetState) props.onSetState(c, e.target.value || null); },
                 }, h('option', { value: '' }, '状态：自动'),
-                  h('option', { value: 'running' }, '处理中'),
-                  h('option', { value: 'ask' }, '等你决策'),
-                  h('option', { value: 'done' }, '已完成')),
+                  LIVE_STATES.map(function (s) {
+                    return h('option', { key: s, value: s }, LIVE_STATE_LABEL[s]);
+                  })),
                 // 极速重发：有上次配置才显示——跳过弹层直接按上次的工作区/模型/指令下发
                 props.quickTitle ? h('button', {
                   className: 'ztp-btn icon', type: 'button',
@@ -3737,7 +3779,8 @@
         var d = detail[0] || {};
         var dlAll = card.deadline || d.deadline;
         var dl = deadlineInfo(dlAll);
-        var dlCls = (!isFinalCard(card) && dl)
+        // 已结束与禅道终态一样不再强调逾期/临期（收起提醒，只留日期）
+        var dlCls = (!isFinalCard(card) && props.live !== 'ended' && dl)
           ? (dl.overdue ? ' overdue' : dl.soon ? ' soon' : '') : '';
         // 图片以真实截图渲染（DetailImages），文本里的 [图片：xxx] 占位标记随之去掉
         var desc = stripImageMarkers(d.desc || card.descBrief || '');
@@ -3754,7 +3797,7 @@
             }, h(CopyIcon), '复制 Markdown')),
 
           h('div', { className: 'ztp-panel-card ztp-k-' + card.kind
-              + (props.live === 'ask' ? ' ztp-live-ask' : props.live === 'done' ? ' ztp-live-done' : '') },
+              + (props.live === 'ask' ? ' ztp-live-ask' : props.live === 'done' ? ' ztp-live-done' : props.live === 'ended' ? ' ztp-live-ended' : '') },
             h('div', { className: 'ztp-row' },
               h(KindTag, { kind: card.kind }),
               props.live ? h(LiveBadge, { state: props.live, since: props.liveSince || null, manual: Boolean(props.manual) }) : null,
@@ -3780,6 +3823,8 @@
           // 处理状态手动修正（2026-10-27 用户要求）：自动检测偶尔会丢（会话被删、DSH 重启、
           // 正看着的会话跑完宿主不置完成未读），这里手动覆盖；持久化在 states.v1，重开面板/
           // 重启后仍在。「自动」清除覆盖，回到跟随关联会话的自动检测。
+          // 「已结束」是只能人设的终态（done = agent 干完，ended = 我验收/收摊）：列表沉底灰化、
+          // 流程看板不显示；其余状态照旧参与筛选/排序/看板。
           h('div', { className: 'ztp-state-edit' },
             h('div', { className: 'ztp-state-head' },
               h('span', { className: 'ztp-state-label' }, '处理状态'),

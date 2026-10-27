@@ -25,7 +25,7 @@
 | M3 插入输入框 + 新会话下发 | ✅ 服务级 `setDraft` 真机可用；**描述里的截图改为真实图片附件**（`conversation.createDrafts` + `facade.addAttachments`，见 §4.1）；新会话下发待真机复验 |
 | M4 打磨 | 🔄 进行中（细节见各节）：2026-10-24 修会话超时静默空白 + 拉取失败 toast/错误视图；「处理」改弹层确认式（§4.2）+ 关联会话 chip（§4.3）+ 弹层闭包 bug 修复与下发时序优化 + 入口改左侧栏全局面板（§5.1）+「处理」不自动跳转（§4.2 末）；2026-10-25「插入对话」改弹层式新会话自动跳转不自动发（§4.5）；**同日新增列表三件套：搜索/排序/逾期高亮 + mine.v1 快照秒开 + 处理结果回读（§4.7，待真机目视确认）**；**自动轮询/在线离线状态/新指派提醒 + 列表多选批量下发已完成（§4.9，待真机目视确认）**——M4 既有欠账已清零；2026-10-27「新建对话」单入口 + 自动带入开关 + 动作行/工具栏界面整理（§4.19） |
 | M5 多账号 | ✅ 2026-10-24 完成：schema v2（accounts[]+activeId，旧格式自动迁移）、每账号独立 client/cookie/缓存、账号菜单切换/添加/按账号移除；**2026-10-25 补账号别名**（菜单内 ✎ 行内编辑 + 添加账号时可填 + chip/页脚优先显示别名，新 RPC `zentao.rename`，详见 §6 多账号节；host 改动需重装+重启）；测试全绿（multi 36 项 + client +5），待真机目视确认 |
-| M6 实时状态 | ✅ 2026-10-24 完成：**禅道卡片活性徽标（处理中/等你决策/已完成）+ 完成/等决策常驻提醒 toast（「去看看」跳回会话）**，信号来自 DSH 宿主 `uiSession.sessionStatus`（见 §4.4）。当天先做过一版「鲸鱼娘办公室」可视化面板（左侧栏第二面板 + 自绘 SVG 工位场景，角色参考 Neko3000/deepseek-whalechan），**用户看过后明确否决（「太垃圾」）已整体移除**——不要再做办公室/娘化角色类可视化；保留监控内核改为卡片上的活性体现。2026-10-25 补**处理进度持久化（states.v1）+ 不在面板列表事项的定时清理**（见 §4.6，待真机目视确认）；2026-10-27 补**处理状态手动修正**（§4.18：自动检测丢了可手改，持久化、不被自动评估覆盖）。仅 client 改动，⌘R 生效 |
+| M6 实时状态 | ✅ 2026-10-24 完成：**禅道卡片活性徽标（处理中/等你决策/已完成）+ 完成/等决策常驻提醒 toast（「去看看」跳回会话）**，信号来自 DSH 宿主 `uiSession.sessionStatus`（见 §4.4）。当天先做过一版「鲸鱼娘办公室」可视化面板（左侧栏第二面板 + 自绘 SVG 工位场景，角色参考 Neko3000/deepseek-whalechan），**用户看过后明确否决（「太垃圾」）已整体移除**——不要再做办公室/娘化角色类可视化；保留监控内核改为卡片上的活性体现。2026-10-25 补**处理进度持久化（states.v1）+ 不在面板列表事项的定时清理**（见 §4.6，待真机目视确认）；2026-10-27 补**处理状态手动修正**（§4.18：自动检测丢了可手改，持久化、不被自动评估覆盖），并新增**只能人手标记的「已结束」终态**（§4.22）。仅 client 改动，⌘R 生效 |
 
 测试命令：
 ```bash
@@ -622,7 +622,8 @@ board 模式占满主体渲染 `BoardView`，**tab 段/快捷筛选条/排序/�
 - **UI**：卡片动作行加 `<select class="ztp-statesel">`（状态：自动/处理中/等你决策/已完成，
   回显手动值，非空时 `.on` 高亮）→ `onSetState`；详情元信息卡下加 `.ztp-state-edit`
   （「自动 + 三态」chip 组，手动态高亮，`.ztp-state-hint` 标「手动设置 · 覆盖自动检测」，
-  底部说明持久化）。`LiveBadge` 加 `manual` prop：title 前缀「手动设置的状态：」+ `.manual`
+  底部说明持久化）。**2026-10-27 晚补第四态「已结束」（只能手动），见 §4.22：下拉与 chip
+  现在都是「自动 + 四态」。** `LiveBadge` 加 `manual` prop：title 前缀「手动设置的状态：」+ `.manual`
   内描边。两处都走 ZentaoPane 的 `setStateHere`（`useCallback([activeAcct])`）→
   `setManualState` → bump `stateRev` 重读 states.v1 → toast；清除时 `watchPoke()` 让自动
   评估立刻回填。
@@ -735,6 +736,35 @@ board 模式占满主体渲染 `BoardView`，**tab 段/快捷筛选条/排序/�
 - 测试：client **366 项**（+3 列表行为：相对截止「今天」+ title 完整日期 / 创建人不再占顶行 / #id 在
   LiveBadge 之前；+1 CSS 契约：选中卡彩条必须用 inset 阴影，防方条戳出圆角）。视觉仍用 `.preview/build.mjs` 的列表页（`list-dark/light/narrow.png`），
   在 1500/1000 宽、日/夜核对；**未在真机 DSH 内目视**。
+
+### 4.22 「已结束」人工终态（2026-10-27，用户要求：会话完成 ≠ 我收摊）
+
+用户原话「现在会话完成就是标记已完成，还要一个已结束的状态，由我来手动标记」。拍板：**仍显示在列表**
+（不收起）、**沉到最底 + 整卡灰化**；**已结束覆盖自动检测作为最终状态**（不叠加「已完成」）。
+**仅 client 改动，⌘R 生效**。
+
+- **状态模型**：`LIVE_STATES = ['running','ask','done','ended']`（顺序即下拉/chip 顺序）。
+  ended **只能人设**——`deriveLiveState` 永不产出它；`setManualState` 接受 ended，照旧写
+  `{sessionId, state, at, manual:true, lastSeen}`。`resolveLiveState` 的 manual 分支天然支持
+  （无需改判定）；`syncPersistedStates` 对 manual 条目照旧跳过，自动评估/会话删除都不会覆盖。
+  再处理换会话（saveSessionLink 清 states）与 72h 离场清理规则不变。
+- **UI**：LiveBadge 新增 `ended`：灰底灰字 + **方框对勾「封存章」**（rect + 对勾两步，不再用 done 的
+  check 动画）；title 写「你已手动标记为已结束（不再跟进；选「自动」可恢复跟随会话）」。卡片根节点
+  `ztp-live-ended`（opacity .6，hover/focus/选中恢复 .95；标题转 secondary；截止不再标红/临期，
+  回退完整日期）；详情面板 `ztp-panel-card.ztp-live-ended` 只压边框与标题色（读详情时不降可读性）。
+  状态下拉与详情 chip 都从 LIVE_STATES 生成（自动 + 四态），回显手动值。
+- **排序**：`endedRank(c, liveOf)` 最先比较——smart / deadline / pri 都把已结束沉到**最底**
+  （在 done 与禅道终态之后）；origin 保持禅道原序（显式「默认顺序」不掺状态）。为此 deadline/pri
+  的 maker 也接收 liveOf，但只用它判断 ended，ask/running/done 仍不掺（§4.7 的原则不变）。
+- **联动**：流程看板 `boardColumns` 跳过 ended（阶段已终结，留在「待处理」会变假待办）；
+  `quickFilterHit` 的逾期/今天到期维度排除 ended（收摊的旧账不再天天在「逾期」里报到，计数同步）；
+  已结束不进入「已完成」筛选（两个维度分开）。其余（搜索/批量/备注/复制/会话 chip）全部照常可用。
+- 测试：client **380 项**（+14：ended 落盘 / 压过实时 done·running / 自动不覆盖 / smart·deadline·pri
+  沉底 + origin 原序 / LiveBadge 封存章 / CardItem 灰化类与下拉回显 / DetailView 灰化与 chip 高亮 /
+  逾期与今天到期排除 / 已结束卡不标逾期 / 看板不入板 / 自动检测永不产出 ended / CSS 契约）。
+  下拉与 chip 的旧断言从 4 项改 5 项、chip 索引不变（done 仍是 [3]、ended 是 [4]）。
+  视觉用 `.preview/build.mjs` 的列表页（假数据加了一张 overdue 的已结束卡）在日/夜、1500/760 宽核对：
+  灰化后仍能读标题，封存章与 done 对勾一眼可分。
 
 ### 5. DSH 插件体系（本机实测）
 

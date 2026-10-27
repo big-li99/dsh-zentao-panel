@@ -112,6 +112,11 @@ check('CSS：prefers-reduced-motion 下关闭看板动效',
 check('CSS：选中卡左彩条用 inset 阴影（跟随圆角，方条不再戳出卡片）',
   /\.ztp-card\.on\{[^}]*box-shadow:inset 3px 0 0 0/.test(cssText)
   && /\.ztp-card\.on:before\{opacity:0;\}/.test(cssText));
+// 2026-10-27：「已结束」= 手动终态，灰色封存章 + 卡片灰化（hover/选中恢复可读）
+check('CSS：已结束徽标与卡片灰化已声明',
+  cssText.includes('.ztp-live.ended{') && cssText.includes('.ztp-card.ztp-live-ended{')
+  && cssText.includes('.ztp-card.ztp-live-ended:hover')
+  && cssText.includes('.ztp-panel-card.ztp-live-ended{'));
 
 // ── 左侧栏全局面板（main keyed slot + sidebar.panellist 图标行）──
 const mainReg = slotRegs.find((r) => r.opts.name === 'main');
@@ -698,6 +703,13 @@ check('deriveLiveState：running → running（处理中）',
 check('deriveLiveState：idle / 无状态 / 会话已删 → null（不叠徽标）',
   D({ running: false, pendingInteraction: null, completionUnread: false }, true) === null
   && D(null, true) === null && D({ running: true }, false) === null);
+check('deriveLiveState：自动检测永不产出 ended（已结束只能人设）',
+  [
+    { running: true, pendingInteraction: null, completionUnread: false },
+    { running: false, pendingInteraction: null, completionUnread: true },
+    { running: true, pendingInteraction: 'approval', completionUnread: true },
+    null,
+  ].every((n) => D(n, true) !== 'ended'));
 
 // 边沿事件：同帧 done+decision 只报 decision（行动需求已覆盖）
 const E = (p, n) => mod._test.watchEdges(p, n);
@@ -981,6 +993,44 @@ TT.setManualState('acct1', { kind: 'bug', id: 78 }, null, NOW);
 TT.setManualState('acct1', { kind: 'bug', id: 78 }, 'bogus', NOW);
 check('setManualState：null / 非法值 = 清除手动设置（回到自动检测）',
   TT.readStateMap()['acct1/bug-78'] === undefined);
+
+// ── 「已结束」手动终态（2026-10-27 用户要求）：只能人设、覆盖自动结果、排序沉底、看板隐藏 ──
+lsBacking.clear();
+TT.setManualState('acct1', { kind: 'bug', id: 323, title: '人工收尾卡' }, 'ended', NOW);
+check('setManualState：已结束可手动设置并落盘（manual 条目）',
+  TT.readStateMap()['acct1/bug-323'].state === 'ended'
+  && TT.readStateMap()['acct1/bug-323'].manual === true);
+check('resolveLiveState：已结束压过自动检测（实时 done/running 都不显示）',
+  TT.resolveLiveState({ sessionId: 's1' }, { ready: true, statusReady: true, states: { s1: 'done' } },
+    TT.readStateMap()['acct1/bug-323']).state === 'ended'
+  && TT.resolveLiveState({ sessionId: 's1' }, { ready: true, states: { s1: 'running' } },
+    TT.readStateMap()['acct1/bug-323']).state === 'ended');
+TT.syncPersistedStates([{ key: 'acct1/bug-323', sessionId: 's1', kind: 'bug', id: 323 }],
+  { s1: 'running' }, SOPT, NOW + 1000);
+check('syncPersistedStates：已结束不被自动评估改回 running/done',
+  TT.readStateMap()['acct1/bug-323'].state === 'ended');
+const endedLive = (c) => (c.id === 323 ? 'ended' : c.id === 1 ? 'done' : null);
+check('sortCards smart：已结束沉到最底（done 与禅道终态之后）',
+  TT.sortCards([
+    { kind: 'bug', id: 323, status: 'active' },              // 已结束
+    { kind: 'bug', id: 1, status: 'active' },                // done
+    { kind: 'bug', id: 2, status: 'closed' },                // 禅道终态
+    { kind: 'bug', id: 3, status: 'active', deadline: '2026-10-21' },
+  ], 'smart', NOW, endedLive).map((c) => c.id).join() === '3,1,2,323');
+check('sortCards deadline/pri：已结束也沉底（终态而非「活动」状态）',
+  TT.sortCards([
+    { kind: 'bug', id: 323, status: 'active', deadline: '2026-10-20', pri: 1 },
+    { kind: 'bug', id: 1, status: 'active', deadline: '2026-12-01', pri: 3 },
+    { kind: 'bug', id: 3, status: 'closed', pri: 2 },
+  ], 'deadline', NOW, endedLive).map((c) => c.id).join() === '1,3,323'
+  && TT.sortCards([
+    { kind: 'bug', id: 323, status: 'active', deadline: '2026-10-20', pri: 1 },
+    { kind: 'bug', id: 1, status: 'active', deadline: '2026-12-01', pri: 3 },
+    { kind: 'bug', id: 3, status: 'closed', pri: 2 },
+  ], 'pri', NOW, endedLive).map((c) => c.id).join() === '3,1,323');
+check('sortCards origin：保持禅道原序（显式「默认顺序」不掺状态）',
+  TT.sortCards([{ kind: 'bug', id: 323 }, { kind: 'bug', id: 1 }], 'origin', NOW, endedLive)
+    .map((c) => c.id).join() === '323,1');
 
 // saveSessionLink 值带 lastSeen；再处理会清掉旧进度记录
 lsBacking.clear();
@@ -1770,6 +1820,11 @@ check('quickFilterHit：截止维度（overdue/today）排除终态/无截止/�
   && TT.quickFilterHit(qfToday, 'today', null, nowTs) === true
   && TT.quickFilterHit(qfTomorrow, 'today', null, nowTs) === false
   && TT.quickFilterHit(qfTomorrow, 'overdue', null, nowTs) === false);
+check('quickFilterHit：已结束不参与逾期/今天到期（收摊的事不再报警）',
+  TT.quickFilterHit(qfOverdue, 'overdue', () => 'ended', nowTs) === false
+  && TT.quickFilterHit(qfToday, 'today', () => 'ended', nowTs) === false
+  && JSON.stringify(TT.quickFilterCounts([qfOverdue, qfToday], () => 'ended', nowTs))
+    === '{"ask":0,"running":0,"flagged":0,"overdue":0,"today":0,"done":0}');
 check('quickFilterCards：空筛选返回副本；按维度过滤',
   TT.quickFilterCards([qfToday, qfOverdue, qfTomorrow], null, null, nowTs).length === 3
   && TT.quickFilterCards([qfToday, qfOverdue, qfTomorrow], 'overdue', null, nowTs).map((c) => c.id).join() === '12');
@@ -1967,10 +2022,11 @@ const manTop2 = manNode2.children.find((n) => n && n.props && n.props.className 
 const manBadge2 = manTop2.children.find((n) => n && n.type === TT.LiveBadge);
 const manActs2 = manNode2.children.find((n) => n && n.props && n.props.className === 'ztp-acts');
 const manSel2 = flatNodes(manActs2.children).find((n) => n && n.type === 'select');
-check('CardItem：渲染「处理状态」下拉（回显手动值 + on + 四个选项）与带 manual 标记的徽标',
+check('CardItem：渲染「处理状态」下拉（回显手动值 + on + 五个选项）与带 manual 标记的徽标',
   Boolean(manSel2) && manSel2.props.value === 'done'
   && manSel2.props.className.split(' ').includes('on')
-  && manSel2.children.map((o) => o.props.value).join() === ',running,ask,done'
+  && manSel2.children.flat(3).filter((o) => o && o.type === 'option').map((o) => o.props.value).join()
+    === ',running,ask,done,ended'
   && manBadge2 && manBadge2.props.manual === true && manBadge2.props.state === 'done');
 manSel2.props.onChange({ target: { value: 'running' } });
 manSel2.props.onChange({ target: { value: '' } });
@@ -1996,9 +2052,10 @@ const manDv2 = TT.DetailView({
 const stateEdit2 = manDv2.children.find((n) => n && n.props && n.props.className === 'ztp-state-edit');
 const chipBox2 = stateEdit2.children.find((n) => n && n.props && n.props.className === 'ztp-state-chips');
 const chipBtns2 = chipBox2.children.flat(2).filter(Boolean);
-check('DetailView：处理状态 chip 组（自动 + 三态），手动值高亮且带「手动设置」提示',
-  chipBtns2.length === 4 && chipBtns2[0].children[0] === '自动'
+check('DetailView：处理状态 chip 组（自动 + 四态），手动值高亮且带「手动设置」提示',
+  chipBtns2.length === 5 && chipBtns2[0].children[0] === '自动'
   && !chipBtns2[0].props.className.split(' ').includes('on')
+  && chipBtns2.map((b) => b.children[0]).join() === '自动,处理中,等你决策,已完成,已结束'
   && chipBtns2[3].props.className.split(' ').includes('on')
   && stateEdit2.children[0].children.some((n) => n && n.props && n.props.className === 'ztp-state-hint'));
 chipBtns2[3].props.onClick();
@@ -2013,6 +2070,40 @@ const autoChips2 = autoDv2.children.find((n) => n && n.props && n.props.classNam
 check('DetailView：无手动状态时「自动」chip 高亮',
   autoChips2[0].props.className.split(' ').includes('on')
   && !autoChips2[3].props.className.split(' ').includes('on'));
+
+// ── 「已结束」手动终态（2026-10-27 用户要求：会话完成 = 已完成，另要一个人工收尾的状态）──
+// 只能手动（自动检测永不产出）；列表沉到最底 + 灰化；流程看板不显示；覆盖 done 作为最终状态。
+check('LIVE_STATES：已结束在可手动状态里，且排在最后（chip/下拉顺序）',
+  TT.LIVE_STATES.join() === 'running,ask,done,ended');
+const endedBadge = TT.LiveBadge({ state: 'ended', since: NOW, manual: true });
+const endedSvg = endedBadge.children.find((n) => n && n.type === 'svg');
+check('LiveBadge：已结束是灰色「封存章」（ended 类 + 方框 + 不再用 done 的对勾动画）',
+  endedBadge.props.className.split(' ').includes('ended')
+  && /已结束/.test(endedBadge.props.title)
+  && Boolean(endedSvg)
+  && endedSvg.children.some((n) => n && n.type === 'rect')
+  && !endedSvg.children.some((n) => n && n.props && n.props.className === 'ztp-live-ok'));
+const endedNode = TT.CardItem({
+  card: bc1, linkView: null, live: 'ended', liveManual: 'ended',
+  onToggleMark: () => {}, onCopyTitle: () => {}, onNewChat: () => {}, onDispatch: () => {},
+  onOpen: () => {}, onOpenSession: () => {},
+});
+const endedSel = flatNodes(endedNode.children).find((n) => n && n.type === 'select');
+check('CardItem：已结束卡片带 ztp-live-ended 灰化类，状态下拉回显「已结束」',
+  endedNode.props.className.split(' ').includes('ztp-live-ended')
+  && endedSel.props.value === 'ended'
+  && endedSel.children.flat(3).filter((o) => o && o.type === 'option').map((o) => o.props.value).join()
+    === ',running,ask,done,ended');
+const endedDv = TT.DetailView({ card: bc1, rpc: () => {}, live: 'ended', manual: 'ended', onBack: () => {} });
+const endedPanel = endedDv.children.find((n) => n && n.props && String(n.props.className).includes('ztp-panel-card'));
+const endedChips = endedDv.children.find((n) => n && n.props && n.props.className === 'ztp-state-edit')
+  .children.find((n) => n && n.props && n.props.className === 'ztp-state-chips')
+  .children.flat(2).filter(Boolean);
+check('DetailView：已结束面板灰化 + chip 高亮「已结束」',
+  endedPanel.props.className.split(' ').includes('ztp-live-ended')
+  && endedChips[4].children[0] === '已结束'
+  && endedChips[4].props.className.split(' ').includes('on')
+  && !endedChips[3].props.className.split(' ').includes('on'));
 
 // ── 完成闭环（2026-10-25 迭代）：finishUrl 深链 + 详情 done 态按钮 ──
 check('finishUrl：三类卡片替换为操作页（同 base 同 id）',
@@ -2277,19 +2368,21 @@ check('决策应答台：ask 态渲染（标题/说明/一键同意/自定义入
   && !askDvNo.children.some((n) => n && n.props && n.props.className === 'ztp-ask-box'));
 
 // ── 流程看板（2026-10-25 用户提案·方案 A）：四列泳道 ──
-const bdLive = (c) => ({ 11: 'running', 12: 'ask', 13: 'done', 15: 'running' }[c.id] || null);
+const bdLive = (c) => ({ 11: 'running', 12: 'ask', 13: 'done', 15: 'running', 77: 'ended' }[c.id] || null);
 const bdCards = [
   qfToday, qfOverdue, qfTomorrow, qfLive, // id 11,12,13,15 → running/ask/done/running
   bc1, // id 1 无活性 → todo
   { kind: 'bug', id: 99, title: '已关闭', status: 'closed' }, // 禅道终态 → 不入板
+  { kind: 'bug', id: 77, title: '已结束', status: 'active' }, // 手动已结束 → 不入板
 ];
 const bdCols = TT.boardColumns(bdCards, bdLive, nowTs);
-check('boardColumns：null→待处理 / running/ask/done 各归列 / 禅道终态不入板',
+check('boardColumns：null→待处理 / running/ask/done 各归列 / 禅道终态与已结束不入板',
   bdCols.todo.map((c) => c.id).join() === '1'
   && bdCols.running.map((c) => c.id).join() === '11,15'
   && bdCols.ask.map((c) => c.id).join() === '12'
   && bdCols.done.map((c) => c.id).join() === '13'
-  && !JSON.stringify(bdCols).includes('"id":99'));
+  && !JSON.stringify(bdCols).includes('"id":99')
+  && !JSON.stringify(bdCols).includes('"id":77'));
 check('boardColumns：段内按截止升序（running 列 11(今天) 在 15(无截止) 前）',
   bdCols.running[0].id === 11);
 let bdPicked = null;
@@ -2325,9 +2418,9 @@ check('BoardView：点缩略卡回传 onPick；逾期卡在 ask 列、截止 chi
 
 // ── 看板动效契约（2026-10-27）：换列检测 / 光点坐标 / 截止文案 / 站头字形 ──
 const laneMapA = TT.boardLaneMap(TT.boardColumns(bdCards, bdLive, nowTs));
-check('boardLaneMap：kind-id → 车道；禅道终态卡不入图',
+check('boardLaneMap：kind-id → 车道；禅道终态与已结束卡不入图',
   laneMapA['bug-11'] === 'running' && laneMapA['task-12'] === 'ask'
-  && laneMapA['bug-13'] === 'done' && !('bug-99' in laneMapA));
+  && laneMapA['bug-13'] === 'done' && !('bug-99' in laneMapA) && !('bug-77' in laneMapA));
 const noMotions = TT.boardMotions(null, laneMapA);
 check('boardMotions：首次挂载只建基线，不放动效（打开面板不满屏乱跳）',
   Object.keys(noMotions.cards).length === 0 && noMotions.moved === null);
@@ -2408,6 +2501,19 @@ const stMeta = stTop.children.find((n) => n && n.props && n.props.className === 
 const stDl = stMeta.children.find((n) => n && n.props && String(n.props.className).startsWith('ztp-dl'));
 check('CardItem：截止用相对说法（今天），完整日期进 title',
   Boolean(stDl) && textOf(stDl) === '今天' && stDl.props.title.includes(todayIso));
+const endedDueNode = TT.CardItem({
+  card: { kind: 'bug', id: 902, title: '已结束的逾期卡', status: 'active', deadline: '2020-01-01' },
+  linkView: null, live: 'ended',
+  onOpen: () => {}, onOpenSession: () => {}, onToggleMark: () => {}, onCopyTitle: () => {},
+  onNewChat: () => {}, onDispatch: () => {},
+});
+const endedDueMeta = endedDueNode.children
+  .find((n) => n && n.props && n.props.className === 'ztp-top').children
+  .find((n) => n && n.props && n.props.className === 'ztp-top-meta');
+const endedDue = endedDueMeta.children.find((n) => n && n.props && String(n.props.className).startsWith('ztp-dl'));
+check('CardItem：已结束卡不强调逾期（无 overdue 类，回退完整日期，title 不带逾期天数）',
+  Boolean(endedDue) && !endedDue.props.className.split(' ').includes('overdue')
+  && textOf(endedDue) === '2020-01-01' && !endedDue.props.title.includes('逾期'));
 check('CardItem：创建人不再占卡片顶行（下沉详情；搜索仍按卡片数据命中）',
   !textOf(stMeta).includes('张三'));
 const stIdIdx = stTop.children.findIndex((n) => n && n.props && n.props.className === 'ztp-id');
