@@ -6,6 +6,9 @@ node_modules/
 .env
 .env.*
 
+# 本机预览产物（看板设计评审用的静态渲染 + 截图）
+.preview/
+
 # 测试落盘的配置（DSH_HOME 指向 /tmp 时不落这里，防手滑）
 config.json
 

@@ -554,6 +554,9 @@ continueLinked（continueInSession 链路，带【继续处理 禅道X #id】前
 
 ### 4.16 流程看板（2026-10-25，用户提案·方案 A：四列泳道全局视图）
 
+> 2026-10-27 视觉/动效重做见 **§4.20**（以下为初版设计记录；缩略卡已去掉 KindTag、
+> 四列已改为满幅管线工作面，动效不再「不做」）。
+
 用户自己提的 idea（流程图界面展示正在进行的任务，先出方案再拍板——选了泳道看板）。
 head 加「列表 / 流程」视图切换（`.ztp-viewseg`，`viewMode` 入 paneCache.view 持久化）；
 board 模式占满主体渲染 `BoardView`，**tab 段/快捷筛选条/排序/批量入口都隐藏**（board 是
@@ -664,6 +667,74 @@ board 模式占满主体渲染 `BoardView`，**tab 段/快捷筛选条/排序/�
 - 测试：client 349 项（新增 16：CardItem 单入口与动作行分层 / 弹层默认勾选与文案 / 取消后空白
   文案 + 附加指令收起 / send 回传 carry 与清空 md/images / 批量弹层标题且无开关 / 空白会话 3 项 / carry 偏好 3 项）。
   布局用 headless Chrome 静态预览（日/夜 token + 1280/820/560 三档宽度）核对，未在真机 DSH 内目视。
+
+### 4.20 流程看板视觉/动效重做（2026-10-27，用户要求「加点动画 好好设计一下」）
+
+用户看的是「流程」视图（§4.16 的四列泳道），原样是四个带边框的盒子 + 每张卡带 KindTag。
+本次把它当一块「四站管线」重做，**只动 client**，⌘R 生效；数据/RPC/分列规则零变化。
+
+- **视觉**：`.ztp-board` 变成满幅工作面（bg-layer-1、无外框），四列用 `.5px` 发丝线分隔；
+  每列顶部 2px `--ztp-lane` 色带拼成一根四段状态条（todo=tertiary / running=business /
+  ask=warn / done=success），站头背景 9% 同色向下渐隐（ask 13%）。站头 = 状态字形
+  `.ztp-bglyph`（todo 空心圈 / running 三根均衡器条 / ask 琥珀点+扩散环 / done 对勾）+
+  站名 + 右对齐 `.ztp-bcol-n`（tab 数字，前一条 1px 分隔线）。列体 `.ztp-bcol-b` 独立滚动，
+  分组头 `.ztp-bgrp` 吸顶（-6px 负边距盖住 gap；`background: bg-layer-1`）。
+- **卡片** `.ztp-bcard` 改为 `<button>`（键盘可达 + focus-visible 主题色描边）：不再放 KindTag
+  （分组头已说明类型），元信息行 `#id` + 旗标 + P1/P2 + done 对勾 + `.ztp-bdl` 相对截止；
+  两行标题；hover 时类型色 4% 底 + 左彩条上下延伸 + 右侧箭头滑入；done 列标题降为 secondary。
+- **截止文案** `boardDue(deadline, now)`：按日历天 → 逾期 N 天 / 今天 / 明天 / N 天后 /
+  MM-DD（**跨年才带年份**）；now 可注入。与列表的完整日期不同，看板空间小、扫描优先。
+- **动效只看「变了什么」**（用户此前否决过装饰性可视化，这条是硬约束）：
+  - 分列基线 `boardLaneMap(cols)` → `{key: lane}`；`boardMotions(prev, next)` 产出
+    `cards[key] = {kind:'new'|'move', from, dir:'fwd'|'back'}` 与 `moved`（一次刷新只留
+    最后一颗光点）。BoardView 用 `useRef` 存基线、`useEffect([sig])` 比对（sig = 稳定的
+    key:lane 串）；**首次挂载只建基线不放动画**（打开面板不满屏乱跳），900ms 后清标记
+    （计时器随 effect cleanup）；无变化时 `setMarks(NO_BOARD_MARKS)` 同一对象 → React bail out。
+  - CSS：换列卡 `.mv-fwd/.mv-back`（从原站方向 14px 滑入 .4s）、新卡 `.is-new`、
+    光点 `.ztp-pkt`（`--ztp-x1/--ztp-x2` 由 `laneCenterPct(lane)` 给，top 2px 沿色带飞 .62s）、
+    目标站 `.hot`（色带闪 .8s + 计数 bump）、在跑卡左彩条 `ztp-spine` 下滑高光 2.6s、
+    ask 站头 `ztp-warnrib` 呼吸 3.2s、running 色带 `ztp-ribbon` 流光 2.8s、done 站头对勾
+    `ztp-draw` 描一遍。`@media (prefers-reduced-motion:reduce)` 全部 `animation:none` + 隐藏光点。
+  - **⚠️ 测试替身没有 `React.useRef`**：顶部 `useRef = React.useRef || (init)=>({current:init})`，
+    退化后每次渲染新盒子；effect 在假 React 里是空实现，契约渲染只跑一次，不影响断言。
+- **视图切换**：`.ztp-viewseg` 加 `.ztp-viewseg-ind` 滑块（`.is-board` 时 translateX(100%)），
+  按钮只留文字色/字重（不再各自换底）。
+- 测试：client **362 项**（当时；§4.21 后 366 项。+13：boardLaneMap / boardMotions 首次·换列·新卡·moved 取最后一个 /
+  laneCenterPct / boardDue 四档 + 跨年 + 坏值 / BoardGlyph 四态 / done 对勾与箭头 / 空车道文案 /
+  CSS 动效与 reduced-motion 契约）。视觉用本地 `.preview/build.mjs`（真实 CSS + BoardView 序列化，
+  已 gitignore）+ headless Chrome 在 1500/980 宽、日/夜/空板/动效暂停帧核对；**未在真机 DSH 内目视**。
+
+### 4.21 列表侧视觉收口（2026-10-27，用户要求「列表侧也优化下样式」）
+
+看板重做后，列表仍是旧的「圆角浮卡 + 阴影 + 满屏实心蓝按钮」。本次只动 client 样式与卡片顶行
+信息顺序（**零行为变化**：筛选/排序/批量/下发/本地标记全部原样），与看板共用一套语言。
+
+- **表面层级**：`.ztp-list-col` 铺 `bg-layer-1`（列表工作面），卡片改 `bg-layer-2` + 8px 圆角 +
+  `.5px` 发丝边框，和看板的「工作面 + 卡」一致；列表/详情之间的竖线收到 `border-l2`。
+- **卡片** `.ztp-card`：去掉 hover 阴影与浮起，改为类型色 4% 底 + `border-l4`（同看板缩略卡）；
+  左彩条 2px 收短（top/bottom 12px），hover 伸展到 6px；选中态从「类型色」改成**业务蓝**
+  （背景 8% + 描边 + 右移 2px），避免 bug 卡一选中整张变红；类型仍由彩条 + 标签表达。
+  **⚠️ 选中态的左彩条不要再用伪元素画满高**（2026-10-27 用户截图反馈：3px 方条从 8px 圆角的
+  左上/左下戳出去）——改成 `box-shadow: inset 3px 0 0 0 var(--ztp-c), inset 0 0 0 1px business`，
+  inset 阴影天然跟随 border-radius；伪元素在 `.on` 下 `opacity:0`。看板缩略卡加 `overflow:hidden`，
+  hover 时上下伸展的彩条同样不会顶出圆角。
+  `:focus-visible` 主题色描边。
+- **顶行身份列**：顺序固定为 `KindTag → #id → 禅道外链 → 旗标 → LiveBadge`（原先把 LiveBadge
+  放在 #id 前，有活性时 ID 会被推走，列表里 #id 上下对不齐）；顶行右组 = 状态 chip + P1/P2 徽标
+  （P3/P4 仍是安静文本）+ `严重 N` + 相对截止 +「查看中」；**创建人从卡片移除**（详情有，搜索
+  `matchSearch` 仍按数据命中）。截止复用 `boardDue`（今天/明天/N 天后/逾期 N 天，跨年才带年份），
+  `title` 里保留完整日期与逾期天数；终态卡仍显示原始日期、不标逾期。逾期改为红色小胶囊。
+- **动作行**：`.ztp-acts` 加 `border-top: .5px border-l1` 与 `padding-top:7px`，和内容分开；
+  按钮从 27/11.5 收到 26/11，图标 23×23；**卡片内主操作**（`.ztp-acts .ztp-btn.primary`）静息
+  是蓝色描边 + 蓝字，hover / `:focus-visible` 才填 `button-primary-fill`（弹层里的 `.ztp-btn.primary`
+  仍是实心，不受影响）。
+- **「查看中」**：从右上角折角（会盖住截止）改成顶行内联小标签（业务蓝 13% 底 + 蓝字），
+  仍是 `.ztp-top-meta` 的最后一个子节点（测试契约不变）。
+- **其他**：`.ztp-tag` 收成 17px 高 / 10.5px / 5px 圆角的标签；`.ztp-skel` 88px + 8px 圆角；
+  `.ztp-live-ask/done` 的卡片描边加 `:not(.on)`，选中态永远最优先。
+- 测试：client **366 项**（+3 列表行为：相对截止「今天」+ title 完整日期 / 创建人不再占顶行 / #id 在
+  LiveBadge 之前；+1 CSS 契约：选中卡彩条必须用 inset 阴影，防方条戳出圆角）。视觉仍用 `.preview/build.mjs` 的列表页（`list-dark/light/narrow.png`），
+  在 1500/1000 宽、日/夜核对；**未在真机 DSH 内目视**。
 
 ### 5. DSH 插件体系（本机实测）
 

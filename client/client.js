@@ -29,6 +29,12 @@
       if (!React || typeof React.createElement !== 'function') return module.exports;
       var h = React.createElement;
       var useState = React.useState, useEffect = React.useEffect, useMemo = React.useMemo, useCallback = React.useCallback;
+      // useRef 只在看板换列检测里用；测试替身没有它时退化成「每次渲染新盒子」——
+      // 看板在测试里只渲染一次、effect 是空实现，退化不影响契约断言。
+      var useRef = React.useRef || function (init) { return { current: init }; };
+      // 换列标记必须在浏览器绘制前落进 DOM（useEffect 是绘制后，卡片会先闪一帧终点态，
+      // 再回到起点重播滑入）。没有 useLayoutEffect 的环境（测试替身）退回 useEffect。
+      var useLayoutEffect = React.useLayoutEffect || useEffect;
 
       var CHANNEL = '/dsh-zentao-panel';
       // main keyed slot 的 key 与 sidebar.panellist 的 id 必须同值：
@@ -81,30 +87,112 @@
         '.ztp-qf.on{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);border-color:transparent;}',
         '.ztp-qf.on:hover{background:var(--dsw-alias-button-primary-hover);color:var(--dsw-alias-label-primary-foreground);}',
         '.ztp-qf .ztp-num{font-size:10px;opacity:.85;}',
-        '.ztp-viewseg{flex:none;display:inline-flex;align-items:center;gap:1px;height:28px;box-sizing:border-box;padding:2px;border:.5px solid var(--dsw-alias-border-l3);border-radius:999px;background:var(--dsw-alias-bg-layer-1);}',
-        '.ztp-view-btn{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;line-height:1;height:22px;padding:0 11px;border-radius:999px;cursor:pointer;}',
-        '.ztp-view-btn:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover);}',
-        '.ztp-view-btn.on{background:var(--dsw-alias-interactive-bg-hover-solid);color:var(--dsw-alias-label-primary);font-weight:500;}',
-        // 流程看板：四列泳道（不做装饰动画，信息密度优先）
-        '.ztp-board{flex:1;display:flex;gap:10px;padding:12px 14px;min-height:0;overflow-x:auto;}',
-        '.ztp-bcol{flex:1;min-width:180px;display:flex;flex-direction:column;min-height:0;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-alias-radius-lg,var(--dsw-radius-lg));background:var(--dsw-alias-bg-layer-1);overflow:hidden;}',
-        '.ztp-bcol-h{flex:none;display:flex;align-items:center;gap:6px;padding:8px 10px;font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary);border-bottom:.5px solid var(--dsw-alias-border-l2);}',
-        '.ztp-bcol-dot{width:7px;height:7px;border-radius:50%;flex:none;}',
-        '.ztp-bcol-dot.todo{background:var(--dsw-alias-label-tertiary);}',
-        '.ztp-bcol-dot.running{background:var(--dsw-alias-state-business-primary);}',
-        '.ztp-bcol-dot.ask{background:var(--dsw-alias-state-warn-primary);}',
-        '.ztp-bcol-dot.done{background:var(--dsw-alias-state-success-primary);}',
-        '.ztp-bcol-h .ztp-num{font-weight:400;opacity:.75;}',
-        '.ztp-bcol-b{flex:1;overflow-y:auto;padding:8px;display:flex;flex-direction:column;gap:6px;}',
-        '.ztp-bcol-empty{color:var(--dsw-alias-label-caption);text-align:center;padding:14px 0;font-size:12px;}',
-        '.ztp-bgrp{display:flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;color:var(--dsw-alias-label-secondary);padding:2px 2px 0;}',
-        '.ztp-bgrp-dot{width:6px;height:6px;border-radius:50%;background:var(--ztp-c,var(--dsw-alias-label-tertiary));}',
+        // 视图切换：滑块指示器（列表 ⇄ 流程），thumb 自己滑过去而不是两个按钮换底色
+        '.ztp-viewseg{position:relative;flex:none;display:inline-flex;align-items:center;gap:1px;height:28px;box-sizing:border-box;padding:2px;border:.5px solid var(--dsw-alias-border-l3);border-radius:999px;background:var(--dsw-alias-bg-layer-1);}',
+        '.ztp-viewseg-ind{position:absolute;left:2px;top:2px;bottom:2px;width:calc(50% - 2px);border-radius:999px;background:var(--dsw-alias-interactive-bg-hover-solid);transition:transform .18s cubic-bezier(.22,.61,.36,1);pointer-events:none;}',
+        '.ztp-viewseg.is-board .ztp-viewseg-ind{transform:translateX(100%);}',
+        '.ztp-view-btn{position:relative;z-index:1;appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:11.5px;line-height:1;height:22px;padding:0 11px;border-radius:999px;cursor:pointer;transition:color .18s ease;}',
+        '.ztp-view-btn:hover{color:var(--dsw-alias-label-primary);}',
+        '.ztp-view-btn.on{color:var(--dsw-alias-label-primary);font-weight:500;}',
+
+        // ───────── 流程看板（2026-10-27 视觉/动效重做）：四站管线 ─────────
+        // 整块是一张满幅工作面：四条泳道用发丝线分隔，顶部 2px 色带连成一根
+        // 四段状态条（灰=排队 / 蓝=在跑 / 琥珀=等你 / 绿=待闭环）。换列时一颗
+        // 光点沿色带从原站走到新站、卡片从原方向的滑入、站头闪一下——只表达
+        // 「刚发生了什么」的信息性动效；静止时不做任何常驻漂浮/呼吸装饰。
+        // 全部动画在 prefers-reduced-motion 下关闭。
+        '.ztp-board{position:relative;flex:1;display:flex;min-height:0;overflow-x:auto;overflow-y:hidden;background:var(--dsw-alias-bg-layer-1);scrollbar-width:thin;}',
+        '.ztp-bcol{position:relative;flex:1 1 0;min-width:196px;display:flex;flex-direction:column;min-height:0;--ztp-lane:var(--dsw-alias-label-tertiary);animation:ztp-lane-in .24s cubic-bezier(.22,.61,.36,1) both;}',
+        '.ztp-bcol + .ztp-bcol{border-left:.5px solid var(--dsw-alias-border-l2);}',
+        '.ztp-bcol:nth-child(2){animation-delay:.035s;}',
+        '.ztp-bcol:nth-child(3){animation-delay:.07s;}',
+        '.ztp-bcol:nth-child(4){animation-delay:.105s;}',
+        '@keyframes ztp-lane-in{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}',
+        '.ztp-bcol.c-running{--ztp-lane:var(--dsw-alias-state-business-primary);}',
+        '.ztp-bcol.c-ask{--ztp-lane:var(--dsw-alias-state-warn-primary);}',
+        '.ztp-bcol.c-done{--ztp-lane:var(--dsw-alias-state-success-primary);}',
+        // 站头：顶部色带 + 状态字形 + 站名 + 右对齐计数（tab 数字，变化时落一下）
+        '.ztp-bcol-h{position:relative;flex:none;display:flex;align-items:center;gap:7px;height:34px;padding:0 12px;box-sizing:border-box;border-bottom:.5px solid var(--dsw-alias-border-l2);background:linear-gradient(to bottom,color-mix(in srgb,var(--ztp-lane) 9%,transparent),transparent);}',
+        '.ztp-bcol-h:before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--ztp-lane);opacity:.55;}',
+        '.ztp-bcol.c-running.has .ztp-bcol-h:before{opacity:.9;background-image:linear-gradient(90deg,transparent,rgba(255,255,255,.6),transparent);background-size:40% 100%;background-repeat:no-repeat;animation:ztp-ribbon 2.8s linear infinite;}',
+        '@keyframes ztp-ribbon{from{background-position:-50% 0}to{background-position:150% 0}}',
+        '.ztp-bcol.c-ask.has .ztp-bcol-h:before{animation:ztp-warnrib 3.2s ease-in-out infinite;}',
+        '.ztp-bcol.c-ask .ztp-bcol-h{background:linear-gradient(to bottom,color-mix(in srgb,var(--ztp-lane) 13%,transparent),transparent);}',
+        '@keyframes ztp-warnrib{0%,100%{opacity:.5;box-shadow:none}50%{opacity:1;box-shadow:0 1px 9px color-mix(in srgb,var(--ztp-lane) 65%,transparent)}}',
+        '.ztp-bcol.hot .ztp-bcol-h:before{animation:ztp-station .8s ease-out;}',
+        '@keyframes ztp-station{0%{opacity:1;box-shadow:0 0 0 0 var(--ztp-lane)}30%{opacity:1;box-shadow:0 0 12px 2px color-mix(in srgb,var(--ztp-lane) 55%,transparent)}100%{opacity:.55;box-shadow:none}}',
+        // 站头字形：排队=空心圈 / 在跑=均衡器（有活才跳）/ 等你=琥珀点+扩散环 / 收尾=对勾（到达时描一遍）
+        '.ztp-bglyph{width:14px;height:14px;flex:none;display:inline-flex;align-items:center;justify-content:center;gap:1.5px;color:var(--ztp-lane);}',
+        '.ztp-bglyph.todo:before{content:"";width:6px;height:6px;border:1.3px solid currentColor;border-radius:50%;opacity:.7;}',
+        '.ztp-bglyph.running b{width:2px;height:5px;border-radius:1px;background:currentColor;opacity:.85;}',
+        '.ztp-bglyph.running b:nth-child(2){height:9px;}',
+        '.ztp-bglyph.running b:nth-child(3){height:6px;}',
+        '.ztp-bglyph.running.live b{animation:ztp-eq 1.1s ease-in-out infinite;}',
+        '.ztp-bglyph.running.live b:nth-child(2){animation-delay:.18s;}',
+        '.ztp-bglyph.running.live b:nth-child(3){animation-delay:.36s;}',
+        '@keyframes ztp-eq{0%,100%{transform:scaleY(.5);opacity:.5}50%{transform:scaleY(1);opacity:1}}',
+        '.ztp-bglyph.ask{position:relative;}',
+        '.ztp-bglyph.ask i{width:6px;height:6px;border-radius:50%;background:currentColor;}',
+        '.ztp-bglyph.ask.live i{animation:ztp-askdot 2.6s ease-in-out infinite;}',
+        '.ztp-bglyph.ask.live:after{content:"";position:absolute;left:3px;top:3px;width:8px;height:8px;border-radius:50%;border:1px solid currentColor;animation:ztp-halo 2.6s ease-out infinite;}',
+        '@keyframes ztp-askdot{0%,100%{opacity:.6}50%{opacity:1}}',
+        '@keyframes ztp-halo{0%{transform:scale(.5);opacity:.65}75%,100%{transform:scale(1.35);opacity:0}}',
+        '.ztp-bglyph.done svg{width:12px;height:12px;}',
+        '.ztp-bglyph.done svg path{stroke-dasharray:18;}',
+        '.ztp-bcol.hot .ztp-bglyph.done svg path{animation:ztp-draw .5s .1s ease-out both;}',
+        '@keyframes ztp-draw{from{stroke-dashoffset:18}to{stroke-dashoffset:0}}',
+        '.ztp-bcol-n{margin-left:auto;display:inline-flex;align-items:center;gap:4px;font-size:11.5px;line-height:1;font-weight:500;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary);}',
+        '.ztp-bcol-n:before{content:"";width:1px;height:10px;background:var(--dsw-alias-border-l3);}',
+        '.ztp-bcol-n.zero{color:var(--dsw-alias-label-caption);}',
+        '.ztp-bcol.hot .ztp-bcol-n{animation:ztp-bump .34s cubic-bezier(.3,1.4,.5,1);}',
+        '@keyframes ztp-bump{0%{transform:translateY(3px);opacity:.4}100%{transform:none;opacity:1}}',
+        '.ztp-bcol-b{flex:1;overflow-y:auto;overflow-x:hidden;padding:6px 10px 16px;display:flex;flex-direction:column;gap:6px;scrollbar-width:thin;scrollbar-gutter:stable;}',
+        '.ztp-bcol-empty{margin:auto 0;padding:24px 8px;text-align:center;font-size:11.5px;line-height:1.6;color:var(--dsw-alias-label-caption);}',
+        // 类型分组头：滚动时吸顶，长列里也始终知道自己在看哪类事项
+        '.ztp-bgrp{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:6px;margin:-6px -10px 0;padding:9px 10px 4px;font-size:10.5px;font-weight:600;letter-spacing:.03em;color:var(--dsw-alias-label-tertiary);background:var(--dsw-alias-bg-layer-1);}',
+        '.ztp-bgrp-dot{width:5px;height:5px;border-radius:50%;background:var(--ztp-c,var(--dsw-alias-label-tertiary));box-shadow:0 0 0 2px color-mix(in srgb,var(--ztp-c,var(--dsw-alias-label-tertiary)) 16%,transparent);}',
         '.ztp-bgrp .ztp-num{font-weight:400;opacity:.7;}',
-        '.ztp-bcard{border:.5px solid var(--dsw-alias-border-l3);border-left:3px solid var(--ztp-c,var(--dsw-alias-border-l3));border-radius:var(--dsw-alias-radius-sm,var(--dsw-radius-sm));background:var(--dsw-alias-bg-layer-2);padding:7px 9px;cursor:pointer;}',
-        '.ztp-bcard:hover{border-color:var(--dsw-alias-border-l4);background:var(--dsw-alias-interactive-bg-hover);}',
-        '.ztp-bcard-t{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--dsw-alias-label-secondary);flex-wrap:wrap;}',
-        '.ztp-bcard-title{margin-top:3px;font-size:12px;line-height:1.4;color:var(--dsw-alias-label-primary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;}',
-        '@media (max-width:719px){.ztp-search{width:110px;}}',
+        // 缩略卡：类型彩条（左）+ 元信息行（#id / P / 截止）+ 两行标题 + hover 才出现的进入箭头
+        '.ztp-bcard{position:relative;display:block;width:100%;box-sizing:border-box;overflow:hidden;text-align:left;font:inherit;color:inherit;appearance:none;border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-alias-radius-md,var(--dsw-radius-md));background:var(--dsw-alias-bg-layer-2);padding:7px 26px 8px 12px;margin:0;cursor:pointer;transition:border-color .14s ease,background .14s ease;}',
+        '.ztp-bcard:before{content:"";position:absolute;left:0;top:6px;bottom:6px;width:2px;border-radius:0 2px 2px 0;background:var(--ztp-c,var(--dsw-alias-border-l3));opacity:.9;transition:top .16s ease,bottom .16s ease;}',
+        '.ztp-bcard:hover{border-color:var(--dsw-alias-border-l4);background:color-mix(in srgb,var(--ztp-c,var(--dsw-alias-label-tertiary)) 4%,var(--dsw-alias-bg-layer-2));}',
+        '.ztp-bcard:hover:before{top:3px;bottom:3px;}',
+        '.ztp-bcard:active{background:var(--dsw-alias-interactive-bg-active,var(--dsw-alias-interactive-bg-hover));}',
+        '.ztp-bcard:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px;}',
+        '.ztp-bcard-t{display:flex;align-items:center;gap:6px;min-width:0;font-size:11px;line-height:1.2;color:var(--dsw-alias-label-tertiary);}',
+        '.ztp-bcard-t .ztp-id{font-size:11px;color:var(--dsw-alias-label-tertiary);}',
+        '.ztp-bpri{flex:none;font-size:9.5px;font-weight:600;line-height:14px;height:14px;padding:0 4px;border-radius:3px;background:color-mix(in srgb,var(--dsw-alias-label-tertiary) 12%,transparent);color:var(--dsw-alias-label-secondary);}',
+        '.ztp-bpri.p1{background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 14%,transparent);color:var(--dsw-alias-state-error-primary);}',
+        '.ztp-bpri.p2{background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 15%,transparent);color:var(--dsw-alias-state-warn-primary);}',
+        '.ztp-bok{flex:none;display:inline-flex;width:12px;height:12px;margin-left:auto;color:var(--dsw-alias-state-success-primary);}',
+        '.ztp-bok svg{width:12px;height:12px;display:block;}',
+        '.ztp-bok + .ztp-bdl{margin-left:0;}',
+        '.ztp-bdl{margin-left:auto;flex:none;font-variant-numeric:tabular-nums;white-space:nowrap;color:var(--dsw-alias-label-tertiary);}',
+        '.ztp-bdl.soon{color:var(--dsw-alias-state-warn-primary);font-weight:600;}',
+        '.ztp-bdl.overdue{color:var(--dsw-alias-state-error-primary);font-weight:600;background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 12%,transparent);border-radius:3px;padding:1px 5px;margin-right:-2px;}',
+        '.ztp-bcard-title{margin-top:3px;font-size:13px;line-height:1.4;color:var(--dsw-alias-label-primary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;}',
+        '.ztp-bcol.c-done .ztp-bcard-title{color:var(--dsw-alias-label-secondary);}',
+        '.ztp-bcard-go{position:absolute;right:8px;top:50%;width:12px;height:12px;margin-top:-6px;color:var(--dsw-alias-label-caption);opacity:0;transform:translateX(-2px);transition:opacity .14s ease,transform .14s ease;pointer-events:none;}',
+        '.ztp-bcard:hover .ztp-bcard-go,.ztp-bcard:focus-visible .ztp-bcard-go{opacity:.9;transform:none;}',
+        '.ztp-bcard-go svg{width:12px;height:12px;display:block;}',
+        // 换列/新卡：只给真正变了的卡片一个短促的落位动效（从原站方向滑入）
+        '.ztp-bcard.mv-fwd{animation:ztp-slot-fwd .4s cubic-bezier(.22,.61,.36,1) both;}',
+        '.ztp-bcard.mv-back{animation:ztp-slot-back .4s cubic-bezier(.22,.61,.36,1) both;}',
+        '@keyframes ztp-slot-fwd{from{opacity:0;transform:translateX(-14px)}to{opacity:1;transform:none}}',
+        '@keyframes ztp-slot-back{from{opacity:0;transform:translateX(14px)}to{opacity:1;transform:none}}',
+        '.ztp-bcard.is-new{animation:ztp-card-new .32s ease-out both;}',
+        '@keyframes ztp-card-new{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}',
+        // 在跑车道：每张卡的左彩条上有一道缓慢下滑的高光（这张确实在被处理）
+        '.ztp-bcol.c-running .ztp-bcard:after{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;border-radius:2px;background:linear-gradient(to bottom,transparent,rgba(255,255,255,.85),transparent);background-size:100% 48%;background-repeat:no-repeat;opacity:.55;animation:ztp-spine 2.6s linear infinite;pointer-events:none;}',
+        '.ztp-bcol.c-running .ztp-bcard:nth-child(2n):after{animation-delay:-1.3s;}',
+        '@keyframes ztp-spine{from{background-position:0 -70%}to{background-position:0 170%}}',
+        // 换列光点：沿顶部状态条从原站走到新站（left 由 inline --ztp-x1/--ztp-x2 给出）
+        '.ztp-pkt{position:absolute;top:2px;left:0;width:5px;height:5px;border-radius:50%;z-index:3;pointer-events:none;background:var(--ztp-pkt-c);box-shadow:0 0 0 2px color-mix(in srgb,var(--ztp-pkt-c) 18%,transparent),0 0 10px color-mix(in srgb,var(--ztp-pkt-c) 60%,transparent);animation:ztp-pkt .62s cubic-bezier(.45,0,.2,1) both;}',
+        '@keyframes ztp-pkt{0%{left:var(--ztp-x1);opacity:0;transform:scale(.5)}18%{opacity:1}82%{opacity:1}100%{left:var(--ztp-x2);opacity:0;transform:scale(.9)}}',
+        '@media (hover:none){.ztp-bcard-go{display:none;}}',
+        '@media (max-width:1100px){.ztp-bcol{min-width:180px;}}',
+        '@media (max-width:719px){.ztp-search{width:110px;}.ztp-bcol{min-width:168px;}}',
+        '@media (prefers-reduced-motion:reduce){.ztp-bcol,.ztp-bcol-h:before,.ztp-bglyph b,.ztp-bglyph i,.ztp-bglyph.ask.live:after,.ztp-bglyph.done svg path,.ztp-bcard,.ztp-bcard:after,.ztp-pkt,.ztp-bcol.hot .ztp-bcol-n{animation:none !important;}.ztp-bcard{transition:none;}.ztp-pkt{display:none;}}',
 
         // 图标按钮
         '.ztp-tool{width:28px;height:28px;flex:none;display:inline-flex;align-items:center;justify-content:center;padding:6px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;line-height:1;box-sizing:border-box;}',
@@ -115,7 +203,7 @@
 
         // 主体：左列表 / 右详情 双栏（宽面板）；窄容器（悬浮兜底 <720px）详情覆盖列表
         '.ztp-body{flex:1;min-height:0;display:flex;align-items:stretch;}',
-        '.ztp-list-col{flex:1.2;min-width:0;overflow:auto;scrollbar-gutter:stable;padding:14px 16px 20px;box-sizing:border-box;border-right:.5px solid var(--dsw-alias-border-l3);}',
+        '.ztp-list-col{flex:1.2;min-width:0;overflow:auto;scrollbar-gutter:stable;padding:12px 14px 18px;box-sizing:border-box;border-right:.5px solid var(--dsw-alias-border-l2);background:var(--dsw-alias-bg-layer-1);}',
         '.ztp-detail-col{flex:1;min-width:0;overflow:auto;scrollbar-gutter:stable;padding:14px 16px 20px;box-sizing:border-box;}',
         '.ztp-dph{padding:56px 16px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px;line-height:1.8;}',
         '.ztp-dph svg{width:28px;height:28px;opacity:.5;display:block;margin:0 auto 8px;}',
@@ -129,33 +217,38 @@
         '}',
 
         // 卡片
-        '.ztp-card{position:relative;display:block;width:100%;box-sizing:border-box;text-align:left;font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-1);border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-radius-lg);padding:11px 14px 11px 16px;margin:0 0 10px;cursor:pointer;transition:background .12s ease,border-color .12s ease,transform .12s ease,box-shadow .12s ease;}',
-        '.ztp-card:hover{background:var(--dsw-alias-interactive-bg-hover);border-color:var(--dsw-alias-border-l4);box-shadow:var(--dsw-alias-shadow-lv1,0 1px 4px rgba(0,0,0,.1));}',
-        '.ztp-card:active{background:var(--dsw-alias-interactive-bg-active);}',
-        // 选中态二轮加强（2026-10-25 用户反馈「只是颜色变化不够明显」）：全高 4px 类型彩条 +
-        // 阴影浮起 + 向右微移（示意指向右侧详情）+「查看中」文字角标——不依赖颜色感知也能识别。
-        '.ztp-card.on{background:color-mix(in srgb,var(--ztp-c,var(--dsw-alias-state-business-primary)) 12%,var(--dsw-alias-bg-layer-2));border-color:var(--ztp-c,var(--dsw-alias-state-business-primary));box-shadow:inset 0 0 0 1px var(--ztp-c,var(--dsw-alias-state-business-primary)),var(--dsw-alias-shadow-lv1,0 1px 4px rgba(0,0,0,.12));transform:translateX(3px);}',
-        '.ztp-card.on:before{opacity:1;width:4px;top:0;bottom:0;border-radius:0;}',
+        // 卡片（2026-10-27 列表侧重做）：与看板同一套语言——平铺表面 + 发丝边框 +
+        // 类型彩条；hover 只微微染上类型色（不再浮起阴影）；动作行用一条发丝线与
+        // 内容分开，主操作平时是描边、hover/聚焦才填实。选中态仍是最强信号：
+        // 满高彩条 + 类型色描边 + 右移 2px + 顶行「查看中」小标签。
+        '.ztp-card{position:relative;display:block;width:100%;box-sizing:border-box;text-align:left;font:inherit;color:inherit;background:var(--dsw-alias-bg-layer-2);border:.5px solid var(--dsw-alias-border-l3);border-radius:var(--dsw-alias-radius-md,var(--dsw-radius-md));padding:10px 12px 8px 14px;margin:0 0 8px;cursor:pointer;transition:background .14s ease,border-color .14s ease,transform .14s ease;}',
+        '.ztp-card:hover{border-color:var(--dsw-alias-border-l4);background:color-mix(in srgb,var(--ztp-c,var(--dsw-alias-label-tertiary)) 4%,var(--dsw-alias-bg-layer-2));}',
+        '.ztp-card:active{background:var(--dsw-alias-interactive-bg-active,var(--dsw-alias-interactive-bg-hover));}',
+        '.ztp-card:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:1px;}',
+        '.ztp-card.on{background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 8%,var(--dsw-alias-bg-layer-2));border-color:var(--dsw-alias-state-business-primary);box-shadow:inset 3px 0 0 0 var(--ztp-c,var(--dsw-alias-state-business-primary)),inset 0 0 0 1px var(--dsw-alias-state-business-primary);transform:translateX(2px);}',
+        '.ztp-card.on:before{opacity:0;}',
         '.ztp-card.on .ztp-card-title{font-weight:600;}',
-        '.ztp-viewing-badge{position:absolute;top:-1px;right:-1px;font-size:10px;line-height:1;padding:3px 7px;border-radius:0 var(--dsw-alias-radius-lg,var(--dsw-radius-lg)) 0 var(--dsw-alias-radius-sm,var(--dsw-radius-sm));background:var(--ztp-c,var(--dsw-alias-state-business-primary));color:var(--dsw-alias-label-primary-foreground);pointer-events:none;}',
-        '.ztp-card:before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:2px;border-radius:0 2px 2px 0;background:var(--ztp-c,transparent);opacity:.7;}',
+        // 选中角标改为顶行内联小标签（旧的右上角折角会盖住截止时间）
+        '.ztp-viewing-badge{display:inline-flex;align-items:center;height:16px;padding:0 6px;border-radius:4px;font-size:10px;line-height:1;flex:none;pointer-events:none;background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 13%,transparent);color:var(--dsw-alias-state-business-primary);}',
+        '.ztp-card:before{content:"";position:absolute;left:0;top:12px;bottom:12px;width:2px;border-radius:0 2px 2px 0;background:var(--ztp-c,transparent);opacity:.9;transition:top .16s ease,bottom .16s ease;}',
+        '.ztp-card:hover:before{top:6px;bottom:6px;}',
         '.ztp-k-task{--ztp-c:var(--dsw-alias-state-business-primary);}',
         '.ztp-k-bug{--ztp-c:var(--dsw-alias-state-error-primary);}',
         '.ztp-k-story{--ztp-c:var(--dsw-alias-state-success-primary);}',
         '.ztp-row{display:flex;align-items:center;gap:6px;min-width:0;}',
         // 顶行：tag + #id 左、状态/优先级/截止右（窄容器自动换行，右贴不变）
-        '.ztp-top{display:flex;align-items:center;gap:4px 8px;min-width:0;flex-wrap:wrap;}',
-        '.ztp-top-meta{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:4px 10px;font-size:11.5px;color:var(--dsw-alias-label-tertiary);min-width:0;}',
+        '.ztp-top{display:flex;align-items:center;gap:4px 7px;min-width:0;flex-wrap:wrap;}',
+        '.ztp-top-meta{margin-left:auto;display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:4px 8px;font-size:11px;color:var(--dsw-alias-label-tertiary);min-width:0;}',
         '.ztp-id{font-size:11px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;flex:none;}',
         // 详情页元信息行
         '.ztp-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin-top:8px;font-size:11.5px;color:var(--dsw-alias-label-tertiary);}',
-        '.ztp-card-title{margin-top:5px;font-size:13.5px;line-height:1.45;color:var(--dsw-alias-label-primary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;}',
+        '.ztp-card-title{margin-top:4px;font-size:13.5px;line-height:1.5;color:var(--dsw-alias-label-primary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;}',
 
-        // 类型标签
-        '.ztp-tag{display:inline-flex;align-items:center;height:18px;padding:0 7px;border-radius:999px;font-size:11px;font-weight:500;flex:none;line-height:18px;}',
-        '.ztp-tag.task{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 14%,transparent);}',
-        '.ztp-tag.bug{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 14%,transparent);}',
-        '.ztp-tag.story{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 14%,transparent);}',
+        // 类型标签（列表/详情）：小一号、方一点，跟优先级徽标同一套视觉重量
+        '.ztp-tag{display:inline-flex;align-items:center;height:17px;padding:0 6px;border-radius:5px;font-size:10.5px;font-weight:600;flex:none;line-height:17px;}',
+        '.ztp-tag.task{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent);}',
+        '.ztp-tag.bug{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 12%,transparent);}',
+        '.ztp-tag.story{color:var(--dsw-alias-state-success-primary);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 12%,transparent);}',
 
         // 元信息
         '.ztp-st{display:inline-flex;align-items:center;gap:5px;color:var(--dsw-alias-label-secondary);}',
@@ -168,29 +261,34 @@
         '.ztp-pri.p1{color:var(--dsw-alias-state-error-primary);}',
         '.ztp-pri.p2{color:var(--dsw-alias-state-warn-primary);}',
         '.ztp-warn{color:var(--dsw-alias-state-warn-primary);}',
-        // 截止时间强调：逾期红 / 临期（≤3 天）橙（终态状态不着色）
-        '.ztp-dl{font-variant-numeric:tabular-nums;}',
+        // 严重程度：只在 bug 上有，安静地跟在优先级后面
+        '.ztp-sev{font-size:10.5px;color:var(--dsw-alias-label-tertiary);white-space:nowrap;}',
+        // 截止时间强调：逾期红底小胶囊 / 临期（≤3 天）橙（终态状态不着色）
+        '.ztp-dl{font-variant-numeric:tabular-nums;white-space:nowrap;}',
         '.ztp-dl.soon{color:var(--dsw-alias-state-warn-primary);font-weight:600;}',
-        '.ztp-dl.overdue{color:var(--dsw-alias-state-error-primary);font-weight:600;}',
+        '.ztp-dl.overdue{color:var(--dsw-alias-state-error-primary);font-weight:600;background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent);border-radius:3px;padding:1px 5px;margin-right:-2px;}',
 
-        // 动作行（2026-10-27 改版）：左侧会话 chip；右侧「工具组 + 分隔线 + 主操作」——
-        // 图标按钮与状态下拉收进 .ztp-utils（窄面板换行时整组不散），主操作永远在最后。
-        '.ztp-acts{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:6px 8px;margin-top:9px;}',
+        // 动作行（2026-10-27 列表侧改版）：与内容之间一条发丝线；主操作平时是描边，
+        // hover / 键盘聚焦才填实（一屏二十张卡不再是一堵蓝按钮墙）。
+        '.ztp-acts{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:6px 8px;margin-top:8px;padding-top:7px;border-top:.5px solid var(--dsw-alias-border-l1);}',
         '.ztp-acts-right{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:6px;margin-left:auto;min-width:0;}',
         '.ztp-utils{display:inline-flex;align-items:center;gap:1px;flex:none;}',
         '.ztp-acts-sep{width:1px;height:15px;flex:none;background:var(--dsw-alias-border-l2);margin:0 2px;}',
-        '.ztp-acts .ztp-btn{height:27px;padding:0 11px;font-size:11.5px;}',
-        '.ztp-btn{appearance:none;font:inherit;font-size:12px;line-height:1;height:28px;padding:0 12px;border-radius:var(--dsw-radius-sm);border:.5px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;box-sizing:border-box;}',
+        '.ztp-acts .ztp-btn{height:26px;padding:0 10px;font-size:11px;}',
+        '.ztp-btn{appearance:none;font:inherit;font-size:12px;line-height:1;height:28px;padding:0 12px;border-radius:var(--dsw-radius-sm);border:.5px solid var(--dsw-alias-border-l3);background:transparent;color:var(--dsw-alias-label-primary);cursor:pointer;display:inline-flex;align-items:center;gap:5px;white-space:nowrap;box-sizing:border-box;transition:background .12s ease,border-color .12s ease,color .12s ease;}',
         '.ztp-btn:hover{background:var(--dsw-alias-interactive-bg-hover);}',
         '.ztp-btn.primary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);border-color:transparent;}',
         '.ztp-btn.primary:hover{background:var(--dsw-alias-button-primary-hover);}',
         '.ztp-btn:disabled{opacity:.45;cursor:default;}',
         '.ztp-btn svg{width:13px;height:13px;}',
-        // 纯图标小按钮（旗标/隐藏/复制）与激活态；卡片上再收紧到 24×24，和状态下拉排成一组
+        // 卡片上的主操作：静息描边，hover/focus 填实
+        '.ztp-acts .ztp-btn.primary{background:transparent;color:var(--dsw-alias-state-business-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-business-primary) 32%,var(--dsw-alias-border-l3));}',
+        '.ztp-acts .ztp-btn.primary:hover,.ztp-acts .ztp-btn.primary:focus-visible{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);border-color:transparent;}',
+        // 纯图标小按钮（旗标/隐藏/复制）与激活态；卡片上再收紧到 23×23，和状态下拉排成一组
         '.ztp-btn.icon{padding:0 7px;color:var(--dsw-alias-label-tertiary);}',
         '.ztp-btn.icon:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover);}',
         '.ztp-btn.icon.on{color:var(--dsw-alias-state-business-primary);}',
-        '.ztp-acts .ztp-btn.icon{width:24px;height:24px;padding:0;justify-content:center;border-color:transparent;}',
+        '.ztp-acts .ztp-btn.icon{width:23px;height:23px;padding:0;justify-content:center;border-color:transparent;}',
         '.ztp-acts .ztp-btn.icon:hover{background:var(--dsw-alias-interactive-bg-hover);}',
         '.ztp-acts .ztp-btn.icon.on{color:var(--dsw-alias-state-business-primary);background:color-mix(in srgb,var(--dsw-alias-state-business-primary) 12%,transparent);}',
         // 卡片上的「手动处理状态」下拉（自动 / 处理中 / 等你决策 / 已完成）
@@ -223,7 +321,7 @@
 
         // 空态 / 骨架 / 错误
         '.ztp-empty{padding:48px 24px;text-align:center;color:var(--dsw-alias-label-tertiary);font-size:12.5px;line-height:1.7;}',
-        '.ztp-skel{height:92px;border-radius:var(--dsw-radius-lg);background:var(--dsw-alias-bg-skeleton);border:.5px solid var(--dsw-alias-border-l1);margin-bottom:8px;animation:ztp-pulse 1.5s ease-in-out infinite;}',
+        '.ztp-skel{height:88px;border-radius:var(--dsw-alias-radius-md,var(--dsw-radius-md));background:var(--dsw-alias-bg-skeleton);border:.5px solid var(--dsw-alias-border-l1);margin-bottom:8px;animation:ztp-pulse 1.5s ease-in-out infinite;}',
         '@keyframes ztp-pulse{0%,100%{opacity:.5}50%{opacity:.95}}',
         '.ztp-err{margin:8px 0;padding:8px 10px;border-radius:var(--dsw-radius-md);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent);color:var(--dsw-alias-state-error-primary);font-size:12px;line-height:1.55;}',
         '.ztp-err-row{display:flex;align-items:center;gap:8px;justify-content:space-between;}',
@@ -426,13 +524,13 @@
         '@keyframes ztp-dot{0%,60%,100%{transform:translateY(0);opacity:.45}30%{transform:translateY(-3px);opacity:1}}',
         // 等决策：胶囊整体呼吸 + 卡片暖色描边提醒
         '.ztp-live.ask{animation:ztp-breath 1.6s ease-in-out infinite;}',
-        '.ztp-card.ztp-live-ask{border-color:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 45%,var(--dsw-alias-border-l3));}',
+        '.ztp-card.ztp-live-ask:not(.on){border-color:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 45%,var(--dsw-alias-border-l3));}',
         '.ztp-card.ztp-live-ask:before{background:var(--dsw-alias-state-warn-primary);}',
         '@keyframes ztp-breath{0%,100%{box-shadow:0 0 0 0 color-mix(in srgb,var(--dsw-alias-state-warn-primary) 0%,transparent)}50%{box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-warn-primary) 22%,transparent)}}',
         // 已完成：对勾一次弹入 + 卡片绿色微光
         '.ztp-live.done svg{width:11px;height:11px;flex:none;}',
         '.ztp-live.done .ztp-live-ok{animation:ztp-pop2 .3s ease-out;}',
-        '.ztp-card.ztp-live-done{border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 40%,var(--dsw-alias-border-l3));}',
+        '.ztp-card.ztp-live-done:not(.on){border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 40%,var(--dsw-alias-border-l3));}',
         '@keyframes ztp-pop2{from{transform:scale(.4);opacity:0}to{transform:scale(1);opacity:1}}',
         // 会话 chip 前的活性小点（有实时状态时随状态变色，处理中闪烁）
         '.ztp-slink .ztp-slink-dot{width:6px;height:6px;border-radius:50%;flex:none;background:var(--dsw-alias-label-caption);}',
@@ -517,6 +615,12 @@
       function ChevronDownIcon() {
         return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
           h('path', { d: 'M4.2 6.2L8 10l3.8-3.8', stroke: 'currentColor', strokeWidth: 1.3, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+        );
+      }
+      /** 看板缩略卡的「打开」箭头（hover/键盘聚焦时滑入）。 */
+      function ChevronRightIcon() {
+        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+          h('path', { d: 'M6.2 3.8L10.4 8l-4.2 4.2', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' }),
         );
       }
       function PlusIcon() {
@@ -822,6 +926,86 @@
         }
         for (var k in out) out[k] = sortCards(out[k], 'deadline', now, null);
         return out;
+      }
+
+      // ───────── 看板动效：只在「真的变了」时发生（2026-10-27）─────────
+      // 看板是监控面，动效必须回答「刚发生了什么」：卡片换列 → 从原方向滑入 +
+      // 光点沿顶部状态条走到新站 + 站头闪一下；新卡进入 → 落位；其余情况静止。
+      // 静止的看板不该有漂浮/呼吸动画（用户此前否决过可视化面板，别再加装饰）。
+      var LANE_INDEX = { todo: 0, running: 1, ask: 2, done: 3 };
+      var LANE_EMPTY_TEXT = {
+        todo: '没有排队的事项',
+        running: '现在没有在跑的事项',
+        ask: '没有等你决策的事项',
+        done: '没有待闭环的完成项',
+      };
+      var NO_BOARD_MARKS = { cards: {}, lane: null, pkt: null };
+
+      /** 看板分列结果 → { 'kind-id': laneId }（换列检测的基线）。 */
+      function boardLaneMap(cols) {
+        var map = {};
+        for (var i = 0; i < BOARD_COLS.length; i++) {
+          var lane = BOARD_COLS[i].id;
+          var list = (cols && cols[lane]) || [];
+          for (var j = 0; j < list.length; j++) {
+            var c = list[j];
+            if (c && c.kind && c.id != null) map[c.kind + '-' + c.id] = lane;
+          }
+        }
+        return map;
+      }
+
+      /**
+       * 比对两次分列，产出需要播放动效的卡片与光点：
+       * - cards[key] = {kind:'new'} 新进入看板（含首次下发）；
+       * - cards[key] = {kind:'move', from, dir:'fwd'|'back'} 换列（dir 决定滑入方向）；
+       * - moved：最后一颗光点的起点/终点（一次刷新只放一颗，多了像弹球）。
+       * prev 为空（首次挂载）→ 不产生任何动效，避免打开面板时满屏乱跳。
+       */
+      function boardMotions(prev, next) {
+        var cards = {};
+        var moved = null;
+        if (!prev) return { cards: cards, moved: moved };
+        for (var key in next) {
+          if (!prev[key]) {
+            cards[key] = { kind: 'new', lane: next[key] };
+          } else if (prev[key] !== next[key]) {
+            var fwd = LANE_INDEX[next[key]] > LANE_INDEX[prev[key]];
+            cards[key] = {
+              kind: 'move', lane: next[key], from: prev[key],
+              dir: fwd ? 'fwd' : 'back',
+            };
+            moved = { key: key, from: prev[key], to: next[key], dir: cards[key].dir };
+          }
+        }
+        return { cards: cards, moved: moved };
+      }
+
+      /** 车道在顶部状态条上的中心位置（百分比，用于光点起点/终点）。 */
+      function laneCenterPct(lane) {
+        var i = LANE_INDEX[lane];
+        return typeof i === 'number' ? (i + 0.5) * 25 : 12.5;
+      }
+
+      /**
+       * 看板截止文案：按「日历天」压缩成年内相对说法（今天/明天/N 天后/逾期 N 天），
+       * 更远的只留 MM-DD。列表里保留完整日期（有地方展开），看板空间小、扫描优先。
+       * now 可注入供测试；解析不了返回 null。
+       */
+      function boardDue(deadline, now) {
+        if (!deadline) return null;
+        var ts = Date.parse(String(deadline).slice(0, 10) + 'T23:59:59');
+        if (!Number.isFinite(ts)) return null;
+        var n = typeof now === 'number' ? now : Date.now();
+        var due = new Date(ts); due.setHours(0, 0, 0, 0);
+        var today = new Date(n); today.setHours(0, 0, 0, 0);
+        var days = Math.round((due.getTime() - today.getTime()) / 86400000);
+        if (days < 0) return { text: '逾期 ' + (-days) + ' 天', tone: 'overdue', days: days };
+        if (days === 0) return { text: '今天', tone: 'soon', days: days };
+        if (days === 1) return { text: '明天', tone: 'soon', days: days };
+        if (days <= 3) return { text: days + ' 天后', tone: 'soon', days: days };
+        var showYear = due.getFullYear() === today.getFullYear() ? '' : due.getFullYear() + '-';
+        return { text: showYear + String(deadline).slice(5, 10), tone: '', days: days };
       }
 
       // ───────────── 自动轮询 + 新指派检测（Idea 1，2026-10-25）─────────────
@@ -2982,54 +3166,157 @@
       }
 
       /**
-       * 流程看板（2026-10-25 用户提案·方案 A）：四列泳道同屏——待处理 → 处理中 →
-       * 等你决策 → 已完成待闭环。纯信息密度（不做装饰动画，鲸鱼娘办公室的教训），
-       * 点缩略卡回列表视图并打开详情。数据来自现有 links/states/实时监控，零新增 RPC。
+       * 流程看板（2026-10-27 重做）：四站管线——待处理 → 处理中 → 等你决策 →
+       * 已完成待闭环。整块是一张满幅工作面，站头就是管线上的四个站；卡片按类型
+       * 分组、按截止排序。点缩略卡回列表视图并打开详情。数据来自现有
+       * links/states/实时监控，零新增 RPC。
+       *
+       * 动效原则（用户 2026-10-27 要求「加点动画」）：只表达「刚发生了什么」——
+       * 换列滑入 + 光点沿顶部状态条走向新站 + 站头闪一下；新卡落位；在跑的卡片
+       * 左彩条有一道缓慢下滑的高光；有等决策时站头琥珀色呼吸。打开面板时只有
+       * 四条车道依次落下，卡片不做逐张淡入（静态时保持安静）。
        */
+      function BoardGlyph(props) {
+        var lane = props.lane;
+        var live = Boolean(props.live);
+        if (lane === 'running') {
+          return h('span', { className: 'ztp-bglyph running' + (live ? ' live' : ''), 'aria-hidden': 'true' },
+            h('b'), h('b'), h('b'));
+        }
+        if (lane === 'ask') {
+          return h('span', { className: 'ztp-bglyph ask' + (live ? ' live' : ''), 'aria-hidden': 'true' },
+            h('i'));
+        }
+        if (lane === 'done') {
+          return h('span', { className: 'ztp-bglyph done', 'aria-hidden': 'true' },
+            h('svg', { viewBox: '0 0 16 16', fill: 'none' },
+              h('path', {
+                d: 'M3.8 8.5l2.6 2.6 5.8-6.1', stroke: 'currentColor', strokeWidth: 1.6,
+                strokeLinecap: 'round', strokeLinejoin: 'round',
+              })));
+        }
+        return h('span', { className: 'ztp-bglyph todo', 'aria-hidden': 'true' });
+      }
+
+      /** 车道强调色（光点/站头用；CSS 里同名变量由 .c-* 提供）。 */
+      var LANE_ACCENT = {
+        todo: 'var(--dsw-alias-label-tertiary)',
+        running: 'var(--dsw-alias-state-business-primary)',
+        ask: 'var(--dsw-alias-state-warn-primary)',
+        done: 'var(--dsw-alias-state-success-primary)',
+      };
+
       function BoardView(props) {
-        var cols = boardColumns(props.cards || [], props.liveOf || null, undefined);
-        return h('div', { className: 'ztp-board' },
-          BOARD_COLS.map(function (col) {
-            var list = cols[col.id] || [];
-            return h('div', { key: col.id, className: 'ztp-bcol c-' + col.id },
-              h('div', { className: 'ztp-bcol-h' },
-                h('i', { className: 'ztp-bcol-dot ' + col.id }),
-                col.label,
-                h('span', { className: 'ztp-num' }, list.length)),
-              h('div', { className: 'ztp-bcol-b' },
-                list.length
-                  ? KIND_ORDER.map(function (k) {
-      // 列内按 任务/Bug/需求 分组（2026-10-25 用户反馈）：组头带计数与类型色点，
-      // 组内保持截止↑排序；缩略卡左彩条用类型色（--ztp-c），紧迫性由截止 chip 表达
-                    var group = list.filter(function (c) { return c.kind === k; });
-                    if (!group.length) return null;
-                    return [
-                      h('div', { key: 'g-' + k, className: 'ztp-bgrp' },
-                        h('i', { className: 'ztp-bgrp-dot ztp-k-' + k }),
-                        KIND_LABEL[k] || k,
-                        h('span', { className: 'ztp-num' }, group.length)),
-                      group.map(function (c) {
-                        var dl = deadlineInfo(c.deadline);
-                        return h('div', {
-                          key: c.kind + '-' + c.id,
-                          className: 'ztp-bcard ztp-k-' + c.kind,
-                          title: (KIND_LABEL[c.kind] || c.kind) + ' #' + c.id + ' · 点击回列表打开详情',
-                          onClick: function () { props.onPick(c); },
-                        },
-                          h('div', { className: 'ztp-bcard-t' },
-                            h(KindTag, { kind: c.kind }),
-                            props.flaggedOf && props.flaggedOf(c)
-                              ? h('span', { className: 'ztp-flagdot' }, h(FlagIcon)) : null,
-                            h('span', { className: 'ztp-id' }, '#' + c.id),
-                            dl ? h('span', {
-                              className: 'ztp-dl' + (dl.overdue ? ' overdue' : dl.soon ? ' soon' : ''),
-                            }, (dl.overdue ? '逾期 ' : '') + fmtDate(c.deadline)) : null),
-                          h('div', { className: 'ztp-bcard-title' }, c.title || ''));
-                      }),
-                    ];
-                  })
-                  : h('div', { className: 'ztp-bcol-empty' }, '—')));
+        var now = typeof props.now === 'number' ? props.now : Date.now();
+        var cols = boardColumns(props.cards || [], props.liveOf || null, now);
+        var laneMap = boardLaneMap(cols);
+        var sig = '';
+        for (var sk in laneMap) sig += sk + ':' + laneMap[sk] + '|';
+
+        // 换列检测：prev 存上一次的 key→lane，effect 里比对后给「变了的卡」打标记，
+        // 900ms 后清空（动效窗口）。首次挂载只建基线，不放动画。
+        var prevRef = useRef(null);
+        var marksS = useState(NO_BOARD_MARKS);
+        var marks = marksS[0] || NO_BOARD_MARKS;
+        var setMarks = marksS[1];
+        useLayoutEffect(function () {
+          var prev = prevRef.current;
+          var res = boardMotions(prev, laneMap);
+          prevRef.current = laneMap;
+          if (!prev) return;
+          if (!Object.keys(res.cards).length) {
+            setMarks(NO_BOARD_MARKS); // 同一对象 → React 直接 bail out，不白重渲染
+            return;
+          }
+          setMarks({ cards: res.cards, lane: res.moved ? res.moved.to : null, pkt: res.moved });
+          var timer = setTimeout(function () { setMarks(NO_BOARD_MARKS); }, 900);
+          return function () { clearTimeout(timer); };
+        }, [sig]);
+
+        var pkt = marks.pkt;
+        var kids = [];
+        if (pkt) {
+          kids.push(h('span', {
+            key: 'pkt',
+            className: 'ztp-pkt',
+            'aria-hidden': 'true',
+            style: {
+              '--ztp-x1': laneCenterPct(pkt.from) + '%',
+              '--ztp-x2': laneCenterPct(pkt.to) + '%',
+              '--ztp-pkt-c': LANE_ACCENT[pkt.to] || LANE_ACCENT.running,
+            },
           }));
+        }
+
+        kids = kids.concat(BOARD_COLS.map(function (col) {
+          var list = cols[col.id] || [];
+          var body = list.length
+            ? KIND_ORDER.map(function (k) {
+                // 列内按 任务/Bug/需求 分组（组头吸顶，带类型色点与计数）；
+                // 组内保持截止↑排序，缩略卡左彩条用类型色（--ztp-c）。
+                var group = list.filter(function (c) { return c.kind === k; });
+                if (!group.length) return null;
+                return [
+                  h('div', { key: 'g-' + k, className: 'ztp-bgrp' },
+                    h('i', { className: 'ztp-bgrp-dot ztp-k-' + k }),
+                    KIND_LABEL[k] || k,
+                    h('span', { className: 'ztp-num' }, group.length)),
+                  group.map(function (c) {
+                    var key = c.kind + '-' + c.id;
+                    var mark = marks.cards[key];
+                    var due = boardDue(c.deadline, now);
+                    var pri = Number(c.pri);
+                    var cls = 'ztp-bcard ztp-k-' + c.kind
+                      + (mark ? (mark.kind === 'new' ? ' is-new' : ' mv-' + mark.dir) : '');
+                    return h('button', {
+                      key: key,
+                      type: 'button',
+                      className: cls,
+                      title: (KIND_LABEL[c.kind] || c.kind) + ' #' + c.id + ' · 点击回列表打开详情',
+                      onClick: function () { props.onPick(c); },
+                    },
+                      h('div', { className: 'ztp-bcard-t' },
+                        h('span', { className: 'ztp-id' }, '#' + c.id),
+                        props.flaggedOf && props.flaggedOf(c)
+                          ? h('span', { className: 'ztp-flagdot', title: '已标记' }, h(FlagIcon)) : null,
+                        (pri === 1 || pri === 2)
+                          ? h('span', { className: 'ztp-bpri p' + pri, title: '优先级 P' + pri }, 'P' + pri) : null,
+                        col.id === 'done'
+                          ? h('span', { className: 'ztp-bok', title: '已完成，进详情可去禅道闭环' },
+                              h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+                                h('path', {
+                                  d: 'M3.6 8.3l2.7 2.7 6.1-6.3', stroke: 'currentColor', strokeWidth: 1.7,
+                                  strokeLinecap: 'round', strokeLinejoin: 'round',
+                                }))) : null,
+                        due ? h('span', {
+                          className: 'ztp-bdl' + (due.tone ? ' ' + due.tone : ''),
+                          title: '截止 ' + fmtDate(c.deadline),
+                        }, due.text) : null),
+                      h('div', { className: 'ztp-bcard-title' }, c.title || ''),
+                      h('span', { className: 'ztp-bcard-go', 'aria-hidden': 'true' }, h(ChevronRightIcon)));
+                  }),
+                ];
+              })
+            : h('div', { className: 'ztp-bcol-empty' }, LANE_EMPTY_TEXT[col.id] || '暂无事项');
+
+          return h('div', {
+            key: col.id,
+            className: 'ztp-bcol c-' + col.id
+              + (list.length ? ' has' : '')
+              + (marks.lane === col.id ? ' hot' : ''),
+          },
+            h('div', { className: 'ztp-bcol-h' },
+              h(BoardGlyph, { lane: col.id, live: list.length > 0 }),
+              col.label,
+              h('span', {
+                key: 'n-' + list.length,
+                className: 'ztp-bcol-n' + (list.length ? '' : ' zero'),
+                title: col.label + ' ' + list.length + ' 项',
+              }, list.length)),
+            h('div', { className: 'ztp-bcol-b' }, body));
+        }));
+
+        return h('div', { className: 'ztp-board' }, kids);
       }
 
       /**
@@ -3098,9 +3385,12 @@
       function CardItem(props) {
         var c = props.card;
         var sel = props.selectable === true;
-        var dl = deadlineInfo(c.deadline);
-        var dlCls = (!isFinalCard(c) && dl)
-          ? (dl.overdue ? ' overdue' : dl.soon ? ' soon' : '') : '';
+        var due = boardDue(c.deadline);
+        var dlCls = (!isFinalCard(c) && due && due.tone) ? ' ' + due.tone : '';
+        var final = isFinalCard(c);
+        var dueText = (!final && due) ? due.text : fmtDate(c.deadline);
+        var dueTitle = c.deadline ? '截止 ' + fmtDate(c.deadline) : '';
+        if (!final && due && due.tone === 'overdue') dueTitle += ' · 已逾期 ' + (-due.days) + ' 天';
         var live = props.live || null;
         return h('div', {
           className: 'ztp-card ztp-k-' + c.kind
@@ -3126,8 +3416,6 @@
             sel ? h('span', { className: 'ztp-check' + (props.selected ? ' on' : '') },
               props.selected ? h(CheckMarkIcon) : null) : null,
             h(KindTag, { kind: c.kind }),
-            props.flagged ? h('span', { className: 'ztp-flagdot', title: '已标记重点关注' }, h(FlagIcon)) : null,
-            live ? h(LiveBadge, { state: live, since: props.liveSince || null, manual: Boolean(props.liveManual) }) : null,
             h('span', { className: 'ztp-id' }, '#' + c.id),
             // 禅道超链接在卡片上（详情里不再放链接/按钮）；draggable 关掉避免链接拖拽覆盖卡片 Markdown 拖拽
             (!sel && c.url) ? h('a', {
@@ -3135,15 +3423,19 @@
               title: '在禅道打开' + (KIND_LABEL[c.kind] || c.kind) + ' #' + c.id,
               onClick: function (e) { e.stopPropagation(); },
             }, h(LinkIcon)) : null,
+            props.flagged ? h('span', { className: 'ztp-flagdot', title: '已标记重点关注' }, h(FlagIcon)) : null,
+            live ? h(LiveBadge, { state: live, since: props.liveSince || null, manual: Boolean(props.liveManual) }) : null,
             h('span', { className: 'ztp-top-meta' },
               h(StatusChip, { status: c.status }),
-              c.pri != null ? h('span', { className: 'ztp-pri p' + c.pri }, 'P' + c.pri) : null,
-              c.severity != null ? h('span', null, '严重 ' + c.severity) : null,
-              c.deadline ? h('span', {
-                className: 'ztp-dl' + dlCls,
-                title: dlCls ? (dl.overdue ? '已逾期 ' + overdueDays(dl) + ' 天' : '距截止不足 3 天') : '',
-              }, (dlCls.indexOf('overdue') !== -1 ? '逾期 ' : '截止 ') + fmtDate(c.deadline)) : null,
-              c.openedBy ? h('span', null, c.openedBy + ' 创建') : null,
+              // 优先级：P1/P2 用彩色小徽标，P3/P4 只留安静的文本（列表里不再一排 P3 抢视线）
+              c.pri != null
+                ? ((Number(c.pri) === 1 || Number(c.pri) === 2)
+                    ? h('span', { className: 'ztp-bpri p' + c.pri, title: '优先级 P' + c.pri }, 'P' + c.pri)
+                    : h('span', { className: 'ztp-pri', title: '优先级 P' + c.pri }, 'P' + c.pri))
+                : null,
+              c.severity != null ? h('span', { className: 'ztp-sev', title: '严重程度 ' + c.severity }, '严重 ' + c.severity) : null,
+              // 截止：与看板同一套相对说法（今天 / 明天 / N 天后 / 逾期 N 天），完整日期进 title
+              c.deadline ? h('span', { className: 'ztp-dl' + dlCls, title: dueTitle }, dueText) : null,
               props.active && !sel ? h('span', { className: 'ztp-viewing-badge' }, '查看中') : null)),
           h('div', { className: 'ztp-card-title' }, c.title || ''),
           props.note ? h('div', { className: 'ztp-note-line', title: '本地备注：' + props.note },
@@ -4815,7 +5107,11 @@
             })),
             h('div', { className: 'ztp-grow' }),
             // 视图切换（流程看板提案）：board 模式是跨分类全局视图，tab/筛选/批量只在列表模式出现
-            h('div', { className: 'ztp-viewseg', role: 'tablist', 'aria-label': '视图' },
+            h('div', {
+              className: 'ztp-viewseg' + (viewMode[0] === 'board' ? ' is-board' : ''),
+              role: 'tablist', 'aria-label': '视图',
+            },
+              h('i', { className: 'ztp-viewseg-ind', 'aria-hidden': 'true' }),
               h('button', {
                 type: 'button', role: 'tab', 'aria-selected': viewMode[0] === 'list' ? 'true' : 'false',
                 className: 'ztp-view-btn' + (viewMode[0] === 'list' ? ' on' : ''),
@@ -5141,7 +5437,13 @@
         QUICK_FILTERS: QUICK_FILTERS,
         QfBar: QfBar,
         BoardView: BoardView,
+        BoardGlyph: BoardGlyph,
         boardColumns: boardColumns,
+        boardLaneMap: boardLaneMap,
+        boardMotions: boardMotions,
+        laneCenterPct: laneCenterPct,
+        boardDue: boardDue,
+        LANE_EMPTY_TEXT: LANE_EMPTY_TEXT,
         BOARD_COLS: BOARD_COLS,
         copyToClipboard: copyToClipboard,
         scrollCardIntoView: scrollCardIntoView,

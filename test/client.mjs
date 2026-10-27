@@ -100,6 +100,19 @@ mod.apply(ctx);
 
 check('apply 通知 CSS 已注入', appended.length === 1 && appended[0].attrs['data-dsh-zentao-panel'] === '1');
 
+// 看板动效样式契约（2026-10-27）：换列光点/滑入/站头闪 + 减弱动效兜底必须都在
+const cssText = appended[0].textContent || '';
+check('CSS：看板换列光点与落位动效已声明',
+  cssText.includes('.ztp-pkt') && cssText.includes('@keyframes ztp-slot-fwd')
+  && cssText.includes('@keyframes ztp-station') && cssText.includes('.ztp-bglyph'));
+check('CSS：prefers-reduced-motion 下关闭看板动效',
+  cssText.includes('@media (prefers-reduced-motion:reduce)')
+  && /prefers-reduced-motion:reduce\)\{[^}]*\.ztp-pkt/.test(cssText));
+// 2026-10-27 用户截图反馈：选中卡 3px 方条从圆角戳出去——必须用 inset 阴影画彩条
+check('CSS：选中卡左彩条用 inset 阴影（跟随圆角，方条不再戳出卡片）',
+  /\.ztp-card\.on\{[^}]*box-shadow:inset 3px 0 0 0/.test(cssText)
+  && /\.ztp-card\.on:before\{opacity:0;\}/.test(cssText));
+
 // ── 左侧栏全局面板（main keyed slot + sidebar.panellist 图标行）──
 const mainReg = slotRegs.find((r) => r.opts.name === 'main');
 const iconReg = slotRegs.find((r) => r.opts.name === 'sidebar.panellist');
@@ -2310,6 +2323,63 @@ check('BoardView：点缩略卡回传 onPick；逾期卡在 ask 列、截止 chi
   && bdAskDeep.some((row) => row && row.children && row.children.some(
     (m) => m && m.props && String(m.props.className).split(' ').includes('overdue'))));
 
+// ── 看板动效契约（2026-10-27）：换列检测 / 光点坐标 / 截止文案 / 站头字形 ──
+const laneMapA = TT.boardLaneMap(TT.boardColumns(bdCards, bdLive, nowTs));
+check('boardLaneMap：kind-id → 车道；禅道终态卡不入图',
+  laneMapA['bug-11'] === 'running' && laneMapA['task-12'] === 'ask'
+  && laneMapA['bug-13'] === 'done' && !('bug-99' in laneMapA));
+const noMotions = TT.boardMotions(null, laneMapA);
+check('boardMotions：首次挂载只建基线，不放动效（打开面板不满屏乱跳）',
+  Object.keys(noMotions.cards).length === 0 && noMotions.moved === null);
+const laneMapB = Object.assign({}, laneMapA, {
+  'bug-11': 'ask', 'task-12': 'todo', 'story-15': 'done', 'task-77': 'todo',
+});
+const mo = TT.boardMotions(laneMapA, laneMapB);
+check('boardMotions：换列记 move（前进 fwd / 回退 back，带 from）',
+  mo.cards['bug-11'].kind === 'move' && mo.cards['bug-11'].dir === 'fwd'
+  && mo.cards['bug-11'].from === 'running'
+  && mo.cards['task-12'].dir === 'back' && mo.cards['task-12'].from === 'ask');
+check('boardMotions：新卡记 new；moved 只取最后一颗光点（不弹球）',
+  mo.cards['task-77'].kind === 'new'
+  && mo.moved && mo.moved.from === 'ask' && mo.moved.to === 'todo');
+check('laneCenterPct：四站中心 12.5 / 37.5 / 62.5 / 87.5',
+  TT.laneCenterPct('todo') === 12.5 && TT.laneCenterPct('running') === 37.5
+  && TT.laneCenterPct('ask') === 62.5 && TT.laneCenterPct('done') === 87.5);
+const dueNow = new Date('2026-10-25T10:00:00').getTime();
+check('boardDue：逾期按日历天（逾期 5 天 / overdue）',
+  TT.boardDue('2026-10-20', dueNow).text === '逾期 5 天'
+  && TT.boardDue('2026-10-20', dueNow).tone === 'overdue');
+check('boardDue：今天 / 明天 / N 天后 → soon，更远只留 MM-DD',
+  TT.boardDue('2026-10-25', dueNow).text === '今天'
+  && TT.boardDue('2026-10-26', dueNow).text === '明天'
+  && TT.boardDue('2026-10-28', dueNow).text === '3 天后'
+  && TT.boardDue('2026-10-28', dueNow).tone === 'soon'
+  && TT.boardDue('2026-11-10', dueNow).text === '11-10'
+  && TT.boardDue('2026-11-10', dueNow).tone === ''
+  && TT.boardDue('2027-01-15', dueNow).text === '2027-01-15');
+check('boardDue：空/坏日期 → null', TT.boardDue('', dueNow) === null && TT.boardDue('xx', dueNow) === null);
+check('BoardGlyph：四站字形各不同（空心圈 / 均衡器 / 琥珀点 / 对勾）',
+  TT.BoardGlyph({ lane: 'todo' }).props.className === 'ztp-bglyph todo'
+  && TT.BoardGlyph({ lane: 'running', live: true }).props.className === 'ztp-bglyph running live'
+  && TT.BoardGlyph({ lane: 'running' }).props.className === 'ztp-bglyph running'
+  && TT.BoardGlyph({ lane: 'ask', live: true }).props.className === 'ztp-bglyph ask live'
+  && TT.BoardGlyph({ lane: 'done' }).props.className === 'ztp-bglyph done'
+  && TT.BoardGlyph({ lane: 'done' }).children[0].type === 'svg'
+  && TT.BoardGlyph({ lane: 'todo' }).children.length === 0);
+const bdDoneCards = bdColCards(bdFlat[3]).filter(
+  (n) => n && n.props && String(n.props.className).startsWith('ztp-bcard'));
+const bdDoneMeta = bdDoneCards[0].children.find((n) => n && n.props && n.props.className === 'ztp-bcard-t');
+check('BoardView：done 列缩略卡带绿色对勾；每张卡都有 hover 进入箭头',
+  bdDoneMeta.children.some((n) => n && n.props && n.props.className === 'ztp-bok')
+  && bdDoneCards[0].children.some((n) => n && n.props && n.props.className === 'ztp-bcard-go'));
+const bdEmpty = TT.BoardView({ cards: [], liveOf: null, flaggedOf: () => false, onPick: () => {} });
+const bdEmptyLanes = bdEmpty.children.flat(2);
+check('BoardView：空车道给出下一步文案（不是一根横线）',
+  bdEmptyLanes.length === 4
+  && bdEmptyLanes.every((lane) => lane.children[1].children[0].props.className === 'ztp-bcol-empty')
+  && textOf(bdEmptyLanes[0].children[1]) === '没有排队的事项'
+  && textOf(bdEmptyLanes[2].children[1]) === '没有等你决策的事项');
+
 // 选中态二轮加强：active 卡片带「查看中」文字角标（不依赖颜色感知）
 const actNode = TT.CardItem({
   card: bc1, active: true, live: null, linkView: null,
@@ -2318,8 +2388,32 @@ const actNode = TT.CardItem({
 });
 const actMeta = actNode.children.find((n) => n && n.props && n.props.className === 'ztp-top').children.find((n) => n && n.props && n.props.className === 'ztp-top-meta');
 const actBadge = actMeta.children[actMeta.children.length - 1];
-check('CardItem active 态：渲染「查看中」角标（类型色底白字，绝对定位右上）',
+check('CardItem active 态：顶行渲染「查看中」内联标签（不再是右上角折角，避免盖住截止）',
   actBadge.props.className === 'ztp-viewing-badge' && actBadge.children[0] === '查看中');
+
+// ── 列表卡片样式收口（2026-10-27）：相对截止 / 身份列稳定 / 创建人下沉 ──
+const todayIso = (() => {
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+})();
+const stNode = TT.CardItem({
+  card: { kind: 'bug', id: 901, title: '样式收口', status: 'active', pri: 2, severity: 2, deadline: todayIso, openedBy: '张三' },
+  linkView: null, live: 'running',
+  onOpen: () => {}, onOpenSession: () => {}, onToggleMark: () => {}, onCopyTitle: () => {},
+  onNewChat: () => {}, onDispatch: () => {},
+});
+const stTop = stNode.children.find((n) => n && n.props && n.props.className === 'ztp-top');
+const stMeta = stTop.children.find((n) => n && n.props && n.props.className === 'ztp-top-meta');
+const stDl = stMeta.children.find((n) => n && n.props && String(n.props.className).startsWith('ztp-dl'));
+check('CardItem：截止用相对说法（今天），完整日期进 title',
+  Boolean(stDl) && textOf(stDl) === '今天' && stDl.props.title.includes(todayIso));
+check('CardItem：创建人不再占卡片顶行（下沉详情；搜索仍按卡片数据命中）',
+  !textOf(stMeta).includes('张三'));
+const stIdIdx = stTop.children.findIndex((n) => n && n.props && n.props.className === 'ztp-id');
+const stLiveIdx = stTop.children.findIndex((n) => n && n.type === TT.LiveBadge);
+check('CardItem：#id 固定在类型标签之后，活性徽标跟在其后（身份列不随状态跳动）',
+  stIdIdx >= 0 && stLiveIdx > stIdIdx);
 
 // ── 选中卡滚动定位（2026-10-25 用户反馈「跳转后不滚动」）──
 let scrolled = null;
