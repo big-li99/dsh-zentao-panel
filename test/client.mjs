@@ -905,13 +905,15 @@ lsBacking.clear();
 const mkLink = (id, at, lastSeen) => ({ sessionId: 's-' + id, at, lastSeen, kind: 'bug', id, title: 't' + id });
 lsBacking.set('dsh-zentao-panel.links.v1', JSON.stringify({
   'acct1/bug-1': mkLink(1, NOW - 100 * H, NOW - 100 * H), // 在线
-  'acct1/bug-2': mkLink(2, NOW - 100 * H, NOW - 2 * H),   // 离线 2h（宽限期内）
+  'acct1/bug-2': mkLink(2, NOW - 100 * H, NOW - 7 * H),   // 离线 7h（8h 宽限内）
   'acct1/bug-3': mkLink(3, NOW - 200 * H),                // 旧格式无 lastSeen，离线 200h
+  'acct1/bug-4': mkLink(4, NOW - 100 * H, NOW - 9 * H),   // 离线 9h（超 8h 宽限）
   'acct2/bug-9': mkLink(9, NOW - 200 * H),                // 其他账号
 }));
 lsBacking.set(SKEY, JSON.stringify({
-  'acct1/bug-2': { sessionId: 's-2', state: 'done', at: NOW - 2 * H },
+  'acct1/bug-2': { sessionId: 's-2', state: 'done', at: NOW - 7 * H },
   'acct1/bug-3': { sessionId: 's-3', state: 'done', at: NOW - 200 * H },
+  'acct1/bug-4': { sessionId: 's-4', state: 'done', at: NOW - 9 * H },
   'acct2/bug-9': { sessionId: 's-9', state: 'done', at: NOW - 200 * H },
   'acct1/bug-7': { sessionId: 's-7', state: 'done', at: NOW - 200 * H }, // 孤儿（无 link）
 }));
@@ -921,7 +923,10 @@ const lm2 = JSON.parse(lsBacking.get('dsh-zentao-panel.links.v1'));
 const sm2 = JSON.parse(lsBacking.get(SKEY));
 check('cleanupStaleLinks：超期离线删除（旧格式无 lastSeen 退回 at 计时），links 与进度一起删',
   lm2['acct1/bug-3'] === undefined && sm2['acct1/bug-3'] === undefined);
-check('cleanupStaleLinks：宽限期内（2h < 72h）保留', lm2['acct1/bug-2'] !== undefined && sm2['acct1/bug-2'].state === 'done');
+check('cleanupStaleLinks：宽限期内（7h < 8h）保留', lm2['acct1/bug-2'] !== undefined && sm2['acct1/bug-2'].state === 'done');
+check('cleanupStaleLinks：超过 8h 宽限（9h）删除（2026-10-29 用户要求：72h 太长，回来会带旧状态）',
+  lm2['acct1/bug-4'] === undefined && sm2['acct1/bug-4'] === undefined
+  && TT.LINK_GRACE_MS === 8 * 3600 * 1000);
 check('cleanupStaleLinks：其他账号条目不动', lm2['acct2/bug-9'] !== undefined && sm2['acct2/bug-9'] !== undefined);
 check('cleanupStaleLinks：孤儿进度记录（无关联）同样清理', sm2['acct1/bug-7'] === undefined);
 check('cleanupStaleLinks：在线条目刷新 lastSeen（计时基准重置）', lm2['acct1/bug-1'].lastSeen === NOW);
@@ -1900,7 +1905,7 @@ check('marks：隐藏卡离开「指派给我」列表（禅道完成/转派）�
   TT.hiddenCount(TT.readMarkMap(), 'acctM', [bc1, bc2]) === 1
   && TT.hiddenCount(TT.readMarkMap(), 'acctM', [bc1]) === 0
   && TT.hiddenCount(TT.readMarkMap(), 'acctM', []) === 0
-  && TT.markOf(TT.readMarkMap(), 'acctM', bc2).hide === true); // 标记本身按 72h 宽限保留
+  && TT.markOf(TT.readMarkMap(), 'acctM', bc2).hide === true); // 标记本身按 8h 宽限保留
 check('marks：同一卡旗标+隐藏并存，去掉一个另一个保留',
   TT.toggleCardMark('acctM', bc2, 'flag')
   && TT.markOf(TT.readMarkMap(), 'acctM', bc2).hide === true

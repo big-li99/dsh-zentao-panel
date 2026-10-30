@@ -391,7 +391,7 @@ Neko3000/deepseek-whalechan 公开规范——**注意其图片素材不在开�
   - **⚠️⚠️ 真机踩坑（2026-10-25，#16141 未标完成）**：宿主的 completionUnread **只对后台会话置位**——用户正看着的会话（「插入对话」跳过去手动发送、或中途点 chip/toast 去看过）跑完**永远不产生完成信号**。第一版把「running 归零」当瞬态删记录 → 这些场景下卡片漏成「无状态」。已修：**running 归零（有结束信号时）→ 升级记录为 done**（这一轮确实跑完了；steer 排队会重新出现 running 覆盖回去）；**ask 归零 = 用户已回应 → 删**（不是完成）。结束确认信号 `confirmed = statusReady || sessionSeen[sessionId]`（状态源非空，或该会话在快照里有行且全 false=真实 idle——比「Map 非空」更准，防跑完瞬间 Map 恰好清空时卡「处理中」）；两者皆无（DSH 刚启动）→ 不动（防重启风暴）。**注意：第一版期间跑完的任务记录已被删除，无法事后追补**（不敢追补——insert 模式建了会话没发送的也会是 idle，误标「已完成」），只保证此后正确。
   - **会话被删**（byIdReady 且无该行）→ 一律删（与 chip「会话已删除」语义一致）。**再处理**（saveSessionLink 覆盖新会话）→ 旧进度记录作废。
 - **渲染兜底 `resolveLiveState(link, snap, persisted)`**（liveOf/liveSinceOf 查询入口，返回 `{state, since}`）：实时优先；实时拿不到 → persisted 兜底——**done 粘性显示**，running/ask **仅在监控未就绪时**兜底（`watch.snapshot` 新增 `statusReady` 闸门，就绪后以实时为准，避免把重启前死掉的 turn 显示成「处理中」）。`LiveBadge` 加 `since` prop（兜底显示时 title 带「更新于 M月d日 HH:mm」）。`watchStateForCard` 保持纯实时（toast 边沿用）。
-- **定时清理 `cleanupStaleLinks(activeId, cards, now)`**：挂在 ZentaoPane 的 paneCache 同步 effect 里——**每次 mine 拉取成功后顺带跑**（mine 一次返回三类全量，不存在某类没刷新误删；「定时」即每次拉取/未来轮询）。规则：卡片在线 → 刷新 `lastSeen`（**每小时最多写一次盘**，减少 localStorage 磨损）；离线超过宽限期 `LINK_GRACE_MS = 72h`（旧格式值无 lastSeen 退回 `at` 计时）→ links 与 states 条目一起删；孤儿进度记录（无对应 link）同规则清；只动当前账号。有删动 bump `linkRev` 重读。
+- **定时清理 `cleanupStaleLinks(activeId, cards, now)`**：挂在 ZentaoPane 的 paneCache 同步 effect 里——**每次 mine 拉取成功后顺带跑**（mine 一次返回三类全量，不存在某类没刷新误删；「定时」即每次拉取/未来轮询）。规则：卡片在线 → 刷新 `lastSeen`（**每小时最多写一次盘**，减少 localStorage 磨损）；离线超过宽限期 `LINK_GRACE_MS = 8h`（**2026-10-29 用户要求从 72h 收紧**：72h 太长，卡片完结/转派离开列表后再被指派回来，旧「已完成」进度还挂着；8h 保证「当天短暂波动不误删、第二天回来是干净状态」。旧格式值无 lastSeen 退回 `at` 计时）→ links 与 states 条目一起删；孤儿进度记录（无对应 link）同规则清；只动当前账号。有删动 bump `linkRev` 重读。
 - `saveSessionLink` 值新增 `lastSeen`（= at，清理计时基准）。
 - 测试：`test/client.mjs` 新增 29 项（states.v1 自愈 / statusMapReady / syncPersistedStates 8 项含粘性 done、running 归零升级 done、sessionSeen 通道、重启防护、会话删除 / resolveLiveState 5 项 / cleanupStaleLinks 7 项含宽限保留、旧格式退回、他账号不动、孤儿清理、幂等 / saveSessionLink lastSeen 与换会话作废 / watchEval 联动落盘 + statusReady / 重启恢复 2 项）。⚠️ 测试注意：cleanup 会 `watchPoke` → watchEval，fake `sessions.list` 的 byId 必须覆盖全部关联会话，否则被误判「会话已删」连带删 done 记录。
 
@@ -484,7 +484,7 @@ placeholder「拼到任务背景末尾，如：只分析定位原因，先不要
 不 API 回写。DetailView 在元信息卡与「处理结果」区之间渲染「去禅道标记完成」外链按钮
 （`.ztp-finish-row` 包 `.ztp-btn.primary` 的 `<a target="_blank">`，
 仅当该卡 `resolveLiveState` 为 done 时显示——agent 处理完才有闭环动作；点开禅道完成操作页后事项
-离开指派列表，由 cleanupStaleLinks 72h 宽限清理）。
+离开指派列表，由 cleanupStaleLinks 8h 宽限清理）。
 
 ### 4.12 快捷筛选条（2026-10-25，用户批准的提案）
 
@@ -513,8 +513,8 @@ QUICK_FILTERS 现在 6 项）；隐藏 → `visCards` 把隐藏卡从列表/计�
 `.ztp-foot-hide`「显示已隐藏 N」临时切换 `showHidden`（淡化 `.ztp-card.hiddenmark` 显示，点 ⊘ 取消）。
 **N 只数当前列表里实际隐藏的卡**（`hiddenCount(map, activeId, cards)`；2026-10-26 用户反馈修复：
 原先按 marks 全量计数，卡片在禅道完成/转派离开「指派给我」后仍占着数字、点开却找不到那张卡）。
-隐藏标记本身仍按 72h 宽限保留（卡片重新指派回来仍然隐藏；`cleanupStaleLinks` 顺带清 marks：在线刷
-lastSeen 1h 限频 / 离线 72h 宽限删 / 只动当前账号）。
+隐藏标记本身仍按 8h 宽限保留（当日重新指派回来仍然隐藏；`cleanupStaleLinks` 顺带清 marks：在线刷
+lastSeen 1h 限频 / 离线 8h 宽限删 / 只动当前账号）。
 
 **③极速重发（lastdispatch.v1）**：`{workspaceId?, cwd?, model?, instr, at}`——sendDispatch **成功即保存**
 （含批量）。卡片动作行 ⚡（`quickTitle` 非空才渲染，title=`lastDispatchSummary` 摘要：工作区/继承目录/
@@ -528,7 +528,7 @@ lastSeen 1h 限频 / 离线 72h 宽限删 / 只动当前账号）。
 `getNote`/`noteLine`（压空白 50 字截断）。卡片标题下一行 `.ztp-note-line`（铅笔图标+摘要，title 全文）；
 DetailView 元信息卡下编辑区（textarea + 保存/清除，`noteText` 在切卡 effect 里重置——与备注共用一个 effect，
 并把「继续处理」框的 contOpen/contText 也一并重置）。cleanupStaleLinks 顺带清（在线 1h 限频刷 seenAt、
-离线 72h 宽限删，**notes 的在线计时字段叫 seenAt 不是 lastSeen**）。
+离线 8h 宽限删，**notes 的在线计时字段叫 seenAt 不是 lastSeen**）。
 
 **②继续处理（continueInSession）**：处理结果区「继续处理…」按钮（仅 `replyLink && onContinue` 存在时渲染）
 → 展开 textarea → 「续发到会话」。链路：`retain('zentao-panel')` → `scope` → `facade.setDraft(【继续处理
@@ -605,7 +605,7 @@ board 模式占满主体渲染 `BoardView`，**tab 段/快捷筛选条/排序/�
 
 - **丢失根因**（既有设计，见 §4.6）：done 是 states.v1 的粘性进度记录，但会话被删
   （syncPersistedStates 的 gone 分支）、再处理换会话（saveSessionLink 清 states）、卡片离开
-  列表 72h（cleanupStaleLinks）都会清；宿主的 completionUnread 又只对后台会话置位，正看着
+  列表 8h（cleanupStaleLinks）都会清；宿主的 completionUnread 又只对后台会话置位，正看着
   的会话跑完没有完成信号（§4.6 已用 running→done 补，但重启/会话删除等场景仍可能漏）。
 - **数据模型**：states.v1 条目新增 `manual:true`，完整值 `{sessionId, state, at, manual,
   lastSeen}`。`setManualState(activeId, card, state, now)`：state 为 null/不在 `LIVE_STATES`
@@ -747,7 +747,7 @@ board 模式占满主体渲染 `BoardView`，**tab 段/快捷筛选条/排序/�
   ended **只能人设**——`deriveLiveState` 永不产出它；`setManualState` 接受 ended，照旧写
   `{sessionId, state, at, manual:true, lastSeen}`。`resolveLiveState` 的 manual 分支天然支持
   （无需改判定）；`syncPersistedStates` 对 manual 条目照旧跳过，自动评估/会话删除都不会覆盖。
-  再处理换会话（saveSessionLink 清 states）与 72h 离场清理规则不变。
+  再处理换会话（saveSessionLink 清 states）与 8h 离场清理规则不变。
 - **UI**：LiveBadge 新增 `ended`：灰底灰字 + **方框对勾「封存章」**（rect + 对勾两步，不再用 done 的
   check 动画）；title 写「你已手动标记为已结束（不再跟进；选「自动」可恢复跟随会话）」。卡片根节点
   `ztp-live-ended`（opacity .6，hover/focus/选中恢复 .95；标题转 secondary；截止不再标红/临期，
@@ -892,7 +892,7 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   **点开该会话看完**（实时徽标本应消失）→ 回面板卡片**仍显示绿色「已完成」**（粘性进度记录，
   hover 徽标 title 带「更新于 …」时间）；② **重启 DSH Desktop** → 打开禅道面板 → 已完成事项的
   「已完成」徽标**立即可见**（states.v1 兜底，不等监控就绪）；DSH 关闭期间后台会话跑完的也能看到；
-  ③ 在禅道把某张处理过的卡完结/转派（离开「指派给我」列表）→ 72h 后面板任一次拉取成功时，
+  ③ 在禅道把某张处理过的卡完结/转派（离开「指派给我」列表）→ 8h 后面板任一次拉取成功时，
   该卡的会话 chip 与徽标一起消失（links/states 条目被清；验证可临时把 `LINK_GRACE_MS` 调小）；
   ④ 重启后正在跑的 turn 若已死，**不**显示「处理中」（瞬态兜底只在监控未就绪的过渡期生效）。
   **仅 client 改动，⌘R 生效**
