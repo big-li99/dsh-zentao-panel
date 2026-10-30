@@ -116,6 +116,27 @@ DSH_HOME=/tmp/zt-host  node test/host.mjs     # apply() + RPC wire 协议端到�
 （smoke/host 的禅道地址与账号来自 `ZENTAO_BASE`/`ZENTAO_ACCOUNT`/`ZENTAO_PASSWORD`
 环境变量或 `~/.dsh/zentao-panel/config.json`，不落 git。）
 
+## 发版（维护者）
+
+改 `package.json` 的 `version` 并切 `CHANGELOG.md` 顶部小节后，推 tag 即可：
+
+```bash
+git commit -am "release: v0.4.1 — …"
+git tag v0.4.1
+git push && git push --tags
+```
+
+[Release workflow](.github/workflows/release.yml) 随之自动完成两件事：
+
+1. 用 CHANGELOG 对应小节创建 GitHub Release（已存在则改标题/正文，重跑不报错）；
+2. 发 npm 包：校验 tag 与 `package.json` 版本一致（不一致直接失败）、版本已存在则跳过、
+   预发布版本（`0.4.1-rc.1`）发 `next` dist-tag、正式版发 `latest`。
+
+npm 侧用**信任发布（Trusted Publishing / OIDC）**，不需要任何长期 token，public 仓库自动附带
+provenance 徽标。一次性配置：npmjs.com → 本包 → Settings → **Trusted publishing** →
+Add trusted publisher → GitHub Actions，填 `big-li99` / `dsh-zentao-panel` / 工作流文件名 `release.yml`，
+并勾选允许 `npm publish`。**配置后 2 天内必须完成首次发布，否则配置过期作废**（需删掉重建）。
+
 ## 安装
 
 从 npm 安装（推荐）：

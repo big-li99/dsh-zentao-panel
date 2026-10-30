@@ -20,7 +20,74 @@ jobs:
           # CHANGELOG 里没有对应小节时兜底，避免 Release 建不出来
           [ -s notes.md ] || echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/master/CHANGELOG.md)。" > notes.md
 
+      # 幂等：重跑本 workflow（例如 npm 发布失败后修复重跑）时 Release 已存在，
+      # 直接 gh release create 会报错，连带挡住后面的 publish job
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --title "dsh-zentao-panel $GITHUB_REF_NAME" --notes-file notes.md
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --title "dsh-zentao-panel $GITHUB_REF_NAME" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --title "dsh-zentao-panel $GITHUB_REF_NAME" --notes-file notes.md
+          fi
+
+  publish:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # 信任发布（OIDC）必需：runner 用它换 npm 的短时发布令牌
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 24 + npm >= 11.5.1 才支持信任发布，下面一步再显式升一次 npm 兜底
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Upgrade npm
+        run: npm install -g npm@latest && npm --version
+
+      - name: Read package metadata
+        id: pkg
+        run: |
+          echo "name=$(jq -r .name package.json)" >> "$GITHUB_OUTPUT"
+          echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+
+      # 版本闸门：tag 与 package.json 不一致就停，避免把 v0.4.1 的 tag 发成 0.4.0
+      - name: Verify tag matches package.json version
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="${{ steps.pkg.outputs.version }}"
+          echo "tag=$GITHUB_REF_NAME  stripped=$TAG  package.json=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::tag $GITHUB_REF_NAME 与 package.json version $PKG 不一致，先改 package.json 再重推 tag"
+            exit 1
+          fi
+
+      # 幂等：该版本已在 registry 上（重推 tag / 重跑 workflow）就跳过，不打 E409
+      - name: Check registry for existing version
+        id: check
+        run: |
+          NAME="${{ steps.pkg.outputs.name }}"
+          VER="${{ steps.pkg.outputs.version }}"
+          if npm view "$NAME@$VER" version >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::$NAME@$VER 已存在于 npm，跳过发布"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::$NAME@$VER 尚未发布，开始发布"
+          fi
+
+      # 预发布版本（0.5.0-rc.1）发到 next，正式版才动 latest——npm 默认永远抢 latest
+      - name: Publish to npm
+        if: steps.check.outputs.exists == 'false'
+        run: |
+          VER="${{ steps.pkg.outputs.version }}"
+          if [[ "$VER" == *-* ]]; then
+            npm publish --tag next
+          else
+            npm publish
+          fi
