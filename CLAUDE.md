@@ -46,6 +46,18 @@ DSH_HOME=/tmp/zt-host  node test/host.mjs    # apply() + RPC wire 协议端到�
 **配好后 2 天内必须完成首次发布，否则配置过期需删掉重建**（[docs](https://docs.npmjs.com/trusted-publishers/)）。
 workflow 改动验证：`actionlint`（带 shellcheck）零告警；版本闸门可用 `GITHUB_REF_NAME=vX.Y.Z` 本地复跑。
 
+**awesome-dsh-plugin 列表条目同步**（只有**用户可见**变化的版本才做）：条目是上游仓库
+[awesome-dsh-plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin) 里的
+`data/plugins/big-li99__dsh-zentao-panel.yml`（分类 `workflow`）——两个 README 由它生成，**绝不手改**。
+改法：fork `big-li99/awesome-dsh-plugin` 先 `merge-upstream` 同步（长期不用的 fork 会落后上千提交）
+→ 建分支 PUT 该 yml（带上游 blob sha，单引号里的 `'` 写 `''`、含 `: ` 必须整体加引号）→ 开 PR，
+**只动这一个文件**。纯内部修复（0.4.1 的清理宽限期 72h→8h、CI 发版调整）**不改描述**，条目本身也不带
+版本号。历史 PR：#9242 收录、#9886（按 v0.4.0 更新）、#11589（v0.4.1 补「等你决策时在面板内答复 agent」
+与「完成后跳转禅道完成/解决页」两项）。
+完整发版步骤（截图入仓/CHANGELOG 切版/离线测试/打 tag/`gh`+`npm view` 核对/awesome 条目同步）见项目技能
+`.dsh/skills/dsh-zentao-panel-release/SKILL.md`——在仓库工作区打开的 DSH 会话自动载入，需显式调用
+（`disable-model-invocation: true`）。
+
 ## 文件结构
 
 ```
@@ -55,6 +67,8 @@ dsh-zentao-panel/
 ├── README.md            # 用户视角说明（安装/进度）
 ├── package.json         # dsh.bundle + dsh.client 清单声明
 ├── cordis.patch.yml     # cordis loader insert 条目
+├── .dsh/skills/         # 项目级 DSH 技能（以本仓库为工作区打开会话时自动载入）
+│   └── dsh-zentao-panel-release/SKILL.md  # 发版流程：切版 → 打 tag → CI 发 npm 并核对结果
 ├── lib/                 # host 半边（Node ESM，零 npm 依赖）
 │   ├── index.js         # 插件入口 apply(ctx) —— inject: ['webServer', 'connection']
 │   ├── zentao-client.mjs# 禅道 HTTP 客户端（登录协议/cookie jar/my-work/v1 详情）

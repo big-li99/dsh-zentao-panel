@@ -4,6 +4,14 @@
 
 ## [Unreleased]
 
+### 维护
+
+- **发版技能入仓**：`dsh-zentao-panel-release` 从 `~/.dsh/skills` 迁到仓库内的 `.dsh/skills/`
+  （项目级技能，在 DSH 里以本仓库为工作区打开的会话自动载入），并改写为现行 CI 发版流程——推
+  `v*` tag 后由 `release.yml` 走信任发布（OIDC），删掉已失效的本机 `npm publish` 与 npm 令牌排查
+  步骤，补版本闸门、`next`/`latest` 与 trusted publisher 过期的排查。技能不进 npm tarball
+  （`files` 不含 `.dsh/`）。
+
 ## [0.4.1] - 2026-10-30
 
 ### 修复
