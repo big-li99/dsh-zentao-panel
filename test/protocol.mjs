@@ -52,6 +52,18 @@ const v1StoryPayload = {
   ],
 };
 
+// v1 task 详情载荷（真机实测形态：详情有 executionName / moduleTitle，但没有 projectName；
+// 详情页的「项目」只能靠列表卡里的值，所以 client 侧要「先卡片、后详情」合并）
+const v1TaskPayload = {
+  id: 101, name: '任务A', status: 'wait', pri: 2, desc: '<p>做点事</p>',
+  project: 49, execution: 58, executionName: '第二批迭代0930提测任务',
+  module: 788, moduleTitle: '电子档案/档案整理',
+  estimate: '16', consumed: '8', left: '8', progress: 50,
+  assignedTo: { id: 114, account: ACCOUNT, realname: '李宏博' },
+  openedBy: { id: 29, account: 'zhangsan', realname: '徐峰' },
+  actions: [],
+};
+
 const realFetch = globalThis.fetch;
 globalThis.fetch = async (url, init = {}) => {
   const u = new URL(String(url));
@@ -61,14 +73,31 @@ globalThis.fetch = async (url, init = {}) => {
     if (myWorkMode === 'redirect') return new Response('<html><title>用户登录</title>跳转 user-login</html>', { status: 200 });
     if (myWorkMode === 'denied') return jsonResponse({ result: 'fail', message: '您没有权限执行该操作' });
     if (myWorkMode === 'expired' || !alive) return jsonResponse({ result: false, message: '登录已超时，请重新登入!' });
-    return jsonResponse({ status: 'success', data: JSON.stringify({ tasks: [{ id: '101', name: '任务A', status: 'wait', assignedTo: { account: ACCOUNT } }] }) });
+    return jsonResponse({ status: 'success', data: JSON.stringify({ tasks: [{
+      id: '101', name: '任务A', status: 'wait',
+      // 真机形态：列表给的是账号字符串（不是 {account,realname} 对象）
+      assignedTo: ACCOUNT, openedBy: 'zhangsan',
+      project: '49', projectName: '财务共享中心系统-贵州农信项目',
+      execution: '58', executionName: '第二批迭代0930提测任务',
+      module: 788, estimate: '16', consumed: '8', left: '8', progress: 50,
+      storyID: '8', storyTitle: '需求C', fromBug: '0',
+    }] }) });
   }
   if (u.pathname === '/my-work-bug.json') {
-    return jsonResponse({ status: 'success', data: JSON.stringify({ bugs: [{ id: '202', title: 'BugB', severity: 2 }] }) });
+    return jsonResponse({ status: 'success', data: JSON.stringify({ bugs: [{
+      id: '202', title: 'BugB', severity: 2, status: 'active',
+      project: '49', execution: '56', module: '463',
+      product: '12', productName: '财务共享中心系统-贵州农信项目',
+      openedBy: 'chenyudong', story: '0',
+    }] }) });
   }
   if (u.pathname === '/my-work-story.json') {
-    return jsonResponse({ status: 'success', data: JSON.stringify({ stories: { 8: { id: '8', title: '需求C' } } }) });
+    return jsonResponse({ status: 'success', data: JSON.stringify({ stories: { 8: {
+      id: '8', title: '需求C', product: '12', productName: '财务共享中心系统-贵州农信项目', stage: 'developing',
+    } } }) });
   }
+  // v1 task 详情路由（档案字段：详情只带 executionName/moduleTitle，不带 projectName）
+  if (u.pathname === '/api.php/v1/tasks/101') return jsonResponse(v1TaskPayload);
   // v1 story 详情路由
 if (u.pathname === '/api.php/v1/stories/8') return jsonResponse(v1StoryPayload);
 if (u.pathname === '/api.php/v1/stories/999') {
@@ -148,6 +177,37 @@ check('重登走了登录协议（GET login + refreshRandom + POST login）',
   calls.includes('GET /user-login.html') && calls.includes('GET /user-refreshRandom.html') && calls.includes('POST /user-login.html'));
 const again = await service.fetchMine();
 check('重登后缓存命中（不再重登）', again.cached === true && calls.filter((c) => c === 'POST /user-login.html').length === 1);
+
+// ── 2.5 事项档案字段映射（2026-11-09：项目/执行 · 工时口径 · 上游需求）──────
+const taskCard = mine.cards.find((c) => c.kind === 'task');
+const bugCard = mine.cards.find((c) => c.kind === 'bug');
+check('档案映射：列表任务带项目名/执行名 + 工时口径 + 进度',
+  taskCard.projectName === '财务共享中心系统-贵州农信项目'
+  && taskCard.executionName === '第二批迭代0930提测任务'
+  && taskCard.execution === 58 && taskCard.project === 49
+  && taskCard.estimate === 16 && taskCard.consumed === 8 && taskCard.left === 8 && taskCard.progress === 50,
+  JSON.stringify({ p: taskCard.projectName, e: taskCard.executionName, est: taskCard.estimate }));
+check('档案映射：上游需求取 storyID、来源 Bug 的 0 视为无',
+  taskCard.storyId === 8 && taskCard.storyTitle === '需求C' && taskCard.fromBug === null);
+check('档案映射：Bug 无工时字段 → null，产品名/执行照常',
+  bugCard.estimate === null && bugCard.consumed === null && bugCard.left === null
+  && bugCard.productName === '财务共享中心系统-贵州农信项目'
+  && bugCard.execution === 56 && bugCard.module === 463 && bugCard.storyId === null);
+check('档案映射：裸 id 字符串（"49"/"58"/"788"）不当名字，宁可不显示',
+  bugCard.projectName === '' && bugCard.executionName === '' && bugCard.moduleTitle === ''
+  && taskCard.moduleTitle === '' && taskCard.productName === '',
+  JSON.stringify({ p: bugCard.projectName, e: bugCard.executionName, m: bugCard.moduleTitle }));
+check('列表字符串形态的指派人/创建人不再丢成空串（按人搜索可用）',
+  taskCard.assignedTo === ACCOUNT && taskCard.openedBy === 'zhangsan' && bugCard.openedBy === 'chenyudong');
+
+calls.length = 0;
+const det101 = await service.fetchDetail('task', 101);
+check('详情映射：moduleTitle/executionName 透传，不额外打请求',
+  det101.moduleTitle === '电子档案/档案整理' && det101.executionName === '第二批迭代0930提测任务'
+  && calls.filter((c) => c === 'GET /api.php/v1/tasks/101').length === 1,
+  calls.join(','));
+check('详情映射：详情不带 projectName（client 侧靠列表卡合并）；指派人取真名',
+  det101.projectName === '' && det101.assignedTo === '李宏博' && det101.estimate === 16);
 
 // ── 3. v1 详情路径复数 + actions 精简映射（2026-10-25 提案 2）──
 calls.length = 0;

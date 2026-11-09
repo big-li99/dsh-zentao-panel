@@ -2540,5 +2540,144 @@ const anchorNode = TT.CardItem({ card: bc1, linkView: null, live: null, onOpen: 
 check('CardItem 根节点带 data-zcard 锚点（kind-id）',
   anchorNode.props['data-zcard'] === 'bug-1');
 
+// ── 事项档案（2026-11-09）：项目/执行 · 工时口径 · 上游需求 ──
+const scTask = {
+  kind: 'task', id: 101, title: '任务A', status: 'wait',
+  executionName: '第二批迭代0930提测任务', moduleTitle: '电子档案/档案整理',
+  projectName: '财务共享中心系统-贵州农信项目',
+};
+check('档案：归属行任务取执行名、Bug 取产品名，拼模块、全空 → null',
+  TT.scopeTextOf(scTask) === '第二批迭代0930提测任务 · 电子档案/档案整理'
+  && TT.scopeTextOf({ kind: 'bug', productName: '财务共享中心系统' }) === '财务共享中心系统'
+  && TT.scopeTextOf({ kind: 'task', moduleTitle: '模块' }) === '模块'
+  && TT.scopeTextOf({ kind: 'task' }) === null
+  && TT.scopeTextOf(null) === null);
+check('档案：关联对象链接从 card.url 推 base，id 非法/url 形态不符 → null',
+  TT.relatedUrlOf({ url: 'http://zt/task-view-101.html' }, 'story', 8) === 'http://zt/story-view-8.html'
+  && TT.relatedUrlOf({ url: 'http://zt/task-view-101.html' }, 'bug', 202) === 'http://zt/bug-view-202.html'
+  && TT.relatedUrlOf({ url: 'http://zt/task-view-101.html' }, 'story', 0) === null
+  && TT.relatedUrlOf({ url: 'http://zt/my.html' }, 'story', 8) === null
+  && TT.relatedUrlOf(null, 'story', 8) === null);
+check('档案：工时文案（16h / 0.5h / 空值与非法值 → 空串）',
+  TT.fmtHours(16) === '16h' && TT.fmtHours(0.5) === '0.5h'
+  && TT.fmtHours(null) === '' && TT.fmtHours('') === '' && TT.fmtHours('x') === '');
+const hProgress = TT.hoursOf({ estimate: 16, consumed: 8, left: 8, progress: 75 }, {});
+const hRatio = TT.hoursOf({ estimate: 16, consumed: 8, left: 8 }, {});
+const hOver = TT.hoursOf({ estimate: 4, consumed: 8 }, {});
+const hDetail = TT.hoursOf({}, { estimate: 8, left: 3 });
+check('档案：hoursOf 优先 progress，其次 consumed/estimate（>100% 夹到 100），全缺 → null',
+  hProgress.pct === 75 && hRatio.pct === 50 && hOver.pct === 100
+  && TT.hoursOf({ kind: 'bug' }, {}) === null);
+check('档案：hoursOf 详情兜底（列表没带工时时用详情的）+ hoursText 缺项跳过',
+  hDetail.estimate === 8 && hDetail.left === 3 && hDetail.pct === null
+  && TT.hoursText(hRatio) === '预计 16h · 已耗 8h · 剩余 8h'
+  && TT.hoursText({ estimate: 2, consumed: null, left: null, pct: null }) === '预计 2h'
+  && TT.hoursText(null) === '');
+check('档案：refLabel 名字+id / 只有 id / 只有名字 / 空',
+  TT.refLabel('财务', 49) === '财务（#49）' && TT.refLabel('', 49) === '#49'
+  && TT.refLabel('X') === 'X' && TT.refLabel('', null) === '');
+check('档案：infoValue 先卡片后详情、空值不覆盖列表已有值',
+  TT.infoValue({ projectName: 'X' }, { projectName: '' }, 'projectName') === 'X'
+  && TT.infoValue({ projectName: '' }, { projectName: 'D' }, 'projectName') === 'D'
+  && TT.infoValue({}, { moduleTitle: '模块' }, 'moduleTitle') === '模块'
+  && TT.infoValue({}, {}, 'projectName') === '');
+const scNode = TT.CardItem({ card: scTask, linkView: null, live: null, onOpen: () => {} });
+const scLine = flatNodes(scNode.children).find((n) => n && n.props && n.props.className === 'ztp-scope');
+check('CardItem：标题下渲染归属行（执行 · 模块，单行小字）',
+  Boolean(scLine) && textOf(scLine) === '第二批迭代0930提测任务 · 电子档案/档案整理'
+  && scLine.props.title === '第二批迭代0930提测任务 · 电子档案/档案整理');
+const scBare = TT.CardItem({ card: { kind: 'bug', id: 2, title: 'b', status: 'active' }, linkView: null, live: null, onOpen: () => {} });
+check('CardItem：没有归属数据时不渲染空行',
+  !flatNodes(scBare.children).some((n) => n && n.props && n.props.className === 'ztp-scope'));
+const archCard = {
+  kind: 'task', id: 101, title: '任务A', status: 'wait',
+  assignedTo: '李宏博', openedBy: '徐峰',
+  project: 49, projectName: '财务共享中心系统-贵州农信项目',
+  execution: 58, executionName: '第二批迭代0930提测任务',
+  module: 788, moduleTitle: '电子档案/档案整理',
+  estimate: 16, consumed: 8, left: 8, progress: 50,
+  storyId: 8, storyTitle: '需求C', fromBug: 202,
+  url: 'http://zt.example/task-view-101.html',
+};
+const archDv = TT.DetailView({ card: archCard, rpc: () => {}, live: null, onBack: () => {} });
+const archKv = flatNodes(archDv.children).find((n) => n && n.props && n.props.className === 'ztp-kv');
+const archKvText = textOf(archKv);
+check('DetailView：档案行显示项目/执行/模块/需求/来源（名字带 #id）',
+  archKvText.includes('财务共享中心系统-贵州农信项目（#49）')
+  && archKvText.includes('第二批迭代0930提测任务（#58）')
+  && archKvText.includes('电子档案/档案整理')
+  && archKvText.includes('#8 需求C')
+  && archKvText.includes('Bug #202'));
+const archStoryLink = flatNodes(archKv.children).find((n) => n && n.type === 'a' && String(n.props.href).includes('story-view-8'));
+const archBugLink = flatNodes(archKv.children).find((n) => n && n.type === 'a' && String(n.props.href).includes('bug-view-202'));
+check('DetailView：需求与来源 Bug 是真链接（新标签打开禅道查看页）',
+  archStoryLink && archStoryLink.props.target === '_blank'
+  && archBugLink && archBugLink.props.href === 'http://zt.example/bug-view-202.html');
+const archHours = flatNodes(archDv.children).find((n) => n && n.props && n.props.className === 'ztp-hours');
+const archBarFill = archHours ? flatNodes(archHours.children).find((n) => n && n.type === 'i') : null;
+check('DetailView：工时行 + 进度条（预计/已耗/剩余 + 50%）',
+  Boolean(archHours) && textOf(archHours).includes('预计 16h · 已耗 8h · 剩余 8h')
+  && textOf(archHours).includes('50%')
+  && archBarFill && archBarFill.props.style['--ztp-p'] === '50%');
+const bugDv = TT.DetailView({
+  card: { kind: 'bug', id: 202, title: 'b', status: 'active', productName: '财务共享中心系统' },
+  rpc: () => {}, live: null, onBack: () => {},
+});
+check('DetailView：无工时字段（Bug）不渲染工时行，产品行照常',
+  !flatNodes(bugDv.children).some((n) => n && n.props && n.props.className === 'ztp-hours')
+  && textOf(flatNodes(bugDv.children).find((n) => n && n.props && n.props.className === 'ztp-kv')).includes('财务共享中心系统'));
+
+// ── 详情内存缓存 + 挂载静默刷新（2026-11-09 用户反馈「每次打开都要加载一下」）──
+TT.clearDetailCache();
+const cacheCard = { kind: 'bug', id: 16964, title: 'x' };
+check('详情缓存：键带账号（多实例下同 kind-id 不是同一条）',
+  TT.detailCacheKey('acctA', cacheCard) === 'acctA/bug-16964'
+  && TT.detailCacheKey(null, cacheCard) === 'anon/bug-16964'
+  && TT.detailCacheKey('acctA', null) === 'acctA/null-null');
+TT.writeDetailCache('acctA', cacheCard, { desc: '第一版' }, 1000);
+check('详情缓存：写入后能读回；别的账号读不到',
+  TT.readDetailCache('acctA', cacheCard, 2000)?.desc === '第一版'
+  && TT.readDetailCache('acctB', cacheCard, 2000) === null
+  && TT.readDetailCache('acctA', null, 2000) === null);
+check('详情缓存：TTL 到期即失效（过期读返回 null 并清掉条目）',
+  TT.readDetailCache('acctA', cacheCard, 1000 + TT.DETAIL_CACHE_TTL_MS)?.desc === '第一版'
+  && TT.readDetailCache('acctA', cacheCard, 1001 + TT.DETAIL_CACHE_TTL_MS) === null
+  && TT.detailCache.size === 0);
+TT.clearDetailCache();
+for (let i = 0; i < TT.DETAIL_CACHE_MAX + 1; i++) {
+  TT.writeDetailCache('acctA', { kind: 'bug', id: i + 1 }, { n: i }, 1000);
+}
+const oldestGone = TT.readDetailCache('acctA', { kind: 'bug', id: 1 }, 2000) === null;
+const secondOldestAlive = TT.readDetailCache('acctA', { kind: 'bug', id: 2 }, 2000)?.n === 1;
+check('详情缓存：上限 LRU（写满后再写一条，最旧的先出）',
+  TT.detailCache.size === TT.DETAIL_CACHE_MAX && oldestGone && secondOldestAlive);
+TT.clearDetailCache();
+for (let i = 0; i < TT.DETAIL_CACHE_MAX; i++) {
+  TT.writeDetailCache('acctA', { kind: 'bug', id: i + 1 }, { n: i }, 1000);
+}
+TT.readDetailCache('acctA', { kind: 'bug', id: 1 }, 2000); // 用到 id=1 → 挪到队尾
+TT.writeDetailCache('acctA', { kind: 'bug', id: 999 }, { n: 'new' }, 1000);
+check('详情缓存：命中即刷新 LRU 顺序（用过的不先淘汰）',
+  TT.readDetailCache('acctA', { kind: 'bug', id: 1 }, 2000)?.n === 0
+  && TT.readDetailCache('acctA', { kind: 'bug', id: 2 }, 2000) === null
+  && TT.readDetailCache('acctA', { kind: 'bug', id: 999 }, 2000)?.n === 'new');
+TT.clearDetailCache();
+check('详情缓存：clearDetailCache 清空 / 空值不写入',
+  (TT.writeDetailCache('acctA', cacheCard, null), TT.detailCache.size === 0)
+  && (TT.writeDetailCache('acctA', null, { desc: 'x' }), TT.detailCache.size === 0));
+check('静默刷新判定：有 paneCache 列表或快照就不转圈（含「已知为空」），全无才走 loading',
+  TT.hasListData({ cards: [{ id: 1 }] }, null) === true
+  && TT.hasListData(null, { cards: [] }) === true
+  && TT.hasListData({ cards: [] }, null) === true
+  && TT.hasListData(null, null) === false
+  && TT.hasListData(null, { at: 1 }) === false
+  && TT.hasListData(undefined, { cards: 'x' }) === false);
+const reloadDv = TT.DetailView({ card: archCard, rpc: () => {}, activeAcct: 'acctA', live: null, onBack: () => {} });
+const reloadBtn = flatNodes(reloadDv.children).find((n) => n && n.props && n.props.className === 'ztp-detail-reload');
+check('DetailView：返回栏有「重新读取」（绕过本机缓存）且点击不抛错',
+  Boolean(reloadBtn) && textOf(reloadBtn) === '重新读取'
+  && String(reloadBtn.props.title).includes('跳过本机缓存')
+  && (reloadBtn.props.onClick(), true));
+
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);

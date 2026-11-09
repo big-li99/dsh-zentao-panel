@@ -53,6 +53,13 @@ over again, then go back and update the status. The middle step loses informatio
 
 - **Three categories + detail**: tasks / bugs / stories, each with list and detail views
   (description, screenshots, activity, notes).
+- **Instant detail**: detail content is cached per account for 10 minutes, so reopening the same card
+  paints immediately while a background refresh runs; "Reload" forces a fresh read. Opening the panel
+  refreshes silently when a local snapshot exists, so no loading flash.
+- **Item profile**: a small ownership line under each card title (execution for tasks, product for
+  bugs/stories, plus module); detail adds project / execution / product / module / parent requirement /
+  source bug (both link straight into ZenTao) and an effort row (estimated / consumed / left + a progress
+  bar — bug reports carry no effort, so the row is hidden). All of it comes from requests already made.
 - **Search**: title, `#ID`, status, creator and assignee in one haystack; multiple space-separated terms
   must all match.
 - **Sort**: smart (default), by deadline, by priority, or original order. Smart sort ranks
@@ -292,9 +299,9 @@ docs/architecture.md  internals: data paths, slot registration, dispatch timing,
 Offline self-check (no DSH, no ZenTao needed):
 
 ```bash
-node test/client.mjs      # 381 assertions: bundle load + registration contract + pure functions
+node test/client.mjs      # 402 assertions: bundle load + registration contract + pure functions
 node test/multi.mjs       # 41 assertions: multi-account store migration / switch / cache isolation / removal
-node test/protocol.mjs    # 14 assertions: ZenTao response envelope, actions mapping, auto re-login
+node test/protocol.mjs    # 21 assertions: ZenTao response envelope, actions mapping, auto re-login
 ```
 
 Integration suites that need an internal ZenTao instance are listed in

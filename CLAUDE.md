@@ -857,7 +857,7 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
 - **client 免构建**：手写 `window.__ModuleLoader__.load` 包装的 CJS 风格 bundle（dsh-notify-me 模式），不用 esbuild——改动即时生效，代价是不能用 JSX（全用 `h()` createElement）
 - **RPC 通道选型**：直接挂自己 inject 的 webServer（dsh-pocket v2 模式），回退 `ctx.connection.rpc.handle`；不复刻浏览器 cookie 认证（loopback-only 信任栅栏足够）
 - **缓存 60s**：面板展开不重复打禅道；「刷新」按钮带 `refresh:true` 强刷
-- **卡片统一模型**：`{kind, id, title, status, pri, severity, deadline, assignedTo, openedBy, execution, product, url, descBrief, images}`，Markdown 生成在 client 的 `cardToMarkdown()`
+- **卡片统一模型**：`{kind, id, title, status, pri, severity, deadline, assignedTo, openedBy, execution, executionName, project, projectName, product, productName, module, moduleTitle, estimate, consumed, left, progress, storyId, storyTitle, fromBug, url, descBrief, images}`（档案字段 2026-11-09 加，见 §4.23），Markdown 生成在 client 的 `cardToMarkdown()`
 - **详情只读改版（2026-10-25 用户要求）**：DetailView 移除全部按钮/链接（会话 chip、插入对话、处理、在禅道打开；「返回」仅在窄容器覆盖模式 <720px 保留），动作全部在左侧卡片上；禅道超链接迁到卡片顶行 #id 旁的小图标 `ztp-zlink`（stopPropagation + `draggable:false` 防链接拖拽覆盖卡片 Markdown 拖拽）。详情图片改为**真实截图画廊** `DetailImages`：`zentao.image` RPC 逐张取字节 → `data:<type>;base64` 直接渲染（DSH 会话 UI 渲染附件图片就是 data:/blob:，主窗口无 CSP 拦截；`--dsw-alias-link` token 已在 asar 源码确认存在），逐张独立落位、单张失败虚线占位、点击全屏放大再点关闭；描述文本用 `stripImageMarkers()` 去掉 `[图片：xxx]` 占位。渲染路径曾用一次性冒烟脚本验证（假 React + 可用 hooks，未入仓库），`test/client.mjs` 93 项不受影响
 - **「插入对话」改版（2026-10-25 用户要求，见 §4.5）**：从「插入当前会话输入框」改为弹层式新会话——同「处理」弹层选工作区/模型/思考强度，但建会话后 `uiWorkspace.openSession` **自动跳转**过去、只填草稿+附件**不自动发送**；共用 `createDraftSession` 前段（create 并行图片预取 → retain('zentao-panel') → setDraft），跳转后释放自己的 retain（mainView 接管保活）。失败降级链保留：新会话建不成/接口缺失 → `insertToCurrentChat` 插当前会话输入框（旧版行为）→ 剪贴板
 - **多账号（M5，2026-10-24）**：
@@ -869,6 +869,53 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
   - RPC：新增 `zentao.switch {id}`；`zentao.logout {id?}`（不传 = 移除激活账号）；`zentao.rename {id, alias}`；`zentao.status` 返回值多 `activeId` + `accounts[]`（含 alias）
   - client：头部账号 chip（`.ztp-acct`）点开 `AccountSwitcher` 弹层（切换/添加/改别名/按账号移除）；切换用持久化 cookie 即时生效；`LoginView` 复用（`mode:'add'` 带取消按钮）；切换/移除后 `mine`/`detail` 先清空再由 effect（依赖 `activeId`）重拉
   - 移除激活账号 → 自动切到剩余第一个；最后一个移除 → `clearConfig()`
+
+### 4.23 事项档案补全：项目/执行 · 工时 · 上游需求（2026-11-09，用户批准的 Idea 1 阶段 1）
+
+- **数据面实测**（本机 18.13，2026-11-09 只读探针）：`my-work-task.json` 带 `projectName/executionName/
+  estimate/consumed/left/progress/storyID/storyTitle/fromBug`；`my-work-bug.json` 带 `productName` 与
+  `product`，**没有工时字段**；v1 详情带 `executionName/moduleTitle`，但**没有 `projectName`**
+  （所以详情页要「先卡片、后详情」合并）。**⚠️ 列表里的 `project/execution/module` 是字符串形式的裸 id**
+  （`"49"/"58"/"788"`），详情里才是数字——`nameFrom()` 把纯数字串判成「不是名字」，否则卡片会显示
+  「49 · 788」。所有字段都来自已有两个接口，**不新增任何网络请求**。
+- **host**（`toCard`）：新增 `executionName/projectName/productName/module/moduleTitle/estimate/
+  consumed/left/progress/storyId/storyTitle/fromBug`；`execution/project/product` 用 `refId()`（数字、
+  字符串、`{id,name}` 对象都收，0/空 → null）。顺手修掉 `assignedTo/openedBy`——列表返回账号字符串、
+  详情返回对象，原来只认对象 → 列表卡这两项一直空串，**按人搜索也匹配不到**（现在两种形态都收）。
+- **client**：`scopeTextOf`（任务取执行名、Bug/需求取产品名，再拼模块名，全空 → null）→ 卡片标题下
+  `.ztp-scope` 单行小字；详情 kv 增加 项目/执行/产品/模块/需求/来源 六行（需求与来源 Bug 用
+  `relatedUrlOf()` 从 `card.url` 推 base 生成 `story-view`/`bug-view` 链接，新标签打开）+ `.ztp-hours`
+  工时行（预计/已耗/剩余 + `--ztp-p` 宽度进度条；`hoursOf` 优先 `progress`，否则 consumed/estimate，
+  >100% 夹回，三项全缺 → 整行不渲染，Bug 天然如此）；`infoValue(card, detail, key)` 先卡片后详情、
+  空值不覆盖。纯函数全部进 `_test`。
+- 测试：protocol +7（列表/详情映射、裸 id 不当名字、字符串指派人、详情不带 projectName），
+  client +13（6 个纯函数 + CardItem 归属行有无 + DetailView 六行/链接/工时/无工时）→
+  client 394 / protocol 21 / multi 41 全绿。真机：host 改动需重启桌面版；本机 task #1442 卡片应显示
+  「第二批迭代0930提测任务」，详情显示项目/执行/模块「电子档案/档案整理」/工时 16·8·8/50%。
+
+### 4.24 详情缓存 + 挂载静默刷新（2026-11-09，用户反馈「没有做缓存吗，每次打开都会加载一下」）
+
+体检结论（真机实测耗时）：列表有 host 60s（`service.mjs:13`）+ 本机 `mine.v1` 快照，图片有双层缓存，
+回复摘要有 `replies.v1`，但 **v1 详情接口零缓存**——每次点卡重付 ~400ms，且 effect 先把 detail 清空
+（闪「加载中…」）；列表每次挂载都走 `loadMine(false)`（非 silent）→ mast 右上角转圈，host 缓存过期时
+要转满 ~2.5s（冷拉三个 my-work 接口）。仅 client 改动，⌘R 生效，**不用重启桌面版**。
+
+- **详情内存缓存**（模块级 `detailCache: Map`，键 `detailCacheKey(activeId, card)` = `<账号>/<kind>-<id>`，
+  多实例下同 id 不是同一条）：TTL `DETAIL_CACHE_TTL_MS = 10min`、上限 `DETAIL_CACHE_MAX = 60`（LRU，
+  读命中即挪队尾，超限淘汰最旧）。`read/writeDetailCache(activeId, card, …, now?)` 的 `now` 可注入
+  （测试用）；不落盘（⌘R / 重启即清）。
+- **DetailView 首屏先铺缓存**：effect 里 `detail[1](readDetailCache(...) || null)` —— **不再先置 null**，
+  后台请求回来再替换并回写缓存；**有缓存时后台失败不弹错误**（保留旧内容，不打断阅读）。
+  详情返回栏加 `.ztp-detail-reload`「重新读取」（`reloadRev` bump 重跑 effect，强制再拉一次）。
+  `activeAcct` 由 ZentaoPane 传入（renderDetail 里 `activeAcct: activeAcct`）。
+- **挂载静默刷新**：activeId effect 改为 `loadMine(false, hasListData(mine[0], snap))`——
+  有 paneCache 列表或本机快照（**含「已知为空」**）就不转圈/不闪骨架，只静默更新；真没数据
+  （首次、切到无快照账号）才走带 loading 的路径。手动刷新按钮与 5 分钟轮询行为不变。
+- 测试：client +8（键含账号 / 读写往返 + 账号隔离 / TTL 过期清条目 / 上限淘汰最旧 / 命中刷新 LRU /
+  clear + 空值不写 / `hasListData` 六态 / 「重新读取」按钮存在且点击不抛错）→
+  client **402** / protocol 21 / multi 41 全绿。
+- ⚠️ fake React 的 `useEffect` 不执行，所以「首屏铺缓存」本身只能靠 `readDetailCache` 纯函数测试覆盖；
+  真机复验点：连点两张卡来回切，第二次应**无加载态**；详情栏「重新读取」点击后内容有一次刷新。
 
 ## 剩余任务（按优先级）
 

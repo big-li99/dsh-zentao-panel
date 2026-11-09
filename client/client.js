@@ -243,6 +243,8 @@
         // 详情页元信息行
         '.ztp-meta{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin-top:8px;font-size:11.5px;color:var(--dsw-alias-label-tertiary);}',
         '.ztp-card-title{margin-top:4px;font-size:13.5px;line-height:1.5;color:var(--dsw-alias-label-primary);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word;}',
+        // 事项档案行（列表卡片）：执行/产品 · 模块，小字单行，只做定位不做强调
+        '.ztp-scope{margin-top:2px;font-size:11px;line-height:1.4;color:var(--dsw-alias-label-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}',
 
         // 类型标签（列表/详情）：小一号、方一点，跟优先级徽标同一套视觉重量
         '.ztp-tag{display:inline-flex;align-items:center;height:17px;padding:0 6px;border-radius:5px;font-size:10.5px;font-weight:600;flex:none;line-height:17px;}',
@@ -358,6 +360,10 @@
         '.ztp-detail-copy{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;height:24px;padding:0 6px;border-radius:var(--dsw-alias-radius-sm,var(--dsw-radius-sm));cursor:pointer;display:inline-flex;align-items:center;gap:3px;margin-left:auto;}',
         '.ztp-detail-copy:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover);}',
         '.ztp-detail-copy svg{width:13px;height:13px;}',
+        // 「重新读取」：详情有缓存后，用户仍可主动绕过缓存拉一次最新
+        '.ztp-detail-reload{appearance:none;border:0;background:transparent;color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;height:24px;padding:0 6px;border-radius:var(--dsw-alias-radius-sm,var(--dsw-radius-sm));cursor:pointer;display:inline-flex;align-items:center;gap:3px;}',
+        '.ztp-detail-reload:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover);}',
+        '.ztp-detail-reload svg{width:13px;height:13px;}',
         '.ztp-back:hover{color:var(--dsw-alias-label-primary);}',
         '.ztp-back svg{width:13px;height:13px;}',
         // 卡片 #id 旁的禅道外链小图标（详情里不再放链接/按钮，超链接迁到卡片上）
@@ -369,6 +375,13 @@
         '.ztp-kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px;margin-top:10px;font-size:12px;color:var(--dsw-alias-label-secondary);}',
         '.ztp-kv dt{color:var(--dsw-alias-label-tertiary);white-space:nowrap;}',
         '.ztp-kv dd{margin:0;word-break:break-word;}',
+        '.ztp-kv dd a{color:var(--dsw-alias-state-business-primary);text-decoration:none;}',
+        '.ztp-kv dd a:hover{text-decoration:underline;}',
+        // 工时口径（详情元信息卡下）：预计/已耗/剩余 + 一条轻量进度条
+        '.ztp-hours{display:flex;align-items:center;gap:8px;margin-top:9px;font-size:11.5px;color:var(--dsw-alias-label-secondary);flex-wrap:wrap;}',
+        '.ztp-hours-bar{position:relative;flex:1;min-width:64px;height:4px;border-radius:2px;background:var(--dsw-alias-interactive-bg-hover);overflow:hidden;}',
+        '.ztp-hours-bar i{position:absolute;left:0;top:0;bottom:0;width:var(--ztp-p,0%);background:var(--dsw-alias-state-business-primary);border-radius:2px;}',
+        '.ztp-hours-pct{font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-tertiary);}',
         // 完成闭环按钮行（详情元信息卡下，仅 done 状态渲染）
         '.ztp-finish-row{margin-top:12px;display:flex;}',
         // 处理状态手动修正（详情元信息卡下）：自动检测丢失时可手改，持久化在本机
@@ -1524,6 +1537,84 @@
         return m ? (m[1] + method + '-' + m[2] + '.html') : null;
       }
 
+      // ───── 事项档案（2026-11-09）：项目 / 执行 / 产品 · 模块 · 工时 · 上游需求 ─────
+      // 数据全部现成，不额外打请求：my-work 列表里任务就带 projectName / executionName /
+      // estimate…，v1 详情带 executionName / moduleTitle（真机实测）。缺值的项整条不渲染
+      // ——宁可少显示，也不给用户看裸 id 或空标签。
+      var SCOPE_NAME_KEY = { task: 'executionName', bug: 'productName', story: 'productName' };
+
+      /** 一行归属：任务看所属执行，Bug/需求看所属产品，再拼模块名；全空 → null。 */
+      function scopeTextOf(card) {
+        if (!card) return null;
+        var main = String(card[SCOPE_NAME_KEY[card.kind] || 'productName'] || '').trim();
+        var mod = String(card.moduleTitle || '').trim();
+        var out = [main, mod].filter(Boolean).join(' · ');
+        return out || null;
+      }
+
+      /** 关联对象（需求 / 来源 Bug）的禅道查看页：从卡片 url 推 base，形态不符 → null。 */
+      function relatedUrlOf(card, kind, id) {
+        var n = Number(id);
+        if (!card || !(n > 0) || !kind) return null;
+        var m = /^(.*\/)(?:task|bug|story)-view-\d+\.html?$/.exec(String(card.url || ''));
+        return m ? (m[1] + kind + '-view-' + n + '.html') : null;
+      }
+
+      /** 工时数值 → 短文案（16 → 「16h」，0.5 → 「0.5h」；非数值 → 空串）。 */
+      function fmtHours(v) {
+        var n = typeof v === 'number' ? v : Number(v);
+        if (v === null || v === undefined || v === '' || !isFinite(n)) return '';
+        return (Math.round(n * 10) / 10) + 'h';
+      }
+
+      /** 工时口径 + 进度百分比；预计/已耗/剩余三者全缺 → null（Bug 不记工时）。 */
+      function hoursOf(card, detail) {
+        var d = detail || {};
+        var pick = function (k) {
+          var v = (card && card[k] !== null && card[k] !== undefined && card[k] !== '') ? card[k] : d[k];
+          return (typeof v === 'number' && isFinite(v)) ? v : null;
+        };
+        var est = pick('estimate'), con = pick('consumed'), left = pick('left');
+        if (est === null && con === null && left === null) return null;
+        var p = pick('progress');
+        var pct;
+        if (p !== null) pct = Math.max(0, Math.min(100, Math.round(p)));
+        else if (est !== null && est > 0 && con !== null) pct = Math.max(0, Math.min(100, Math.round((con / est) * 100)));
+        else pct = null;
+        return { estimate: est, consumed: con, left: left, pct: pct };
+      }
+
+      /** 「预计 16h · 已耗 8h · 剩余 8h」；缺项跳过。 */
+      function hoursText(h) {
+        if (!h) return '';
+        var parts = [];
+        if (h.estimate !== null) parts.push('预计 ' + fmtHours(h.estimate));
+        if (h.consumed !== null) parts.push('已耗 ' + fmtHours(h.consumed));
+        if (h.left !== null) parts.push('剩余 ' + fmtHours(h.left));
+        return parts.join(' · ');
+      }
+
+      /**
+       * 档案字段取值：先卡片（列表接口）、再详情（v1 详情），空值跳过。
+       * 真机实测两边的字段不重合（列表任务有 projectName，详情有 moduleTitle 但没有 projectName），
+       * 详情一加载不能把列表里已有的值覆盖成空。
+       */
+      function infoValue(card, detail, k) {
+        var v = card ? card[k] : undefined;
+        if (v === null || v === undefined || v === '') v = (detail || {})[k];
+        return (v === null || v === undefined) ? '' : v;
+      }
+
+      /** 「名字（#id）」；只有 id 就给 #id，什么都没有给空串。 */
+      function refLabel(name, id) {
+        var n = String(name == null ? '' : name).trim();
+        var i = Number(id);
+        var hasId = i > 0;
+        if (n && hasId) return n + '（#' + i + '）';
+        if (n) return n;
+        return hasId ? '#' + i : '';
+      }
+
       // ───────────────────────── composer 写入（M3）─────────────────────────
       // DSH 的 composer 是 contenteditable（Lexical 受控），稳定挂点是 [data-composer-input]。
       // 必须走 execCommand insertText（或 textContent + input 事件），直接改 DOM 不会同步内部状态。
@@ -2612,6 +2703,51 @@
         try { s.setItem(MINE_KEY, JSON.stringify(all)); } catch (e) { /* 忽略 */ }
       }
 
+      // ───────────── 详情内存缓存（2026-11-09 用户反馈「每次打开都要加载一下」）─────────────
+      // v1 详情接口没有缓存：同一张卡重开要重付 ~400ms（实测），而且会把内容先清空再填，
+      // 于是每次都闪一下「加载中…」。这里按「账号 + kind-id」做模块级内存缓存（多实例下同
+      // id 不是同一条）：TTL 10 分钟、上限 60 条（LRU，最旧先出）。命中内容先铺上，再用后台
+      // 返回的结果替换——复看同一条 0ms，首次仍是一次请求。⌘R / 重启即清，不落盘。
+      var DETAIL_CACHE_TTL_MS = 10 * 60 * 1000;
+      var DETAIL_CACHE_MAX = 60;
+      var detailCache = new Map();
+
+      function detailCacheKey(activeId, card) {
+        return String(activeId || 'anon') + '/' + String(card && card.kind) + '-' + String(card && card.id);
+      }
+      /** 读缓存（命中即算一次使用，挪到队尾保 LRU 顺序）；过期 → 删掉返回 null。 */
+      function readDetailCache(activeId, card, now) {
+        if (!card) return null;
+        var k = detailCacheKey(activeId, card);
+        var hit = detailCache.get(k);
+        if (!hit) return null;
+        var t = typeof now === 'number' ? now : Date.now();
+        if (t - (Number(hit.at) || 0) > DETAIL_CACHE_TTL_MS) {
+          detailCache.delete(k);
+          return null;
+        }
+        detailCache.delete(k);
+        detailCache.set(k, hit);
+        return hit.value;
+      }
+      /** 写缓存：超上限淘汰最旧（Map 迭代序即新旧序）。 */
+      function writeDetailCache(activeId, card, value, now) {
+        if (!card || !value) return;
+        var k = detailCacheKey(activeId, card);
+        detailCache.delete(k);
+        detailCache.set(k, { at: typeof now === 'number' ? now : Date.now(), value: value });
+        while (detailCache.size > DETAIL_CACHE_MAX) {
+          detailCache.delete(detailCache.keys().next().value);
+        }
+      }
+      function clearDetailCache() { detailCache.clear(); }
+
+      /** 挂载时是否已有可展示数据（paneCache 的列表 / 本机快照，含「已知为空」）：
+       *  有就静默刷新（不转 mast 圈、不闪骨架），没有才走带 loading 的常规拉取。 */
+      function hasListData(mine, snap) {
+        return Boolean((mine && Array.isArray(mine.cards)) || (snap && Array.isArray(snap.cards)));
+      }
+
       // ───────────── 处理结果摘要回读（replies.v1 + 关联会话事件窗口）─────────────
       // 不跳会话就知道 agent 最后说了什么：retain 关联会话（retain 即自动打开事件流
       // 并回放最近历史窗口，HISTORY_PAGE_OPTIONS：maxMessages 500 / minTurns 2）→
@@ -3435,6 +3571,7 @@
         var quiet = isFinalCard(c) || live === 'ended';
         var dlCls = (!quiet && due && due.tone) ? ' ' + due.tone : '';
         var dueText = (!quiet && due) ? due.text : fmtDate(c.deadline);
+        var scope = scopeTextOf(c);
         var dueTitle = c.deadline ? '截止 ' + fmtDate(c.deadline) : '';
         if (!quiet && due && due.tone === 'overdue') dueTitle += ' · 已逾期 ' + (-due.days) + ' 天';
         return h('div', {
@@ -3483,6 +3620,7 @@
               c.deadline ? h('span', { className: 'ztp-dl' + dlCls, title: dueTitle }, dueText) : null,
               props.active && !sel ? h('span', { className: 'ztp-viewing-badge' }, '查看中') : null)),
           h('div', { className: 'ztp-card-title' }, c.title || ''),
+          scope ? h('div', { className: 'ztp-scope', title: scope }, scope) : null,
           props.note ? h('div', { className: 'ztp-note-line', title: '本地备注：' + props.note },
             h(NoteIcon), noteLine(props.note)) : null,
           props.replySummary ? h('div', { className: 'ztp-reply-line', title: 'agent 最新回复：' + props.replySummary },
@@ -3761,6 +3899,7 @@
         var noteText = useState(props.note || ''); // 本地备注编辑值；切卡重置（effect）
         var contOpen = useState(false), contText = useState(''); // 继续处理：展开态 + 追问文本
         var askOpen = useState(false), askText = useState('');   // 决策应答台：自定义回复展开态 + 文本
+        var reloadRev = useState(0);                             // 「重新读取」：bump 触发重拉
         useEffect(function () {
           noteText[1](String(props.note || ''));
           contOpen[1](false); contText[1](''); // 切卡收起续发框、清空输入
@@ -3768,16 +3907,24 @@
         }, [card.kind, card.id, props.note]);
         useEffect(function () {
           var alive = true;
-          detail[1](null); err[1](null);
+          // 先铺缓存：复看同一条不再等一次网络（也不再先清空 → 不闪「加载中…」）。
+          // 有缓存时后台请求只负责更新；失败保留旧内容，不打断阅读。
+          var cached = readDetailCache(props.activeAcct, card);
+          detail[1](cached || null);
+          err[1](null);
           Promise.resolve(props.rpc('zentao.detail', { kind: card.kind, id: card.id }))
             .then(function (r) {
               if (!alive) return;
-              if (r && r.ok) detail[1](r.value);
-              else err[1]((r && r.error && r.error.message) || '详情加载失败');
+              if (r && r.ok) {
+                detail[1](r.value);
+                writeDetailCache(props.activeAcct, card, r.value);
+              } else if (!cached) {
+                err[1]((r && r.error && r.error.message) || '详情加载失败');
+              }
             })
-            .catch(function (e) { if (alive) err[1](String((e && e.message) || e)); });
+            .catch(function (e) { if (alive && !cached) err[1](String((e && e.message) || e)); });
           return function () { alive = false; };
-        }, [card.kind, card.id]);
+        }, [card.kind, card.id, reloadRev[0]]);
 
         var d = detail[0] || {};
         var dlAll = card.deadline || d.deadline;
@@ -3788,6 +3935,21 @@
         // 图片以真实截图渲染（DetailImages），文本里的 [图片：xxx] 占位标记随之去掉
         var desc = stripImageMarkers(d.desc || card.descBrief || '');
         var imgs = imagesOf(card, detail[0]);
+        // 档案字段：列表卡与详情响应各带一部分（真机实测：列表任务有 projectName，详情有
+        // moduleTitle，详情没有 projectName）——统一「先卡片、后详情、空值跳过」，
+        // 免得详情一加载反而把列表里已有的项目名覆盖成空。
+        var pickInfo = function (k) { return infoValue(card, d, k); };
+        var hours = hoursOf(card, d);
+        var projectText = refLabel(pickInfo('projectName'), pickInfo('project'));
+        var executionText = refLabel(pickInfo('executionName'), pickInfo('execution'));
+        var productText = refLabel(pickInfo('productName'), pickInfo('product'));
+        var moduleText = String(pickInfo('moduleTitle') || '').trim();
+        var storyId = Number(pickInfo('storyId')) || 0;
+        var storyTitleText = String(pickInfo('storyTitle') || '').trim();
+        var storyLabel = storyId
+          ? ('#' + storyId + (storyTitleText ? ' ' + storyTitleText : ''))
+          : storyTitleText;
+        var fromBugId = Number(pickInfo('fromBug')) || 0;
         return h('div', null,
           // 详情纯只读：链接/按钮都在左侧卡片上；返回按钮仅在窄容器覆盖模式下可见
           h('div', { className: 'ztp-detail-bar' },
@@ -3797,7 +3959,13 @@
               className: 'ztp-detail-copy', type: 'button',
               title: '复制完整 Markdown（标题 + 描述/重现步骤）到剪贴板',
               onClick: function () { props.onCopyMd(card, detail[0] || null); },
-            }, h(CopyIcon), '复制 Markdown')),
+            }, h(CopyIcon), '复制 Markdown'),
+            // 详情有内存缓存（10 分钟）后，这里给一个主动绕过缓存的入口
+            h('button', {
+              className: 'ztp-detail-reload', type: 'button',
+              title: '重新读取这条事项的详情与最近动态（跳过本机缓存）',
+              onClick: function () { reloadRev[1](function (v) { return v + 1; }); },
+            }, h(RefreshIcon), '重新读取')),
 
           h('div', { className: 'ztp-panel-card ztp-k-' + card.kind
               + (props.live === 'ask' ? ' ztp-live-ask' : props.live === 'done' ? ' ztp-live-done' : props.live === 'ended' ? ' ztp-live-ended' : '') },
@@ -3816,12 +3984,42 @@
               }, (dlCls.indexOf('overdue') !== -1 ? '逾期 ' : '截止 ') + fmtDate(card.deadline || d.deadline)) : null),
 
             h('dl', { className: 'ztp-kv' },
-              h('dt', null, '指派给'), h('dd', null, card.assignedTo || '—'),
-              h('dt', null, '创建人'), h('dd', null, card.openedBy || '—'),
+              h('dt', null, '指派给'), h('dd', null, pickInfo('assignedTo') || '—'),
+              h('dt', null, '创建人'), h('dd', null, pickInfo('openedBy') || '—'),
+              projectText ? h('dt', null, '项目') : null, projectText ? h('dd', null, projectText) : null,
+              executionText ? h('dt', null, '执行') : null, executionText ? h('dd', null, executionText) : null,
+              productText ? h('dt', null, '产品') : null, productText ? h('dd', null, productText) : null,
+              moduleText ? h('dt', null, '模块') : null, moduleText ? h('dd', null, moduleText) : null,
+              storyLabel ? h('dt', null, '需求') : null,
+              storyLabel ? h('dd', null,
+                (storyId && relatedUrlOf(card, 'story', storyId))
+                  ? h('a', {
+                    className: 'ztp-kvlink', href: relatedUrlOf(card, 'story', storyId),
+                    target: '_blank', rel: 'noreferrer', title: '在禅道打开该需求的查看页',
+                  }, storyLabel)
+                  : storyLabel) : null,
+              fromBugId ? h('dt', null, '来源') : null,
+              fromBugId ? h('dd', null,
+                relatedUrlOf(card, 'bug', fromBugId)
+                  ? h('a', {
+                    className: 'ztp-kvlink', href: relatedUrlOf(card, 'bug', fromBugId),
+                    target: '_blank', rel: 'noreferrer', title: '在禅道打开来源 Bug',
+                  }, 'Bug #' + fromBugId)
+                  : 'Bug #' + fromBugId) : null,
               d.type ? h('dt', null, '类型') : null, d.type ? h('dd', null, String(d.type)) : null,
               d.stage ? h('dt', null, '阶段') : null, d.stage ? h('dd', null, String(d.stage)) : null,
               d.estStarted ? h('dt', null, '预计开始') : null, d.estStarted ? h('dd', null, fmtDate(d.estStarted)) : null,
-              d.resolvedBuild ? h('dt', null, '解决版本') : null, d.resolvedBuild ? h('dd', null, String(d.resolvedBuild)) : null)),
+              d.resolvedBuild ? h('dt', null, '解决版本') : null, d.resolvedBuild ? h('dd', null, String(d.resolvedBuild)) : null),
+
+            // 工时口径：预计 / 已耗 / 剩余 + 轻量进度条（Bug 没有工时字段 → 整行不渲染）
+            hours ? h('div', { className: 'ztp-hours' },
+              h('span', null, hoursText(hours)),
+              (hours.pct !== null)
+                ? h('span', {
+                  className: 'ztp-hours-bar', role: 'img',
+                  title: '工时进度 ' + hours.pct + '%',
+                }, h('i', { style: { '--ztp-p': hours.pct + '%' } })) : null,
+              (hours.pct !== null) ? h('span', { className: 'ztp-hours-pct' }, hours.pct + '%') : null) : null),
 
           // 处理状态手动修正（2026-10-27 用户要求）：自动检测偶尔会丢（会话被删、DSH 重启、
           // 正看着的会话跑完宿主不置完成未读），这里手动覆盖；持久化在 states.v1，重开面板/
@@ -4579,11 +4777,11 @@
         // 激活账号变化（登录/切换/移除）→ 先用上次快照秒开（标 cached），再后台拉取替换
         useEffect(function () {
           if (status[0] && status[0].configured) {
-            if (!mine[0]) {
-              var snap = readMineSnapshot(status[0].activeId);
-              if (snap && snap.cards.length) mine[1](snap);
-            }
-            loadMine(false);
+            var snap = mine[0] ? null : readMineSnapshot(status[0].activeId);
+            if (snap && snap.cards.length) mine[1](snap);
+            // 已有可展示数据（paneCache 列表 / 快照）→ 静默刷新：打开面板就是完整列表，
+            // 不转 mast 圈、不闪骨架；只有真没数据（首次、切到无快照账号）才走带 loading 的路径
+            loadMine(false, hasListData(mine[0], snap));
           }
         }, [status[0] && status[0].configured, status[0] && status[0].activeId]);
 
@@ -5075,6 +5273,7 @@
           return h(DetailView, {
             key: dCard.kind + '-' + dCard.id,
             rpc: rpc, card: dCard,
+            activeAcct: activeAcct,
             live: liveOf(dCard),
             liveSince: liveSinceOf(dCard),
             manual: liveManualOf(dCard),
@@ -5513,6 +5712,15 @@
         readMineSnapshot: readMineSnapshot,
         writeMineSnapshot: writeMineSnapshot,
         removeMineSnapshot: removeMineSnapshot,
+        // 详情内存缓存（打开即用上次内容，后台静默更新）+ 挂载静默刷新判定
+        detailCache: detailCache,
+        detailCacheKey: detailCacheKey,
+        readDetailCache: readDetailCache,
+        writeDetailCache: writeDetailCache,
+        clearDetailCache: clearDetailCache,
+        DETAIL_CACHE_TTL_MS: DETAIL_CACHE_TTL_MS,
+        DETAIL_CACHE_MAX: DETAIL_CACHE_MAX,
+        hasListData: hasListData,
         // 处理结果摘要回读（replies.v1 + 事件窗口）
         readReplyMap: readReplyMap,
         getReply: getReply,
@@ -5555,6 +5763,14 @@
         instrChipLabel: instrChipLabel,
         normInstrPresets: normInstrPresets,
         finishUrl: finishUrl,
+        // 事项档案（2026-11-09）：归属行 / 工时口径 / 关联对象链接
+        scopeTextOf: scopeTextOf,
+        relatedUrlOf: relatedUrlOf,
+        fmtHours: fmtHours,
+        hoursOf: hoursOf,
+        hoursText: hoursText,
+        infoValue: infoValue,
+        refLabel: refLabel,
         LiveBadge: LiveBadge,
         CardItem: CardItem,
         DetailView: DetailView,
