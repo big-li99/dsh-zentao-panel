@@ -2679,5 +2679,55 @@ check('DetailView：返回栏有「重新读取」（绕过本机缓存）且点
   && String(reloadBtn.props.title).includes('跳过本机缓存')
   && (reloadBtn.props.onClick(), true));
 
+// ── 加载态图标（2026-11-10）：刷新按钮位置改用「静态刷新图标自转」+ 其余加载圈改矢量圆环 ──
+const spinRefresh = TT.RefreshIcon({ className: 'ztp-spin' });
+check('加载态：刷新位置复用 RefreshIcon 并以 ztp-spin 自转（不切形状）',
+  spinRefresh.type === 'svg' && spinRefresh.props.className === 'ztp-spin'
+  && flatNodes(spinRefresh.children).length === 2
+  && flatNodes(spinRefresh.children).every((n) => n.props && n.props.strokeWidth === 1.2));
+const ringSpin = TT.SpinnerIcon({ style: { width: '12px' } });
+const ringCircles = flatNodes(ringSpin.children).filter((n) => n.type === 'circle');
+check('加载圈：SpinnerIcon 是矢量双圆（轨道 + 圆头弧），尺寸可被内联样式覆盖',
+  ringSpin.type === 'svg' && ringSpin.props.className === 'ztp-spin'
+  && ringSpin.props.style.width === '12px'
+  && ringCircles.length === 2
+  && ringCircles[1].props.strokeLinecap === 'round'
+  && String(ringCircles[1].props.strokeDasharray).split(' ').length === 2);
+const spinCssAll = appended.map((s) => s.textContent).join('');
+const spinRule = (spinCssAll.match(/\.ztp-spin\{[^}]*\}/) || [''])[0];
+check('加载圈：CSS 只负责尺寸 + 自转，不再用 conic-gradient/mask/border 画（14px 下会出马赛克颗粒）',
+  spinRule.includes('animation:ztp-rot') && !/conic-gradient|mask:|-webkit-mask|border-top-color/.test(spinRule));
+
+// ── 自转收尾（2026-11-10 用户反馈「动画没有衔接上，突然就复位了」）──
+// 撤掉动画那一刻的角度必须落在整圈上（360°≡0°，与静止态完全一致），否则会回弹。
+const SPIN = TT.SPIN_MS;
+check('收尾：CSS 动画时长与 SPIN_MS 同源', spinRule.includes(`ztp-rot ${SPIN / 1000}s`));
+check('收尾：刚转完一整圈时立刻可停（delay 0）',
+  TT.spinSettleDelay(1000, 1000, SPIN) === 0 && TT.spinSettleDelay(1000, 1000 + SPIN, SPIN) === 0);
+check('收尾：转了一半就等剩下半圈（不停在任意角度）',
+  TT.spinSettleDelay(1000, 1000 + SPIN / 2, SPIN) === SPIN / 2
+  && TT.spinSettleDelay(1000, 1000 + SPIN * 3.25, SPIN) === SPIN * 0.75);
+check('收尾：任意时刻停下时，delayed 之后的角度都是整圈（无回弹）',
+  [1, 137, 450, 899, 1000, 4321, 98765].every((dt) => {
+    const now = 1000 + dt;
+    const at = now + TT.spinSettleDelay(1000, now, SPIN);
+    return (at - 1000) % SPIN === 0;
+  }));
+check('收尾：没有开始时刻（未转过）时直接停，不空转',
+  TT.spinSettleDelay(0, 5000, SPIN) === 0);
+
+const busySlot = TT.RefreshSlot({ busy: true, onRefresh: () => {} });
+const busySvg = flatNodes(busySlot.children)[0];
+check('刷新位：加载中 = span.ztp-tool + 自转的刷新图标（同一颗图标，不换形状）',
+  busySlot.type === 'span' && busySlot.props.className === 'ztp-tool'
+  && busySvg.type === TT.RefreshIcon && busySvg.props.className === 'ztp-spin');
+const idleSlot = TT.RefreshSlot({ busy: false, onRefresh: () => {} });
+check('刷新位：空闲 = 可点的刷新按钮（title/onClick 保留，图标回到静态）',
+  idleSlot.type === 'button' && idleSlot.props.className === 'ztp-tool'
+  && idleSlot.props.title === '重新拉取' && typeof idleSlot.props.onClick === 'function'
+  && flatNodes(idleSlot.children)[0].type === TT.RefreshIcon
+  && flatNodes(idleSlot.children)[0].props === undefined);
+check('刷新位：未配置账号（没有 onRefresh）时不渲染按钮', TT.RefreshSlot({ busy: false, onRefresh: null }) === null);
+
 console.log(failures ? `\n${failures} 项失败` : '\n全部通过');
 process.exit(failures ? 1 : 0);

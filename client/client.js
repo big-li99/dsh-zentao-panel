@@ -41,6 +41,8 @@
       // 选中态按这个 id 寻址 main 注册项（dsh-client-ui-sidebar README 契约）
       var PANEL_ID = 'zentao';
       var TAB_ID = 'dsh-zentao-panel'; // 悬浮兜底入口的 slot id
+      // 加载圈自转一圈的时长（ms）：CSS 动画与「收尾凑整圈」共用同一个数，见 spinSettleDelay。
+      var SPIN_MS = 900;
 
       // ───────────────────────── 样式 ─────────────────────────
       // 只用 DSH 的语义 token：bg-layer-1/2、border-l1..l4、label-primary/secondary/tertiary、
@@ -198,7 +200,9 @@
         '.ztp-tool{width:28px;height:28px;flex:none;display:inline-flex;align-items:center;justify-content:center;padding:6px;border:0;border-radius:var(--dsw-radius-sm);background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;line-height:1;box-sizing:border-box;}',
         '.ztp-tool:hover{background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}',
         '.ztp-tool svg{width:15px;height:15px;}',
-        '.ztp-spin{width:14px;height:14px;border-radius:50%;border:1.5px solid var(--dsw-alias-border-l4);border-top-color:var(--dsw-alias-label-secondary);animation:ztp-rot .8s linear infinite;box-sizing:border-box;}',
+        // 自转（加载态）：只在矢量描边上转，不再用 border / conic-gradient + mask 画小圆环——
+        // 14px 下那种画法在 Chromium 里会被抖动填充，看着有马赛克颗粒（2026-11-10 用户两轮反馈）。
+        '.ztp-spin{width:14px;height:14px;flex:none;display:inline-block;animation:ztp-rot ' + (SPIN_MS / 1000) + 's linear infinite;}',
         '@keyframes ztp-rot{to{transform:rotate(360deg)}}',
 
         // 主体：左列表 / 右详情 双栏（宽面板）；窄容器（悬浮兜底 <720px）详情覆盖列表
@@ -608,12 +612,72 @@
           h('path', { d: 'M9.3 9.3l1.1 1.1 2.1-2.3', stroke: 'currentColor', strokeWidth: 1.1, strokeLinecap: 'round', strokeLinejoin: 'round' }),
         );
       }
-      function RefreshIcon() {
-        return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+      /** 刷新：加载态复用同一颗图标自转（className 传 ztp-spin），静态/转动态形状一致，切换不跳。 */
+      function RefreshIcon(props) {
+        return h('svg', {
+          viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true',
+          className: props && props.className, style: props && props.style,
+        },
           h('path', { d: 'M13.1 8a5.1 5.1 0 1 1-1.55-3.67', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round' }),
           h('path', { d: 'M13.3 2.9v2.6h-2.6', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round', strokeLinejoin: 'round' }),
         );
       }
+      /** 加载圈（列表/图片/详情等「正在加载」处）：矢量圆环，等宽描边 + 圆头，随 .ztp-spin 自转。 */
+      function SpinnerIcon(props) {
+        var r = 5;
+        var arc = 8.8; // 约 100° 的移动弧
+        var circumference = 2 * Math.PI * r; // ≈31.42
+        return h('svg', {
+          viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true',
+          className: 'ztp-spin' + (props && props.className ? ' ' + props.className : ''),
+          style: props && props.style,
+        },
+          h('circle', { cx: 8, cy: 8, r: r, stroke: 'currentColor', strokeWidth: 1.4, opacity: '.24' }),
+          h('circle', {
+            cx: 8, cy: 8, r: r, stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round',
+            strokeDasharray: arc + ' ' + (circumference - arc).toFixed(2), transform: 'rotate(-90 8 8)',
+          }),
+        );
+      }
+      /** 停转还要等多久（ms）：把当前这一圈转完，让动画停在 360° 的整数倍上——
+          那一瞬间的视觉角度与静止态（0°）完全一致，所以「转完 → 停」不会突然回弹复位。
+          startedAt/now 都是时间戳；period 缺省取 SPIN_MS（与 CSS 动画同一时长）。 */
+      function spinSettleDelay(startedAt, now, period) {
+        var p = period || SPIN_MS;
+        if (!p || !startedAt) return 0;
+        var phase = (now - startedAt) % p;
+        return phase === 0 ? 0 : p - phase;
+      }
+
+      /** 刷新位：加载中让同一颗刷新图标自转；加载结束后先把这一圈转完再切回可点的静态按钮，
+          全程同一个视觉身份，不换形状、不回弹（2026-11-10 用户反馈「突然就复位了」）。 */
+      var spinStartedAt = 0;
+      function RefreshSlot(props) {
+        var busy = !!(props && props.busy);
+        var spinning = useState(busy);
+        useEffect(function () {
+          if (busy) {
+            if (!spinStartedAt) spinStartedAt = Date.now();
+            if (!spinning[0]) spinning[1](true);
+            return;
+          }
+          if (!spinning[0]) return;
+          // 收尾：等当前这一圈走完（≤SPIN_MS）再撤掉动画，撤掉时角度正好在 0° 上。
+          var timer = setTimeout(function () {
+            spinStartedAt = 0;
+            spinning[1](false);
+          }, spinSettleDelay(spinStartedAt, Date.now()));
+          return function () { clearTimeout(timer); };
+        }, [busy, spinning[0]]);
+        if (busy || spinning[0]) {
+          return h('span', { className: 'ztp-tool', 'aria-hidden': 'true' }, h(RefreshIcon, { className: 'ztp-spin' }));
+        }
+        if (!props || !props.onRefresh) return null;
+        return h('button', {
+          className: 'ztp-tool', type: 'button', title: '重新拉取', onClick: props.onRefresh,
+        }, h(RefreshIcon));
+      }
+
       function LogoutIcon() {
         return h('svg', { viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
           h('path', { d: 'M6.5 2.9H3.9c-.66 0-1.2.54-1.2 1.2v7.8c0 .66.54 1.2 1.2 1.2h2.6', stroke: 'currentColor', strokeWidth: 1.2, strokeLinecap: 'round' }),
@@ -4112,7 +4176,7 @@
               ? h('div', { className: 'ztp-reply' }, h(MarkdownLite, { text: props.reply.text }))
               : (props.replyLoading
                 ? h('div', { className: 'ztp-reply', style: { color: 'var(--dsw-alias-label-tertiary)', display: 'block' } },
-                    h('span', { className: 'ztp-spin', style: { display: 'inline-block', verticalAlign: '-2px' } }), ' 正在读取…')
+                    h(SpinnerIcon, { style: { verticalAlign: '-2px' } }), ' 正在读取…')
                 : h('div', { className: 'ztp-reply', style: { color: 'var(--dsw-alias-label-tertiary)', display: 'block' } }, '暂无缓存的回复，可点下方「重新读取」')),
             h('div', { className: 'ztp-reply-meta' },
               props.reply ? h('span', null, '更新于 ' + fmtLinkAt(props.reply.at)) : null,
@@ -4215,7 +4279,7 @@
                   })
                 : (row.failed
                   ? h('div', { className: 'ztp-img-failed' }, '图片加载失败，可在禅道查看')
-                  : h('div', { className: 'ztp-img-loading' }, h('span', { className: 'ztp-spin' }))));
+                  : h('div', { className: 'ztp-img-loading' }, h(SpinnerIcon))));
           }),
           zoom[0] ? h('div', { className: 'ztp-img-zoom', onClick: function () { zoom[1](null); } },
             h('img', { src: zoom[0], alt: '' })) : null,
@@ -5179,7 +5243,7 @@
 
         /** 状态未知时先占位，避免登录表单闪一下。 */
         function renderLoading() {
-          return h('div', { className: 'ztp-empty' }, h('span', { className: 'ztp-spin', style: { display: 'inline-block' } }));
+          return h('div', { className: 'ztp-empty' }, h(SpinnerIcon));
         }
 
         /** 列表列：骨架 / 错误 / 空态 / 卡片列表（详情移到右侧栏）。 */
@@ -5328,12 +5392,10 @@
                 + '（点击切换/管理账号）',
               onClick: function () { acctOpen[1](!acctOpen[0]); },
             }, h('span', { className: 'ztp-acct-label' }, acctDisplayName(st) || '未命名'), h(ChevronDownIcon)) : null,
-            loading[0]
-              ? h('span', { className: 'ztp-tool', 'aria-hidden': 'true' }, h('span', { className: 'ztp-spin' }))
-              : (configured ? h('button', {
-                className: 'ztp-tool', type: 'button', title: '重新拉取',
-                onClick: function () { loadMine(true); },
-              }, h(RefreshIcon)) : null),
+            (configured || loading[0]) ? h(RefreshSlot, {
+              busy: !!loading[0],
+              onRefresh: configured ? function () { loadMine(true); } : null,
+            }) : null,
             configured ? h('button', {
               className: 'ztp-tool', type: 'button', title: '退出当前账号（清除本机凭据）',
               onClick: logout,
@@ -5480,7 +5542,7 @@
 
           toast[0] ? h('div', { className: 'ztp-toast', role: 'status' },
             (typeof toast[0] === 'object' && toast[0].sticky)
-              ? h('span', { className: 'ztp-spin', style: { width: '12px', height: '12px', display: 'inline-block', verticalAlign: '-2px' } })
+              ? h(SpinnerIcon, { style: { width: '12px', height: '12px', verticalAlign: '-2px' } })
               : null,
             typeof toast[0] === 'string' ? toast[0] : (toast[0] && toast[0].text) || '') : null,
         );
@@ -5613,6 +5675,12 @@
       exports.apply = apply;
       exports.cardToMarkdown = cardToMarkdown; // 测试用
       exports._test = {
+        // 图标：加载态用的是「静态刷新图标自转」+ 矢量圆环加载圈（2026-11-10 用户要求）
+        RefreshIcon: RefreshIcon,
+        SpinnerIcon: SpinnerIcon,
+        RefreshSlot: RefreshSlot,
+        spinSettleDelay: spinSettleDelay,
+        SPIN_MS: SPIN_MS,
         fillComposerEditable: fillComposerEditable,
         tryInsertIntoComposer: tryInsertIntoComposer,
         insertToCurrentChat: insertToCurrentChat,
