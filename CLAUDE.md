@@ -132,6 +132,8 @@ User-Agent: <常规浏览器 UA>
 
 注意：**my-work 列表的 `id` 是字符串，v1 详情的 `id` 是数字**——比较时统一 `Number()`（已在 `toCard()` 处理，但新代码容易再踩）。story 列表是 dict（按 id 索引）不是数组。
 
+**列表形态不固定（2026-11-13，PR #1）**：本实例 task/bug 返回数组，但部分禅道实例的 `bugs` 也按 id 索引返回 dict——原样透出会让 `service.mjs` 的 `bugs.map` 抛错、面板打不开。`fetchMyWork()` 现已统一归一：`Array.isArray(raw) ? raw : Object.values(raw ?? {})`，story 行为不变；`test/protocol.mjs` 用 `bugListShape` 开关覆盖两种形态 + `fetchMine` 端到端（protocol 现 24 项）。
+
 **描述里的图片**（M3 图片附件依赖，2026-10-23 实测）：同一张截图在两种接口里形态不同——
 - v1 详情：`<img onload="setImageSize(this,0)" src="http://zentao.example.com:8090/file-read-35861.png" />`
 - my-work 列表：`<img src="{35861.png}" />`（占位符，basename 就是 fileID）
