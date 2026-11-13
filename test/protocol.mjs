@@ -30,6 +30,8 @@ const RAND = '654321';
 // jQuery 风格头 + md5(md5(pw)+rand) 密码后置 alive=true。
 let alive = false;
 let myWorkMode = 'ok'; // 'ok' | 'expired' | 'redirect' | 'denied'
+// bug 列表形态：'array'（数组）| 'dict'（按 id 索引的 dict）——部分禅道实例返回 dict
+let bugListShape = 'array';
 const calls = [];
 
 function jsonResponse(obj, headers = {}) {
@@ -84,12 +86,14 @@ globalThis.fetch = async (url, init = {}) => {
     }] }) });
   }
   if (u.pathname === '/my-work-bug.json') {
-    return jsonResponse({ status: 'success', data: JSON.stringify({ bugs: [{
+    const bug = {
       id: '202', title: 'BugB', severity: 2, status: 'active',
       project: '49', execution: '56', module: '463',
       product: '12', productName: '财务共享中心系统-贵州农信项目',
       openedBy: 'chenyudong', story: '0',
-    }] }) });
+    };
+    const bugs = bugListShape === 'dict' ? { 202: bug } : [bug];
+    return jsonResponse({ status: 'success', data: JSON.stringify({ bugs }) });
   }
   if (u.pathname === '/my-work-story.json') {
     return jsonResponse({ status: 'success', data: JSON.stringify({ stories: { 8: {
@@ -151,6 +155,16 @@ check('成功双层 JSON → tasks 数组', Array.isArray(tasks) && tasks.length
 const stories = await client.fetchMyWork('story');
 check('story 是 dict → 解包成数组', Array.isArray(stories) && stories.length === 1 && String(stories[0].id) === '8');
 
+// bug 列表：规范实例返回数组，部分实例按 id 索引返回 dict。两种形态都必须归一成数组，
+// 否则调用方 bugs.map 直接抛错、面板打不开。
+bugListShape = 'array';
+const bugsArr = await client.fetchMyWork('bug');
+check('bug 是数组 → 原样返回', Array.isArray(bugsArr) && bugsArr.length === 1 && bugsArr[0].id === '202');
+bugListShape = 'dict';
+const bugsDict = await client.fetchMyWork('bug');
+check('bug 是 dict → 解包成数组', Array.isArray(bugsDict) && bugsDict.length === 1 && String(bugsDict[0].id) === '202');
+bugListShape = 'array';
+
 // ── 2. service 自动重登（离线端到端，复刻真机场景）─────────────────
 // 旧格式配置（带已死 cookie + 密码）→ fetchMine 探活发现超时 → 自动重登 → 拿到数据
 const home = await mkdtemp(join(tmpdir(), 'zt-protocol-'));
@@ -177,6 +191,16 @@ check('重登走了登录协议（GET login + refreshRandom + POST login）',
   calls.includes('GET /user-login.html') && calls.includes('GET /user-refreshRandom.html') && calls.includes('POST /user-login.html'));
 const again = await service.fetchMine();
 check('重登后缓存命中（不再重登）', again.cached === true && calls.filter((c) => c === 'POST /user-login.html').length === 1);
+
+// 端到端：bug 列表返回 dict 时，service 层聚合不能炸（原先 .map 抛错导致面板打不开）
+bugListShape = 'dict';
+let mineDict = null; let mineDictErr = null;
+try { mineDict = await service.fetchMine({ refresh: true }); } catch (e) { mineDictErr = e; }
+check('bug 列表是 dict 时 fetchMine 照常返回三类卡片',
+  mineDictErr === null && Array.isArray(mineDict?.cards) && mineDict.cards.length === 3
+  && mineDict.cards.filter((c) => c.kind === 'bug').length === 1,
+  mineDictErr ? String(mineDictErr.message) : '');
+bugListShape = 'array';
 
 // ── 2.5 事项档案字段映射（2026-11-09：项目/执行 · 工时口径 · 上游需求）──────
 const taskCard = mine.cards.find((c) => c.kind === 'task');
