@@ -516,6 +516,116 @@ mod._test.saveCarryPref(true);
 check('「自动带入」偏好：恢复勾选', mod._test.readCarryPref() === true);
 window.localStorage.removeItem('dsh-zentao-panel.carry.v1');
 
+// ── 计划模式（2026-11-11 用户要求）：「新建对话」/「处理」弹层勾选 → 新会话先 /plan ──
+// DSH 没有 plan 的 remote 方法，官方 PlanChip 走命令通道：remote.commands.execute(id, '/plan', [])
+window.localStorage.removeItem('dsh-zentao-panel.plan.v1');
+check('「计划模式」偏好：默认关闭', mod._test.readPlanPref() === false);
+mod._test.savePlanPref(true);
+check('「计划模式」偏好：勾选后落盘并读回 true',
+  mod._test.readPlanPref() === true && window.localStorage.getItem('dsh-zentao-panel.plan.v1') === '1');
+mod._test.savePlanPref(false);
+check('「计划模式」偏好：取消后读回 false', mod._test.readPlanPref() === false);
+window.localStorage.removeItem('dsh-zentao-panel.plan.v1');
+
+// 服务缺失 → soft（同 selectModelFor 口径：不拦截下发）
+ctx.get = function () { return undefined; };
+let pmRes = await mod._test.applyPlanMode('s-x');
+check('applyPlanMode：remote.commands 缺失 → soft（不拦截下发）', pmRes.ok === true && pmRes.soft === true);
+
+let pmCall = null;
+let pmValue = { ok: true, value: { commandId: 'cmd-1', result: { kind: 'success' } } };
+ctx.get = function (name) {
+  if (name === 'remote.commands') {
+    return { execute(sid, line, atts) { pmCall = { sid, line, atts }; return pmValue; } };
+  }
+  return undefined;
+};
+pmRes = await mod._test.applyPlanMode('s-new');
+check('applyPlanMode：走 remote.commands.execute(sessionId, "/plan", [])（不带附件）',
+  pmRes.ok === true && pmCall && pmCall.sid === 's-new' && pmCall.line === '/plan'
+  && Array.isArray(pmCall.atts) && pmCall.atts.length === 0);
+
+pmValue = { ok: false, error: { code: 'session/not-running', message: 'no agent' } };
+pmRes = await mod._test.applyPlanMode('s-new');
+check('applyPlanMode：命令显式失败 → ok:false + 错误码（调用方据此不代发）',
+  pmRes.ok === false && pmRes.message === 'session/not-running');
+
+pmValue = { ok: true, value: undefined }; // 宿主没有这个命令（未组合 dsh-plan-mode）
+pmRes = await mod._test.applyPlanMode('s-new');
+check('applyPlanMode：命令不存在（value 缺席）→ ok:false + unknown（旧版 DSH）',
+  pmRes.ok === false && pmRes.reason === 'unknown');
+
+pmValue = { ok: true, value: { commandId: 'c', result: { kind: 'error', text: '/plan 不接受附件' } } };
+pmRes = await mod._test.applyPlanMode('s-new');
+check('applyPlanMode：handler 回 kind:error → ok:false（带宿主原文）',
+  pmRes.ok === false && pmRes.reason === 'rejected' && pmRes.message.includes('不接受附件'));
+
+// 三条链路接入：dispatch（先 /plan 再代发，开不起来就只填草稿）
+pmValue = { ok: true, value: { commandId: 'c', result: { kind: 'success' } } };
+let pSubmitted = 0, pPlanCall = null;
+const pFacade = {
+  draft: '',
+  setDraft(t) { this.draft = t; }, focus() {}, submit() { pSubmitted++; },
+  addAttachments() { return true; },
+};
+const pConversation = {
+  input: { for: () => pFacade },
+  createDrafts: (sid, files) => files.map((f, i) => ({ id: 'pd' + i, kind: 'image' })),
+};
+const planGet = function (name) {
+  if (name === 'sessions') return {
+    list: { getSnapshot: () => ({ current: 's1', byId: { s1: { cwd: '/tmp/proj' } } }) },
+    scope: () => ({}), create() { return 's-plan'; },
+    retain(id) { return { sessionId: id, release() {} }; },
+  };
+  if (name === 'conversation') return pConversation;
+  if (name === 'remote.session') return { selectModel: async () => ({ ok: true, value: {} }) };
+  if (name === 'remote.commands') {
+    return { execute(sid, line) { pPlanCall = { sid, line }; return pmValue; } };
+  }
+  return undefined;
+};
+ctx.get = planGet;
+let pr = await mod._test.dispatchToNewSession('## 卡片', [], { planMode: true });
+check('dispatchToNewSession：勾选计划模式 → 建会话后执行 /plan（不产生模型输入）',
+  pPlanCall && pPlanCall.sid === 's-plan' && pPlanCall.line === '/plan');
+check('dispatchToNewSession：计划模式已开启时照常自动发送（结果文案标注）',
+  pr.ok && pr.mode === 'dispatched' && pr.message.includes('计划模式已开启'));
+
+pmValue = { ok: false, error: { code: 'plan/failed', message: 'boom' } };
+pPlanCall = null;
+pr = await mod._test.dispatchToNewSession('## 卡片', [], { planMode: true });
+check('dispatchToNewSession：计划模式开不起来 → 只填草稿不代发（不替用户决定「直接开工」）',
+  pPlanCall !== null && pr.ok && pr.mode === 'draft'
+  && pr.message.includes('计划模式未能开启') && pSubmitted === 0);
+
+pmValue = { ok: true, value: { commandId: 'c', result: { kind: 'success' } } };
+pPlanCall = null;
+pr = await mod._test.dispatchToNewSession('## 卡片', [], {});
+check('dispatchToNewSession：未勾选计划模式 → 完全不碰 remote.commands',
+  pPlanCall === null && pr.ok && pr.mode === 'dispatched');
+
+// insert / newBlank：跳转前先开计划模式（落地时「计划」chip 已在）
+let iOpened = null, iPlanLine = null;
+ctx.get = function (name) {
+  const base = planGet(name);
+  if (name === 'uiWorkspace') return { openSession(id) { iOpened = id; } };
+  if (name === 'remote.commands') {
+    return { execute(sid, line) { iPlanLine = line; return { ok: true, value: { commandId: 'c', result: { kind: 'success' } } }; } };
+  }
+  return base;
+};
+const irp = await mod._test.insertToNewSession('## 卡片', [], { planMode: true });
+check('insertToNewSession：跳转前已开计划模式（落地即「计划」chip）',
+  irp.ok && irp.mode === 'jumped' && iOpened === 's-plan' && iPlanLine === '/plan');
+
+iPlanLine = null;
+const nbp = await mod._test.newBlankSession({ planMode: true });
+check('newBlankSession：空白会话同样支持计划模式（建会话后 /plan 再跳转）',
+  nbp.ok && nbp.mode === 'jumped' && iPlanLine === '/plan');
+
+ctx.get = nbGet;
+
 // ── 会话关联：「处理」成功后卡片上显示关联会话，可一键跳转 ──
 const card123 = { kind: 'bug', id: 123, title: '登录页报错' };
 check('sessionLinkKey 带账号前缀 + kind-id（不同禅道账号互不混卡）',
@@ -1726,6 +1836,70 @@ check('DispatchDialog（取消自动带入）：send 回传 carry=false，md/ima
   && Array.isArray(ddBlankSent.images) && ddBlankSent.images.length === 0
   && ddBlankSent.instr === '');
 TT.saveCarryPref(true);
+
+// ── 计划模式开关（2026-11-11）：弹层常显 + 默认关闭 + 记住上次 + send 回传 ──
+TT.savePlanPref(false);
+const ddPlan = TT.DispatchDialog({
+  card: bc1, images: [], md: 'x', intent: 'dispatch', activeAcct: 'a',
+  onSend: () => {}, onClose: () => {},
+});
+const ddPlanRow = flatNodes(ddPlan.children[0].children).find(
+  (n) => n && n.type === 'label' && String(n.props && n.props.className).includes('ztp-planopt'));
+const ddPlanInput = flatNodes(ddPlanRow ? ddPlanRow.children : []).find((n) => n && n.type === 'input');
+check('DispatchDialog：「计划模式」开关常显（「处理」弹层也有）+ 默认关闭 + 文案说明',
+  Boolean(ddPlanInput) && ddPlanInput.props.type === 'checkbox' && ddPlanInput.props.checked === false
+  && textOf(ddPlanRow).includes('计划模式') && textOf(ddPlanRow).includes('/plan')
+  && !textOf(ddPlan.children[0]).includes('计划模式已开启'));
+
+const ddBatchPlan = TT.DispatchDialog({
+  card: bc1, cards: [bc1], batch: TT.batchSummary([bc1]), images: [], md: 'x',
+  intent: 'dispatch', activeAcct: 'a', onSend: () => {}, onClose: () => {},
+});
+check('DispatchDialog：批量弹层同样有「计划模式」开关（批量没有自动带入开关但计划模式照用）',
+  flatNodes(ddBatchPlan.children[0].children).some(
+    (n) => n && n.type === 'label' && String(n.props.className).includes('ztp-planopt')));
+
+TT.savePlanPref(true);
+const ddPlanOn = TT.DispatchDialog({
+  card: bc1, images: [], md: 'x', intent: 'insert', activeAcct: 'a',
+  onSend: () => {}, onClose: () => {},
+});
+const ddPlanOnRow = flatNodes(ddPlanOn.children[0].children).find(
+  (n) => n && n.type === 'label' && String(n.props.className).includes('ztp-planopt'));
+check('DispatchDialog：记住上次勾选（下次打开默认开启）+ 说明转「已开启」+ 备注区提示',
+  flatNodes(ddPlanOnRow.children).some((n) => n && n.type === 'input' && n.props.checked === true)
+  && textOf(ddPlanOnRow).includes('已开启')
+  && textOf(ddPlanOn.children[0]).includes('计划模式已开启'));
+
+let ddPlanSent = null;
+const ddPlanSend = TT.DispatchDialog({
+  card: bc1, images: [], md: 'MD', intent: 'dispatch', activeAcct: 'a',
+  onSend: (c, d) => { ddPlanSent = { c, d }; }, onClose: () => {},
+});
+let ddPlanActs = flatNodes(ddPlanSend.children[0].children).find(
+  (n) => n && n.props && n.props.className === 'ztp-disp-acts');
+ddPlanActs.children[1].props.onClick();
+check('DispatchDialog：勾选时 send 回传 choice.planMode + data.plan，并记住偏好',
+  ddPlanSent && ddPlanSent.c.planMode === true && ddPlanSent.d.plan === true
+  && TT.readPlanPref() === true);
+
+TT.savePlanPref(false);
+ddPlanSent = null;
+const ddPlanOff = TT.DispatchDialog({
+  card: bc1, images: [], md: 'MD', intent: 'dispatch', activeAcct: 'a',
+  onSend: (c, d) => { ddPlanSent = { c, d }; }, onClose: () => {},
+});
+ddPlanActs = flatNodes(ddPlanOff.children[0].children).find(
+  (n) => n && n.props && n.props.className === 'ztp-disp-acts');
+ddPlanActs.children[1].props.onClick();
+check('DispatchDialog：未勾选时 choice 不带 planMode、data.plan=false',
+  ddPlanSent && !('planMode' in ddPlanSent.c) && ddPlanSent.d.plan === false
+  && window.localStorage.getItem('dsh-zentao-panel.plan.v1') === '0');
+
+// ⚡ 极速重发沿用上次的计划模式选择
+TT.saveLastDispatch({ workspaceId: 'w1', model: { provider: 'p', model: 'm' }, plan: true, instr: '', at: Date.now() });
+check('lastDispatchSummary：记下计划模式（⚡ 摘要可见）',
+  TT.readLastDispatch().plan === true && TT.lastDispatchSummary(TT.readLastDispatch()).includes('计划模式'));
 
 // ── 附加指令（2026-10-25 迭代）：弹层可选输入 + 记忆上次 + 拼到任务背景末尾 ──
 check('appendInstruction：空白指令原样返回',

@@ -917,6 +917,46 @@ dsh-client-ui-layout README + dsh-mnemon lib/client.js mountSkillsPanel/mountMne
 - ⚠️ fake React 的 `useEffect` 不执行，所以「首屏铺缓存」本身只能靠 `readDetailCache` 纯函数测试覆盖；
   真机复验点：连点两张卡来回切，第二次应**无加载态**；详情栏「重新读取」点击后内容有一次刷新。
 
+### 4.25 下发弹层的「计划模式」开关（2026-11-11，用户要求：新建对话/处理的弹框里加上）
+
+用户一句话需求：「新建对话 和 处理 的弹框里 加上 计划模式的控制」。**仅 client 改动，⌘R 生效**。
+
+- **计划模式在 DSH 里怎么开（源码确认，别再翻）**：状态是 host 侧 `@deepseek-ai/dsh-plan-mode`
+  的 `ctx.planMode` 服务，**客户端没有对应的 remote 方法**（`remote.session` 上只有 selectModel 等）。
+  官方开关本身也是走命令通道——`@deepseek-ai/dsh-client-ui-plan` 的 `PlanChip`：
+  `ctx.remote.commands.execute(sessionId, '/plan off', [])`。所以本项目同样用
+  **`lookupService('remote.commands').execute(sessionId, '/plan', [])`**（懒查找，不加 inject 硬门槛）。
+- **契约细节**：`commands.execute(agent, line, attachments, signal)` 宿主实现——**命令不认识时返回
+  `undefined`**，remote 层包成 `{ok:true, value:undefined}`；handler 自己报错时是
+  `{ok:true, value:{commandId, result:{kind:'error', text}}}`；传输/流程失败才是 `{ok:false, error}`。
+  所以 `applyPlanMode` 判三种失败：`ok:false` / `value===undefined`（宿主未组合 plan-mode）/
+  `value.result.kind==='error'`；服务缺失或抛错 → `{ok:true, soft:true}`（**不拦截下发**，同
+  `selectModelFor` 的口径）。
+- **`/plan` 无参数 = 只切模式、不产生模型输入**（README 明说）；无轮次进行时立即追加 `plan/mode`
+  事件，有轮次则挂起到下一个 pre-step。因此「建会话 → `/plan` → setDraft → submit」顺序就能让
+  计划策略对**第一条消息**生效；desktop profile 默认组合了 `plan-mode`（dsh-base）与 `ui-plan`
+  （dsh-web-app），命令可用。
+- **接入点**：`createDraftSession` 建会话后**立即**发起 `planStep`（与图片预取、setDraft 并行，
+  不拖慢草稿落位），随返回值带出。`dispatchToNewSession` 把 `planStep` 并入原有
+  `Promise.all([modelStep, attach, planStep])`——**计划模式显式失败就不代发**（只填草稿 + 文案
+  「计划模式未能开启：…」，与「模型被拒」同一口径；反之成功时结果文案带「（计划模式已开启）」）。
+  `insertToNewSession` / `newBlankSession` 与 `modelStep` 并行**等一个本地 RPC 往返**再跳转
+  （落地时 composer 的「计划」chip 已亮），失败只在文案里追加说明。
+- **弹层**：思考强度下方一行 `.ztp-planopt` 勾选框（复用 `.ztp-carry` 的勾选框结构与样式，两个
+  类名并列写选择器）——**始终显示**（批量、取消「自动带入」的空白会话同样适用），默认**关闭**，
+  偏好 `dsh-zentao-panel.plan.v1`（`readPlanPref/savePlanPref`，坏数据自愈 + 进程内兜底）。
+  勾选时 `send()` 置 `choice.planMode = true` 并回传 `data.plan`（备注区追加「计划模式已开启：
+  先出方案，你批准后再执行。」）。勾上时整块转主题色用 `:has(input:checked)`。
+- **⚡ 极速重发联动**：`lastdispatch.v1` 增 `plan` 字段（`readLastDispatch` 的白名单也要带上，
+  否则只有 plan 的记录会被判空），重发沿用上次选择，`lastDispatchSummary` 多一段「计划模式」。
+- 测试：client **433** 项（新增 20：偏好三态 / applyPlanMode 五分支（缺失·成功·ok:false·
+  value 缺席·kind:error）/ dispatch 勾选即 `/plan` + 失败不代发 + 未勾选不碰命令 / insert 与
+  newBlank 跳转前已开 / 弹层常显·默认关·记住上次·send 回传 / ⚡ 摘要）→ client 433 / protocol 21 /
+  multi 41 全绿。
+- ⚠️ **未真机确认**：`/plan` 打在「刚建、还没发过消息」的会话上是否即时生效（源码层面成立：
+  无轮次即立即追加），交付后点一次「处理 + 计划模式」看会话头部是否出现「计划」chip、agent 是否
+  先出方案再要批准。
+
 ## 剩余任务（按优先级）
 
 ### 1. 真机验证 M1+M2+M3（第一件事，代码全部完成）

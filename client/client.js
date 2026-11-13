@@ -516,12 +516,16 @@
         '.ztp-disp-acts .ztp-btn{flex:1;height:30px;justify-content:center;}',
         '.ztp-disp-note{margin-top:10px;font-size:11px;color:var(--dsw-alias-label-caption);line-height:1.6;}',
         // 「自动带入」勾选（新建对话专用）：默认勾选 = 任务背景与截图填入草稿；取消 = 只建空白会话
-        '.ztp-carry{display:flex;align-items:flex-start;gap:8px;margin-top:12px;padding:9px 11px;box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1);cursor:pointer;user-select:none;}',
-        '.ztp-carry:hover{border-color:var(--dsw-alias-border-l4);}',
-        '.ztp-carry input{width:14px;height:14px;margin:1px 0 0;flex:none;accent-color:var(--dsw-alias-state-business-primary);cursor:pointer;}',
+        '.ztp-carry,.ztp-planopt{display:flex;align-items:flex-start;gap:8px;margin-top:12px;padding:9px 11px;box-sizing:border-box;border:.5px solid var(--dsw-alias-border-l2);border-radius:var(--dsw-radius-md);background:var(--dsw-alias-bg-layer-1);cursor:pointer;user-select:none;}',
+        '.ztp-carry:hover,.ztp-planopt:hover{border-color:var(--dsw-alias-border-l4);}',
+        '.ztp-carry input,.ztp-planopt input{width:14px;height:14px;margin:1px 0 0;flex:none;accent-color:var(--dsw-alias-state-business-primary);cursor:pointer;}',
         '.ztp-carry-main{min-width:0;}',
         '.ztp-carry-t{display:block;font-size:12.5px;line-height:1.45;color:var(--dsw-alias-label-primary);}',
         '.ztp-carry-d{display:block;margin-top:2px;font-size:11px;line-height:1.5;color:var(--dsw-alias-label-tertiary);word-break:break-word;}',
+        // 计划模式开关（2026-11-11）：沿用 .ztp-carry 的勾选框结构，勾上时整块转主题色
+        '.ztp-planopt{margin-top:10px;}',
+        '.ztp-planopt:has(input:checked){border-color:var(--dsw-alias-state-business-primary);}',
+        '.ztp-planopt:has(input:checked) .ztp-carry-t{color:var(--dsw-alias-state-business-primary);}',
 
         // ───────────────── 处理中任务的实时状态（M6：卡片上的活性徽标 + 常驻提醒）─────────────────────────
         // 会话关联（§4.3）+ uiSession.sessionStatus（running/pendingInteraction/completionUnread）
@@ -1356,6 +1360,29 @@
         } catch (e) { /* 忽略 */ }
       }
 
+      // ───────── 「计划模式」偏好（2026-11-11，下发弹层勾选框）：默认关闭 ─────────
+      // 勾选 = 新会话建好后**先**执行 /plan（agent 先探索、把方案交你批准再动手），
+      // 之后才填草稿/发送；记住上次确认时的选择，常用的人不必每次勾（勾选框始终可见）。
+      var PLAN_KEY = 'dsh-zentao-panel.plan.v1';
+      var planFallback = null; // localStorage 不可用时的进程内兜底（与 instr 同模式）
+
+      function readPlanPref() {
+        try {
+          var s = root.localStorage;
+          var raw = s && s.getItem(PLAN_KEY);
+          if (raw === '1') return true;
+          if (raw === '0') return false;
+        } catch (e) { /* 坏数据/不可用 → 兜底 */ }
+        return planFallback === true;
+      }
+      function savePlanPref(on) {
+        planFallback = on === true;
+        try {
+          var s = root.localStorage;
+          if (s) s.setItem(PLAN_KEY, on === true ? '1' : '0');
+        } catch (e) { /* 内存兜底已写 */ }
+      }
+
       // ───────── 附加指令（2026-10-25 迭代）：弹层可选输入，拼到任务背景末尾 ─────────
       var INSTR_KEY = 'dsh-zentao-panel.instr.v1';
       var instrFallback = null; // localStorage 不可用时的进程内兜底（与 links.v1 同模式）
@@ -1514,7 +1541,7 @@
           var raw = s && s.getItem(LASTDISPATCH_KEY);
           if (raw) {
             var v = JSON.parse(raw);
-            if (v && typeof v === 'object' && (v.workspaceId || v.cwd || v.model || v.instr)) return v;
+            if (v && typeof v === 'object' && (v.workspaceId || v.cwd || v.model || v.instr || v.plan)) return v;
           }
         } catch (e) { /* 坏数据当空 */ }
         return lastDispatchFallback || null;
@@ -1533,6 +1560,7 @@
         if (last.cwd) parts.push('继承目录');
         if (last.workspaceId) parts.push('工作区');
         if (last.model && last.model.model) parts.push('模型 ' + last.model.model);
+        if (last.plan === true) parts.push('计划模式');
         var t = parts.join(' · ');
         if (last.instr && String(last.instr).trim()) t += (t ? ' · ' : '') + '指令「' + instrChipLabel(last.instr) + '」';
         return t;
@@ -2136,6 +2164,41 @@
       }
 
       /**
+       * 给（新建的）会话开启**计划模式**（2026-11-11，用户要求）：
+       * DSH 没有 plan 的 remote 方法（host 侧只有 ctx.planMode 服务），官方 UI 也走命令通道——
+       * `ctx.remote.commands.execute(sessionId, '/plan', [])`（见 @deepseek-ai/dsh-client-ui-plan
+       * 的 PlanChip，退出用 '/plan off'）。不带参数的 /plan 只切换模式、**不产生模型输入**；
+       * 没有进行中的轮次时立即追加 plan/mode 事件（有轮次则挂起到下一个 pre-step），
+       * 所以建会话后先执行它、再 submit，计划策略对第一条消息就生效。
+       * 返回：{ok:true, soft:true} 服务缺失/异常（不拦截下发，口径同 selectModelFor）；
+       * {ok:false, message} 命令显式失败（handler 回 kind:'error'）或命令不存在（value 缺席）。
+       */
+      function applyPlanMode(sessionId) {
+        var ns = null;
+        try { ns = lookupService('remote.commands'); } catch (e) { ns = null; }
+        if (!ns || typeof ns.execute !== 'function') return Promise.resolve({ ok: true, soft: true });
+        return Promise.resolve()
+          .then(function () { return ns.execute(sessionId, '/plan', []); })
+          .then(function (r) {
+            if (r && r.ok === false) {
+              var err = (r && r.error) || {};
+              return { ok: false, message: String(err.code || err.message || '未知错误') };
+            }
+            // value 缺席 = 宿主没有这个命令（未组合 dsh-plan-mode / DSH 版本过旧）
+            if (!r || r.value === undefined) {
+              return { ok: false, reason: 'unknown', message: '计划模式命令不可用（/plan）' };
+            }
+            // 命令跑起来了但 handler 自己报错（kind:'error'）：也算没开成
+            var res = r.value && r.value.result;
+            if (res && res.kind === 'error') {
+              return { ok: false, reason: 'rejected', message: String(res.text || '命令被拒绝') };
+            }
+            return { ok: true };
+          })
+          .catch(function () { return { ok: true, soft: true }; });
+      }
+
+      /**
        * 新会话公共前段（「处理」与「新建对话」共用，2026-10-25 抽出）：
        *   点击确认瞬间：prefetchImageBytes 与 sessions.create 并行（host 拉禅道图最慢，提前开始）
        *   → create 完成：sessions.retain 后台保活（不切视图）+ 立即 facade.setDraft。
@@ -2173,6 +2236,11 @@
           .then(function () { return sessions.create(opts); })
           .then(function (sessionId) {
             if (!sessionId) throw new Error('session.create 未返回会话 id');
+            // 计划模式（2026-11-11）：建会话后**立即**发起（与图片预取、setDraft 并行，
+            // 不拖慢草稿落位）；怎么处置失败由调用方决定（dispatch 不代发 / insert 只提示）
+            var planStep = (choice && choice.planMode)
+              ? applyPlanMode(sessionId)
+              : Promise.resolve({ ok: true, skipped: true });
             var retainRef = null;
             try {
               // 只 retain 不切视图：scope(id) 依赖 retain 才有值；释放时机由调用方决定
@@ -2186,7 +2254,8 @@
               if (facade && typeof facade.setDraft === 'function') {
                 var target = { sessionId: sessionId, scope: scope, facade: facade, conversation: conversation };
                 facade.setDraft(md);
-                return { ok: true, sessionId: sessionId, target: target, retainRef: retainRef, prefetch: prefetch };
+                return { ok: true, sessionId: sessionId, target: target, retainRef: retainRef,
+                  prefetch: prefetch, planStep: planStep };
               }
             }
             // facade 不可用（conversation 服务缺失 / retain 没拿到 scope）：新会话里什么都没填，
@@ -2216,16 +2285,21 @@
         return createDraftSession(md, images, choice).then(function (p) {
           if (!p.ok) return p;
           var facade = p.target.facade;
-          // 模型设置与附件注册并行等待（成功才自动发送；模型显式失败则只填草稿，交用户确认）
+          // 模型设置、附件注册与计划模式并行等待（成功才自动发送；任一显式失败则只填草稿，
+          // 交用户确认——计划模式没生效却代发，等于替用户做了「直接开工」的决定）
           var modelStep = (choice && choice.model)
             ? selectModelFor(p.sessionId, choice.model)
             : Promise.resolve({ ok: true });
-          return Promise.all([modelStep, attachImagesToDraft(images, p.target, p.prefetch)]).then(function (rs) {
-            var mres = rs[0], att = rs[1];
-            if (mres && mres.ok === false) {
+          return Promise.all([modelStep, attachImagesToDraft(images, p.target, p.prefetch),
+            p.planStep || Promise.resolve({ ok: true })]).then(function (rs) {
+            var mres = rs[0], att = rs[1], pres = rs[2];
+            var notes = [];
+            if (mres && mres.ok === false) notes.push('模型设置失败：' + mres.message);
+            if (pres && pres.ok === false) notes.push('计划模式未能开启：' + pres.message);
+            if (notes.length) {
               // 只填了草稿、没 submit：保留 retain（release 会 retireScope，草稿/附件随之丢）
               return { ok: true, mode: 'draft', sessionId: p.sessionId,
-                message: '已新建会话并填入草稿（模型设置失败：' + mres.message + '），点卡片标签跳回确认发送' };
+                message: '已新建会话并填入草稿（' + notes.join('；') + '），点卡片标签跳回确认发送' };
             }
             setTimeout(function () {
               try { if (typeof facade.submit === 'function') facade.submit(); } catch (e) { /* 已填草稿，发送交给用户 */ }
@@ -2235,8 +2309,9 @@
               }, 3000);
             }, 250);
             var suffix = att && att.ok ? '（含 ' + att.count + ' 张图片）' : '';
+            var planTag = (choice && choice.planMode) ? '（计划模式已开启）' : '';
             return { ok: true, mode: 'dispatched', sessionId: p.sessionId,
-              message: '已在后台新会话发送任务背景' + suffix + '，卡片标签可跳回' };
+              message: '已在后台新会话发送任务背景' + suffix + planTag + '，卡片标签可跳回' };
           });
         });
       }
@@ -2297,23 +2372,34 @@
       function insertToNewSession(md, images, choice) {
         return createDraftSession(md, images, choice).then(function (p) {
           if (!p.ok) return p;
-          // 模型与附件后台进行，不阻塞跳转（不自动发送，模型没生效也无代发风险）
-          if (choice && choice.model) selectModelFor(p.sessionId, choice.model);
+          // 附件后台注册，不阻塞跳转（不自动发送，附件晚到无风险）；模型与计划模式
+          // 则等一个本地 RPC 往返——落地新会话时模型与「计划」chip 状态都已正确
           attachImagesToDraft(images, p.target, p.prefetch);
-          var ws = null;
-          try { ws = lookupService('uiWorkspace'); } catch (e) { ws = null; }
-          var jumped = Boolean(ws && typeof ws.openSession === 'function');
-          if (jumped) {
-            try { ws.openSession(p.sessionId); } catch (e) { jumped = false; }
-          }
-          if (jumped) {
-            // mainView 已接管保活 → 释放自己的后台 retain
-            try { if (p.retainRef && typeof p.retainRef.release === 'function') p.retainRef.release(); } catch (e) { /* 已被释放 */ }
-            return { ok: true, mode: 'jumped', sessionId: p.sessionId,
-              message: '已新建会话并跳转，草稿已填入（不自动发送）' };
-          }
-          return { ok: true, mode: 'draft', sessionId: p.sessionId,
-            message: '已新建会话并填入草稿（未能自动跳转，可从会话列表打开确认发送）' };
+          var modelStep = (choice && choice.model)
+            ? selectModelFor(p.sessionId, choice.model)
+            : Promise.resolve({ ok: true });
+          return Promise.all([modelStep, p.planStep || Promise.resolve({ ok: true })])
+            .then(function (rs) {
+              var mres = rs[0], pres = rs[1];
+              var notes = [];
+              if (mres && mres.ok === false) notes.push('模型设置失败：' + mres.message);
+              if (pres && pres.ok === false) notes.push('计划模式未能开启：' + pres.message);
+              var noteText = notes.length ? '（' + notes.join('；') + '）' : '';
+              var ws = null;
+              try { ws = lookupService('uiWorkspace'); } catch (e) { ws = null; }
+              var jumped = Boolean(ws && typeof ws.openSession === 'function');
+              if (jumped) {
+                try { ws.openSession(p.sessionId); } catch (e) { jumped = false; }
+              }
+              if (jumped) {
+                // mainView 已接管保活 → 释放自己的后台 retain
+                try { if (p.retainRef && typeof p.retainRef.release === 'function') p.retainRef.release(); } catch (e) { /* 已被释放 */ }
+                return { ok: true, mode: 'jumped', sessionId: p.sessionId,
+                  message: '已新建会话并跳转，草稿已填入（不自动发送）' + noteText };
+              }
+              return { ok: true, mode: 'draft', sessionId: p.sessionId,
+                message: '已新建会话并填入草稿（未能自动跳转，可从会话列表打开确认发送）' + noteText };
+            });
         });
       }
 
@@ -2321,7 +2407,7 @@
        * 新建**空白**会话（「新建对话」弹层取消勾选「自动带入」时，2026-10-27）：
        * 只建会话 + 按所选模型设置 + 跳转过去，不填草稿、不挂附件、不记卡片关联
        * （没有内容，关联只会让卡片误显示「处理中/已完成」）。
-       * 顺序：create → selectModel（竞态小，跳过去模型已生效）→ uiWorkspace.openSession。
+       * 顺序：create → selectModel 与 /plan（计划模式）并行 → uiWorkspace.openSession。
        * 服务缺失时：sessions 缺失 → ok:false 交上层提示；uiWorkspace 缺失 → 会话已建，
        * mode:'created'（从会话列表打开）。
        */
@@ -2350,8 +2436,15 @@
             var modelStep = (choice && choice.model)
               ? selectModelFor(sessionId, choice.model)
               : Promise.resolve({ ok: true });
-            return modelStep.then(function (mres) {
-              var note = (mres && mres.ok === false) ? '（模型设置失败：' + mres.message + '）' : '';
+            var planStep = (choice && choice.planMode)
+              ? applyPlanMode(sessionId)
+              : Promise.resolve({ ok: true });
+            return Promise.all([modelStep, planStep]).then(function (rs) {
+              var mres = rs[0], pres = rs[1];
+              var notes = [];
+              if (mres && mres.ok === false) notes.push('模型设置失败：' + mres.message);
+              if (pres && pres.ok === false) notes.push('计划模式未能开启：' + pres.message);
+              var note = notes.length ? '（' + notes.join('；') + '）' : '';
               var ws = null;
               try { ws = lookupService('uiWorkspace'); } catch (e) { ws = null; }
               var jumped = Boolean(ws && typeof ws.openSession === 'function');
@@ -4444,6 +4537,8 @@
        * md/images 此时是 N 卡合并后的任务背景；card 仍传首卡作 fallback（批量不带带入开关）。
        * props.lazy = 内容还没读取（确认后才拉详情）——文案不说图片张数，只说「截图（如有）」。
        * 服务不可用/列表为空时对应下拉退化为单项说明，仍可直接确认（走默认）。
+       * 「计划模式」勾选框（2026-11-11）常显：勾选 → choice.planMode=true，新会话建好后
+       * 先执行 /plan 再填草稿/发送（见 applyPlanMode）；偏好记在本机（plan.v1）。
        */
       function DispatchDialog(props) {
         var card = props.card || { kind: '', id: '', title: '' };
@@ -4457,6 +4552,7 @@
         var instr = useState(readLastInstruction()); // 附加指令（可选），默认带出上次输入
         var presets = useState(readInstrPresets()); // 指令模板预设：chip 一键填入
         var carry = useState(readCarryPref()); // 「自动带入」偏好（默认勾选；上次的选择会记住）
+        var planOpt = useState(readPlanPref()); // 「计划模式」偏好（默认关闭；上次的选择会记住）
         var busy = useState(false);
         var withContent = !allowCarry || carry[0] !== false; // 取消带入 → 空白会话（没有附加指令）
 
@@ -4508,11 +4604,13 @@
             choice.model = { provider: modelKey[0].slice(0, sep), model: modelKey[0].slice(sep + 1) };
             if (effortSel[0]) choice.model.reasoningEffort = effortSel[0];
           }
+          if (planOpt[0]) choice.planMode = true; // 计划模式：新会话建好后先 /plan 再填/发
           // 数据随调用回传（card/cards/md/images/activeAcct/intent 来自当前 render 的 props），
           // 接收方 useCallback 闭包里读不到最新 state（见 sendDispatch 注释）
           try {
             saveLastInstruction(instr[0]); // 记住这次的输入（含清空），下次打开弹层带出
             if (allowCarry) saveCarryPref(withContent); // 记住「自动带入」选择
+            savePlanPref(planOpt[0]); // 记住「计划模式」选择
             props.onSend(choice, {
               card: card, cards: props.cards || null,
               md: withContent ? props.md : null,
@@ -4520,6 +4618,7 @@
               activeAcct: props.activeAcct, intent: props.intent || 'dispatch',
               instr: withContent ? instr[0] : '',
               carry: withContent,
+              plan: planOpt[0] === true,
               lazy: Boolean(props.lazy),
             });
           } catch (e) {
@@ -4604,6 +4703,19 @@
                 return h('option', { key: e.id, value: e.id }, e.name);
               })) : null,
 
+            // 计划模式（2026-11-11）：勾选 = 新会话建好后先执行 /plan，agent 先探索、
+            // 把方案交你批准再动手。始终显示（批量、取消「自动带入」的空白会话同样适用）。
+            h('label', { className: 'ztp-planopt' },
+              h('input', {
+                type: 'checkbox', checked: planOpt[0] === true, disabled: busy[0],
+                onChange: function (e) { planOpt[1](e.target.checked); },
+              }),
+              h('span', { className: 'ztp-carry-main' },
+                h('span', { className: 'ztp-carry-t' }, '计划模式'),
+                h('span', { className: 'ztp-carry-d' }, planOpt[0] === true
+                  ? '已开启：新会话先探索并提交方案，你批准后才动手（DSH /plan）'
+                  : '开启后新会话先出方案、你批准再动手（DSH /plan）'))),
+
             withContent ? h('label', { className: 'ztp-label' }, '附加指令（可选）') : null,
             withContent ? h('textarea', {
               className: 'ztp-input ztp-instr', value: instr[0] || '', disabled: busy[0], rows: 2,
@@ -4636,7 +4748,8 @@
                     ? '将新建会话并跳转过去，任务背景（标题、描述与最近动态）与截图（如有）一并填入草稿，不会自动发送。'
                     : '将新建会话并跳转过去，任务背景' + (props.images && props.images.length ? '与 ' + props.images.length + ' 张图片' : '') + '填入草稿，不会自动发送。')
                   : '将新建一个空白会话并跳转过去（不带禅道内容，不会自动发送）。')
-                : '将在新会话发送任务背景' + (props.images && props.images.length ? '，含 ' + props.images.length + ' 张图片附件' : '') + '。'),
+                : '将在新会话发送任务背景' + (props.images && props.images.length ? '，含 ' + props.images.length + ' 张图片附件' : '') + '。',
+              planOpt[0] === true ? ' 计划模式已开启：先出方案，你批准后再执行。' : ''),
 
             h('div', { className: 'ztp-disp-acts' },
               h('button', { className: 'ztp-btn', type: 'button', disabled: busy[0], onClick: close }, '取消'),
@@ -4898,9 +5011,11 @@
           if (last.workspaceId) choice.workspaceId = last.workspaceId;
           else if (last.cwd) choice.cwd = last.cwd;
           if (last.model) choice.model = last.model;
+          if (last.plan === true) choice.planMode = true; // 沿用上次的计划模式选择
           sendDispatch(choice, {
             card: card, md: cardToMarkdown(card, detail), images: imagesOf(card, detail),
             activeAcct: activeAcct, intent: 'dispatch', instr: last.instr || '',
+            plan: last.plan === true,
           });
         };
 
@@ -4971,7 +5086,8 @@
                 // 成功即记住本次完整配置（工作区/模型/指令）——卡片 ⚡「极速重发」用它跳过弹层
                 saveLastDispatch({
                   workspaceId: choice && choice.workspaceId, cwd: choice && choice.cwd,
-                  model: choice && choice.model, instr: d.instr || '', at: Date.now(),
+                  model: choice && choice.model, instr: d.instr || '',
+                  plan: d.plan === true, at: Date.now(),
                 });
                 // 新会话建好即记录关联（draft 模式也算：内容已填进那个会话；批量逐卡指向同一会话）
                 if (r.sessionId) {
@@ -5703,6 +5819,11 @@
         newBlankSession: newBlankSession,
         readCarryPref: readCarryPref,
         saveCarryPref: saveCarryPref,
+        // 计划模式（2026-11-11）：偏好 + /plan 命令通道
+        readPlanPref: readPlanPref,
+        savePlanPref: savePlanPref,
+        applyPlanMode: applyPlanMode,
+        selectModelFor: selectModelFor,
         sessionLinkKey: sessionLinkKey,
         parseLinkKey: parseLinkKey,
         readLinkMap: readLinkMap,
